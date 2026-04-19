@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YugabyteDB Interactive Architecture Demo</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=Outfit:wght@300;400;500&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <header>
+    <div class="logo">
+      <img src="logo_dark.svg" alt="YugabyteDB" style="height: 20px;">
+    </div>
+    <span class="logo-txt" style="font-size:12px;color:var(--txt2);font-family:var(--body);margin-left:4px">Interactive
+      Architecture Explorer</span>
+    <div class="header-mid">
+      <span class="hbadge" id="active-badge">Cluster Overview</span>
+      <div class="cluster-health">
+        <div class="dot" id="health-dot"></div><span id="health-txt">Healthy · RF=3 · 3 TServers · 7 Raft Groups</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-main">
+    <!-- SIDEBAR -->
+    <nav class="sidebar">
+      <div class="sgroup">Overview</div>
+      <button class="sbtn active" onclick="selectScenario(0)">
+        <span class="sicon">🗺️</span>
+        <div>
+          <div class="slabel">Cluster Overview</div>
+          <div class="ssub">Node &amp; tablet layout</div>
+        </div>
+      </button>
+      <div class="sgroup">Sharding</div>
+      <button class="sbtn" onclick="selectScenario(1)">
+        <span class="sicon">🔢</span>
+        <div>
+          <div class="slabel">Hash Sharding</div>
+          <div class="ssub">MurmurHash2 distribution</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(2)">
+        <span class="sicon">📏</span>
+        <div>
+          <div class="slabel">Range (Default)</div>
+          <div class="ssub">Single tablet start</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(3)">
+        <span class="sicon">✂️</span>
+        <div>
+          <div class="slabel">Range (Pre-split)</div>
+          <div class="ssub">SPLIT AT VALUES</div>
+        </div>
+      </button>
+      <div class="sgroup">Write &amp; Read</div>
+      <button class="sbtn" onclick="selectScenario(4)">
+        <span class="sicon">⚡</span>
+        <div>
+          <div class="slabel">Fast Path Write</div>
+          <div class="ssub">Quorum &amp; near-follower</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(5)">
+        <span class="sicon">⚖️</span>
+        <div>
+          <div class="slabel">Distributed Transactions (2PC)</div>
+          <div class="ssub">Multi-tablet atomicity</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(6)">
+        <span class="sicon">🧬</span>
+        <div>
+          <div class="slabel">Index Data Write</div>
+          <div class="ssub">Users + Secondary Index (2PC)</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(7)">
+        <span class="sicon">📖</span>
+        <div>
+          <div class="slabel">Consistent Read</div>
+          <div class="ssub">Leader reads</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(8)">
+        <span class="sicon">⚡</span>
+        <div>
+          <div class="slabel">Follower Reads</div>
+          <div class="ssub">Bounded staleness</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(9)">
+        <span class="sicon">🌎</span>
+        <div>
+          <div class="slabel">Geo-Partitioning</div>
+          <div class="ssub">Multi-region row pinning</div>
+        </div>
+      </button>
+      <div class="sgroup">Failure &amp; Recovery</div>
+      <button class="sbtn" onclick="selectScenario(10)">
+        <span class="sicon">🗳️</span>
+        <div>
+          <div class="slabel">Leader Election</div>
+          <div class="ssub">Crash → elect → recover</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(11)">
+        <span class="sicon">💥</span>
+        <div>
+          <div class="slabel">Node Failure</div>
+          <div class="ssub">Crash, re-elect, catch-up</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(12)">
+        <span class="sicon">🔀</span>
+        <div>
+          <div class="slabel">Network Partition</div>
+          <div class="ssub">Split-brain &amp; quorum</div>
+        </div>
+      </button>
+      <div class="sgroup">Scalability</div>
+      <button class="sbtn" onclick="selectScenario(13)">
+        <span class="sicon">📈</span>
+        <div>
+          <div class="slabel">Horizontal Scaling</div>
+          <div class="ssub">Add/remove nodes &amp; rebalance</div>
+        </div>
+      </button>
+      <div class="sgroup">Storage</div>
+      <button class="sbtn" onclick="selectScenario(14)">
+        <span class="sicon">🔄</span>
+        <div>
+          <div class="slabel">Tablet Split</div>
+          <div class="ssub">Auto-sharding growth</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(15)">
+        <span class="sicon">🗜️</span>
+        <div>
+          <div class="slabel">LSM Compaction</div>
+          <div class="ssub">DocDB storage engine</div>
+        </div>
+      </button>
+      <div class="sgroup">Schema</div>
+      <button class="sbtn" onclick="selectScenario(16)">
+        <span class="sicon">📦</span>
+        <div>
+          <div class="slabel">Colocated Tables</div>
+          <div class="ssub">Shared tablet groups</div>
+        </div>
+      </button>
+    </nav>
+
+    <!-- CLUSTER AREA -->
+    <div class="cluster-area">
+      <div class="toolbar">
+        <span class="tlabel">LEGEND:</span>
+        <span class="tchip tc-l">◉ LEADER</span>
+        <span class="tchip tc-f">○ FOLLOWER</span>
+        <span class="tchip tc-c">◐ CANDIDATE</span>
+        <span class="tchip tc-d">✕ DEAD</span>
+        <span class="tchip tc-p">⟊ PARTITIONED</span>
+        <span class="tterm-display" id="term-display">Raft Term: 4</span>
+      </div>
+
+      <!-- canvas -->
+      <div class="canvas-wrap" id="canvas-wrap">
+        <svg id="svg-overlay"></svg>
+        <div class="region-divider d-v1" style="left: 33%"></div>
+        <div class="region-divider d-v2" style="left: 66%"></div>
+        <div class="client-box" id="client-box">⬡ YB-TServer Gateway</div>
+
+        <!-- Region Info Column (Visible only in Geo-mode) -->
+        <div class="region-info-card" id="ric-us">
+          <div class="ric-flag">🇺🇸</div>
+          <div class="ric-name">US-East</div>
+          <div class="ric-meta">AWS us-east-1</div>
+        </div>
+        <div class="region-info-card" id="ric-eu">
+          <div class="ric-flag">🇪🇺</div>
+          <div class="ric-name">Europe</div>
+          <div class="ric-meta">AWS eu-central-1</div>
+        </div>
+        <div class="region-info-card" id="ric-apac">
+          <div class="ric-flag">🇸🇬</div>
+          <div class="ric-name">APAC</div>
+          <div class="ric-meta">AWS ap-south-1</div>
+        </div>
+        
+        <!-- Region US -->
+        <div class="node-card" id="node-1">
+          <div class="region-label">US-East</div>
+          <div class="n-header"><div class="n-indicator" id="ni-1"></div><div class="n-name">TServer-1</div><div class="n-zone">us-east-1a</div></div>
+          <div class="n-body" id="nb-1"></div>
+        </div>
+        <div class="node-card" id="node-2">
+          <div class="region-label">US-East</div>
+          <div class="n-header"><div class="n-indicator" id="ni-2"></div><div class="n-name">TServer-2</div><div class="n-zone">us-east-1b</div></div>
+          <div class="n-body" id="nb-2"></div>
+        </div>
+        <div class="node-card" id="node-3">
+          <div class="region-label">US-East</div>
+          <div class="n-header"><div class="n-indicator" id="ni-3"></div><div class="n-name">TServer-3</div><div class="n-zone">us-east-1c</div></div>
+          <div class="n-body" id="nb-3"></div>
+        </div>
+
+        <!-- Region EU -->
+        <div class="node-card" id="node-4" style="display:none">
+          <div class="region-label">Europe</div>
+          <div class="n-header"><div class="n-indicator" id="ni-4"></div><div class="n-name">TServer-4</div><div class="n-zone">eu-central-1a</div></div>
+          <div class="n-body" id="nb-4"></div>
+        </div>
+        <div class="node-card" id="node-5" style="display:none">
+          <div class="region-label">Europe</div>
+          <div class="n-header"><div class="n-indicator" id="ni-5"></div><div class="n-name">TServer-5</div><div class="n-zone">eu-central-1b</div></div>
+          <div class="n-body" id="nb-5"></div>
+        </div>
+        <div class="node-card" id="node-6" style="display:none">
+          <div class="region-label">Europe</div>
+          <div class="n-header"><div class="n-indicator" id="ni-6"></div><div class="n-name">TServer-6</div><div class="n-zone">eu-central-1c</div></div>
+          <div class="n-body" id="nb-6"></div>
+        </div>
+
+        <!-- Region APAC -->
+        <div class="node-card" id="node-7" style="display:none">
+          <div class="region-label">APAC</div>
+          <div class="n-header"><div class="n-indicator" id="ni-7"></div><div class="n-name">TServer-7</div><div class="n-zone">ap-south-1a</div></div>
+          <div class="n-body" id="nb-7"></div>
+        </div>
+        <div class="node-card" id="node-8" style="display:none">
+          <div class="region-label">APAC</div>
+          <div class="n-header"><div class="n-indicator" id="ni-8"></div><div class="n-name">TServer-8</div><div class="n-zone">ap-south-1b</div></div>
+          <div class="n-body" id="nb-8"></div>
+        </div>
+        <div class="node-card" id="node-9" style="display:none">
+          <div class="region-label">APAC</div>
+          <div class="n-header"><div class="n-indicator" id="ni-9"></div><div class="n-name">TServer-9</div><div class="n-zone">ap-south-1c</div></div>
+          <div class="n-body" id="nb-9"></div>
+        </div>
+      </div>
+
+      <!-- FAILURE DASHBOARD -->
+      <div class="failure-dash" id="failure-dash" style="height:230px">
+        <div class="fd-tabs" id="fd-tabs">
+          <button class="fd-tab active" id="fdt-node" onclick="switchFDTab('node')">💥 Node Failure</button>
+          <button class="fd-tab" id="fdt-part" onclick="switchFDTab('part')">🔀 Network Partition</button>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px;padding-right:10px">
+            <span id="fd-phase-lbl" style="font-size:10px;color:var(--txt3);font-family:var(--mono)"></span>
+          </div>
+        </div>
+        <div class="fd-content">
+          <div class="fd-nodes" id="fd-nodes"></div>
+          <div class="fd-tracker">
+            <div class="fd-tracker-header">
+              <div class="fd-counter">
+                <div class="fdc-val" id="fd-write-total">0</div>
+                <div class="fdc-lbl">WRITES SENT</div>
+              </div>
+              <div class="fd-counter">
+                <div class="fdc-val" id="fd-write-ok" style="color:var(--ok)">0</div>
+                <div class="fdc-lbl">COMMITTED</div>
+              </div>
+              <div class="fd-counter">
+                <div class="fdc-val" id="fd-write-lost" style="color:var(--dead)">0</div>
+                <div class="fdc-lbl">REJECTED</div>
+              </div>
+              <div class="fd-counter">
+                  <div class="fdc-val" id="fd-write-lag" style="color:var(--warn)">0</div>
+                  <div class="fdc-lbl">LOG LAG</div>
+              </div>
+              <div style="flex:1"></div>
+              <button class="btn btn-p" id="btn-fd-run" onclick="fdToggleAutoWrite()"
+                style="font-size:10px;padding:5px 10px">▶ Start Writes</button>
+            </div>
+            <div class="fd-write-log" id="fd-write-log"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SCALABILITY DASHBOARD -->
+      <div class="scalability-dash" id="scalability-dash">
+        <div class="fd-tabs">
+          <div class="fd-tab active">📊 Cluster Balance & Scaling Stats</div>
+        </div>
+        <div class="sd-content">
+          <div id="sd-stats-grid" class="sd-stats-grid"></div>
+        </div>
+      </div>
+
+      <!-- DATA PANEL -->
+      <div class="data-panel" id="data-panel">
+        <div class="log-hdr" style="padding: 6px 12px; flex-shrink: 0;">Table Data View</div>
+        <div class="data-table-wrap">
+          <table class="data-table" id="data-table">
+            <thead><tr id="data-table-head"></tr></thead>
+            <tbody id="data-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- SPLIT PANEL -->
+      <div class="split-panel" id="split-panel">
+        <div class="log-hdr" style="padding: 0; margin-bottom: 8px;">Tablet Split Analysis</div>
+        <div class="split-viz" id="split-viz"></div>
+      </div>
+    </div>
+
+    <!-- INFO PANEL -->
+    <aside class="info-panel">
+      <div class="i-title" id="i-title">Cluster Overview</div>
+      <div class="i-desc" id="i-desc">YugabyteDB distributes data across TServers using tablet-based sharding.</div>
+      <div class="step-sec" id="step-sec"><span class="scount">—</span></div>
+      <div class="elect-timeline" id="elect-timeline" style="display:none">
+        <div class="et-title">Election Lifecycle</div>
+        <div class="et-steps" id="et-steps"></div>
+      </div>
+      <div class="ddl-sec" id="ddl-sec">
+        <div class="lat-title">Table Schema</div>
+        <div class="ddl-code" id="ddl-code"></div>
+      </div>
+      <div class="lat-sec">
+        <div class="lat-title">Operation Latency</div>
+        <div id="lat-rows"></div>
+      </div>
+      <div class="tx-sec" id="tx-panel" style="display:none">
+        <div class="tx-title">Distributed Transactions <span id="tx-count">0</span></div>
+        <div id="tx-list" style="display:contents">
+           <div style="font-size:9px;color:var(--txt3);text-align:center;padding:10px">No active transactions</div>
+        </div>
+      </div>
+      <div class="log-sec">
+        <div class="log-hdr">Event Log <button class="log-clr" onclick="clearLog()">Clear</button></div>
+        <div class="log-body" id="log-body"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- CTRL BAR -->
+  <div class="ctrl-bar">
+    <div class="cgrp">
+      <button class="btn btn-p" id="btn-step" onclick="stepForward()">Step →</button>
+      <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
+      <button class="btn" id="btn-reset" onclick="resetScenario()">↺ Reset</button>
+    </div>
+    <div class="cdiv"></div>
+    <div class="spd-wrap">Speed: <input type="range" id="spd" min="0.5" max="3" step="0.5" value="1"
+        oninput="speedVal=+this.value;document.getElementById('spd-val').textContent=this.value+'×'"><span
+        id="spd-val">1×</span></div>
+    <div class="cdiv"></div>
+    <div class="cgrp" id="extra-btns"></div>
+    <div class="qwrap">
+      <input class="qinput" id="qinput" placeholder="SELECT * FROM users WHERE id = 4"
+        onkeydown="if(event.key==='Enter')execQuery()" />
+      <button class="btn btn-p" onclick="execQuery()">Execute</button>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="engine.js"></script>
+  <script src="scenarios.js"></script>
+</body>
+
+</html>
