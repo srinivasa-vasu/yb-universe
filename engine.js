@@ -1279,24 +1279,67 @@
         addLog(`YSQL: ${q}`, 'li');
         const ins = q.match(/insert\s+into\s+(\w+).*values\s*\((\d+)/i);
         const sel = q.match(/select.*from\s+(\w+).*where\s+id\s*=\s*(\d+)/i);
+
+        function findTabletForTable(tbl, id) {
+          const groups = S.groups.filter(g => g.table === tbl);
+          if (!groups.length) return null;
+          const hash = hashKey(id);
+          const byHash = groups.find(g => hashInRange(hash, g.range));
+          if (byHash) {
+            addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4, '0')} → ${tbl}.t${byHash.tnum}`, '');
+            return byHash;
+          }
+          const byRange = groups.find(g => {
+            const p = g.range.split(' — ');
+            if (p.length !== 2) return false;
+            const lo = parseInt(p[0]), hi = parseInt(p[1]);
+            return !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
+          });
+          if (byRange) {
+            addLog(`Range: id=${id} in [${byRange.range}] → ${tbl}.t${byRange.tnum}`, '');
+            return byRange;
+          }
+          return null;
+        }
+
         if (ins) {
-          const tbl = ins[1].toLowerCase(); const id = parseInt(ins[2]); const hash = hashKey(id);
-          const tg = S.groups.find(g => g.table === tbl && hashInRange(hash, g.range));
+          const tbl = ins[1].toLowerCase(); const id = parseInt(ins[2]);
+          const tg = findTabletForTable(tbl, id);
           if (tg) {
-            addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4, '0')} → ${tbl}.t${tg.tnum}`, '');
-            const ctx = makeCtx(); ctx.pktClientToTablet(tg.id, tg.leaderNode, 'pk-write', 500).then(() => { ctx.hlTablet(tg.id, tg.leaderNode, 't-hl'); addLog('Write committed ✓', 'ls'); });
-          }
-        } else if (sel) {
-          const tbl = sel[1].toLowerCase(); const id = parseInt(sel[2]); const hash = hashKey(id);
-          const tg = S.groups.find(g => g.table === tbl && hashInRange(hash, g.range));
-          if (tg) {
-            addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4, '0')} → ${tbl}.t${tg.tnum}`, '');
-            const ctx = makeCtx(); ctx.pktClientToTablet(tg.id, tg.leaderNode, 'pk-read', 500).then(() => {
-              const row = tg.data.find(r => r[0] === id);
-              if (row) addLog(`Result: {${row.join(', ')}}`, 'ls'); else addLog(`Row ${id} not found`, 'lw');
-              ctx.pktTabletToClient(tg.id, tg.leaderNode, 'pk-read', 400);
+            const ctx = makeCtx();
+            ctx.pktClientToTablet(tg.id, tg.leaderNode, 'pk-write', 500).then(() => {
+              const follows = tg.replicas.filter(n => n !== tg.leaderNode);
+              Promise.all(follows.map(f => ctx.pktTabletToTablet(tg.id, tg.leaderNode, tg.id, f, 'pk-raft', 400))).then(() => {
+                addLog('Quorum achieved ✓', 'ls');
+                for (const nid of tg.replicas) { ctx.hlTablet(tg.id, nid, 't-hl'); ctx.reRenderTablet(tg.id, nid, true); }
+                addLog('Write committed ✓', 'ls');
+              });
             });
-          }
+          } else addLog(`No tablet found for id=${id} in table ${tbl}`, 'le');
+        } else if (sel) {
+          const tbl = sel[1].toLowerCase(); const id = parseInt(sel[2]);
+          const groups = S.groups.filter(g => g.table === tbl);
+          const hash = hashKey(id);
+          const routedByHash = groups.find(g => hashInRange(hash, g.range));
+          const routedByRange = !routedByHash && groups.find(g => {
+            const p = g.range.split(/\s*[—–]\s*/);
+            const lo = parseInt(p[0]), hi = parseInt(p[1]);
+            return p.length === 2 && !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
+          });
+          if (routedByHash) addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4,'0')} → ${tbl}.t${routedByHash.tnum}`, '');
+          else if (routedByRange) addLog(`Range: id=${id} in [${routedByRange.range}] → ${tbl}.t${routedByRange.tnum}`, '');
+          const tg = (routedByHash && routedByHash.data.some(r => r[0] === id)) ? routedByHash
+                   : (routedByRange && routedByRange.data.some(r => r[0] === id)) ? routedByRange
+                   : groups.find(g => g.data.some(r => r[0] === id));
+          if (tg) {
+            const target = tg;
+            const ctx = makeCtx();
+            ctx.pktClientToTablet(target.id, target.leaderNode, 'pk-read', 500).then(() => {
+              const row = target.data.find(r => r[0] === id);
+              if (row) addLog(`Result: {${row.slice(0, 4).join(', ')}}`, 'ls'); else addLog(`Row ${id} not found`, 'lw');
+              ctx.pktTabletToClient(target.id, target.leaderNode, 'pk-read', 400);
+            });
+          } else addLog(`No tablet found for id=${id} in table ${tbl}`, 'le');
         } else addLog(`Try: SELECT * FROM users WHERE id = 4`, 'lw');
       }
 
