@@ -22,13 +22,13 @@
        for (const g of groups) {
          rs[g.id] = {};
          for (const n of g.replicas)
-           rs[g.id][n] = { 
-             mem: 15 + Math.random() * 28, 
-             ss: 22 + Math.random() * 40, 
+           rs[g.id][n] = {
+             mem: 15 + Math.random() * 28,
+             ss: 22 + Math.random() * 40,
              ssts: [Math.floor(20 + Math.random() * 30)], // Initial SST file size
-             newRows: [], 
+             newRows: [],
              provisionalRows: [],
-             readRow: undefined 
+             readRow: undefined
            };
        }
        return rs;
@@ -183,7 +183,7 @@
           ns.rows += caught;
           ns.logIdx += caught;
           ns.writes += caught;
-          
+
           const maxLag = Math.max(...[1, 2, 3].map(x => S.nodeStats[x]?.lagRows || 0));
           document.getElementById('fd-write-lag').textContent = maxLag;
           fdAddWriteEntry('sync', `TS-${nodeId} catch-up: +${caught} entries · lag=${ns.lagRows}`);
@@ -194,28 +194,28 @@
         fdRenderNodes();
         delete fdCatchingUp[nodeId];
       })();
-      
+
       return fdCatchingUp[nodeId];
     }
 
     function renderScalingStats() {
       const container = document.getElementById('sd-stats-grid');
       if (!container) return;
-      
-      const zones = { 
-        'Zone A': { l: 0, t: 0, nodes: [1, 4, 7] }, 
-        'Zone B': { l: 0, t: 0, nodes: [2, 5, 8] }, 
-        'Zone C': { l: 0, t: 0, nodes: [3, 6, 9] } 
+
+      const zones = {
+        'Zone A': { l: 0, t: 0, nodes: [1, 4, 7] },
+        'Zone B': { l: 0, t: 0, nodes: [2, 5, 8] },
+        'Zone C': { l: 0, t: 0, nodes: [3, 6, 9] }
       };
       const nodeStats = {};
-      
+
       S.nodes.forEach(n => {
         const el = document.getElementById(`node-${n.id}`);
         if (el && el.style.display !== 'none') {
            nodeStats[n.id] = { l: 0, t: 0 };
         }
       });
-      
+
       S.groups.forEach(g => {
         if (nodeStats[g.leaderNode]) {
            nodeStats[g.leaderNode].l++;
@@ -242,7 +242,7 @@
           </div>`;
       });
       html += '</div></div>';
-      
+
       html += '<div class="sd-section"><h4>Zones</h4><div class="sd-grid">';
       Object.keys(zones).forEach(z => {
         const zoneNodes = zones[z].nodes.filter(nid => nodeStats[nid]);
@@ -256,7 +256,7 @@
         }
       });
       html += '</div></div>';
-      
+
       container.innerHTML = html;
     }
 
@@ -363,7 +363,7 @@
         const nb = document.getElementById(`nb-${n}`);
         if (nb) nb.innerHTML = '';
       }
-      
+
       const sc = SCENARIOS[currentScenario];
       const filter = sc?.filterTable;
       for (const g of S.groups) {
@@ -404,7 +404,7 @@
       if (g.data?.length || rs?.provisionalRows?.length) {
         const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
         dHtml = '<div class="t-data">';
-        
+
         // Header Row
         if (g.table === 'users') {
           dHtml += `<div class="d-row t-data-header ${isGeo ? 'is-geo' : ''}">
@@ -414,16 +414,16 @@
 
         const combined = [...g.data.map(d => ({...d, data: d, type: 'comm'})), ... (rs?.provisionalRows || []).map(d => ({...d, data: d, type: 'prov'}))];
         const rowsToShow = combined.slice(-3);
-        
+
         for (let i = 0; i < rowsToShow.length; i++) {
           const entry = rowsToShow[i];
           const row = entry.data;
           const isProv = entry.type === 'prov';
-          const isN = rs?.newRows?.includes(i); 
+          const isN = rs?.newRows?.includes(i);
           const isR = rs?.readRow === i;
-          
+
           dHtml += `<div class="d-row ${isProv ? 'provisional' : ''} ${isN ? 'r-new' : ''} ${isR ? 'r-read' : ''} ${isGeo ? 'is-geo' : ''}">`;
-          
+
           if (g.isColocated) {
             const rowTable = row[5] || 'users';
             const subTi = TABLES[rowTable] || { color: '#94a3b8' };
@@ -451,16 +451,16 @@
       const panel = document.getElementById('tx-panel');
       const list = document.getElementById('tx-list');
       const count = document.getElementById('tx-count');
-      
+
       if (!S.transactions.length) {
         panel.style.display = 'none';
         return;
       }
-      
+
       panel.style.display = 'flex';
       count.textContent = S.transactions.length;
       list.innerHTML = '';
-      
+
       S.transactions.forEach(tx => {
         const row = document.createElement('div');
         row.className = 'tx-row';
@@ -536,7 +536,7 @@
       svg.querySelectorAll('.conn-grp').forEach(e => e.remove());
       const canvas = document.getElementById('canvas-wrap');
       const cr = canvas.getBoundingClientRect();
-      
+
       // Update SVG height to cover all content
       svg.setAttribute('height', canvas.scrollHeight);
 
@@ -545,10 +545,10 @@
         for (const n of g.replicas) {
           const el = document.getElementById(`tablet-${g.id}-${n}`); if (!el) continue;
           const r = el.getBoundingClientRect();
-          pos.push({ 
-            x: r.left - cr.left + r.width / 2 + canvas.scrollLeft, 
-            y: r.top - cr.top + r.height / 2 + canvas.scrollTop, 
-            n 
+          pos.push({
+            x: r.left - cr.left + r.width / 2 + canvas.scrollLeft,
+            y: r.top - cr.top + r.height / 2 + canvas.scrollTop,
+            n
           });
         }
         if (pos.length < 2) continue;
@@ -662,8 +662,8 @@
         setLat: (i, v) => setLatency(i, v),
         setDDL: code => {
           const sec = document.getElementById('ddl-sec'); const box = document.getElementById('ddl-code');
-          if (code) { 
-            sec.style.display = 'block'; 
+          if (code) {
+            sec.style.display = 'block';
             // Basic syntax highlighting
             let html = code
               .replace(/\b(CREATE TABLE|PRIMARY KEY|SPLIT AT VALUES|VALUES|INT|TEXT|ASC|HASH)\b/g, (m) => {
@@ -699,10 +699,10 @@
           if (role === 'LEADER') { g.leaderNode = nId; renderAllTablets(); renderConnections(); }
           else if (role === 'CANDIDATE') {
             const el = document.getElementById(`tablet-${tgId}-${nId}`);
-            if (el) { 
-              el.classList.add('t-candidate'); 
-              const b = el.querySelector('.role-badge'); 
-              if (b) { b.className = 'role-badge r-CANDIDATE'; b.textContent = 'CANDIDATE'; } 
+            if (el) {
+              el.classList.add('t-candidate');
+              const b = el.querySelector('.role-badge');
+              if (b) { b.className = 'role-badge r-CANDIDATE'; b.textContent = 'CANDIDATE'; }
             }
           }
         },
@@ -729,7 +729,7 @@
             <div class="hash-range">Range: ${range}</div>
           `;
           cw.appendChild(card);
-          
+
           return new Promise(r => {
             card.onmouseleave = () => {
               card.remove();
@@ -748,9 +748,9 @@
           const cw = document.getElementById('canvas-wrap');
           const cr = cw.getBoundingClientRect();
           const cb = document.getElementById('client-box').getBoundingClientRect();
-          const from = { 
-            x: cb.left - cr.left + cb.width / 2 + cw.scrollLeft, 
-            y: cb.top - cr.top + cb.height / 2 + cw.scrollTop 
+          const from = {
+            x: cb.left - cr.left + cb.width / 2 + cw.scrollLeft,
+            y: cb.top - cr.top + cb.height / 2 + cw.scrollTop
           };
           const to = getTC(tgId, nId, cr); if (!to) { res(); return; }
           animPkt(from, { x: to.x + cw.scrollLeft, y: to.y + cw.scrollTop }, cls, dur / speedVal, res);
@@ -759,9 +759,9 @@
           const cw = document.getElementById('canvas-wrap');
           const cr = cw.getBoundingClientRect();
           const cb = document.getElementById('client-box').getBoundingClientRect();
-          const to = { 
-            x: cb.left - cr.left + cb.width / 2 + cw.scrollLeft, 
-            y: cb.top - cr.top + cb.height / 2 + cw.scrollTop 
+          const to = {
+            x: cb.left - cr.left + cb.width / 2 + cw.scrollLeft,
+            y: cb.top - cr.top + cb.height / 2 + cw.scrollTop
           };
           const from = getTC(tgId, nId, cr); if (!from) { res(); return; }
           animPkt({ x: from.x + cw.scrollLeft, y: from.y + cw.scrollTop }, to, cls, dur / speedVal, res);
@@ -772,8 +772,8 @@
           const from = getTC(fTg, fN, cr); const to = getTC(tTg, tN, cr);
           if (!from || !to) { res(); return; }
           animPkt(
-            { x: from.x + cw.scrollLeft, y: from.y + cw.scrollTop }, 
-            { x: to.x + cw.scrollLeft, y: to.y + cw.scrollTop }, 
+            { x: from.x + cw.scrollLeft, y: from.y + cw.scrollTop },
+            { x: to.x + cw.scrollLeft, y: to.y + cw.scrollTop },
             cls, dur / speedVal, res
           );
         }),
@@ -841,9 +841,9 @@
 
     function selectScenario(id) {
       currentScenario = id; currentStep = -1; stepRunning = false; stopPlay();
-      S = freshState(); 
+      S = freshState();
       fdReset();
-      
+
       const sc = SCENARIOS[id];
       const ctx = makeCtx();
 
@@ -867,7 +867,7 @@
 
       renderAllTablets(); setTimeout(renderConnections, 80);
       for (let n = 1; n <= 9; n++) renderNodeAlive(n, true);
-      
+
       document.getElementById('active-badge').textContent = sc.name;
       document.getElementById('i-title').textContent = sc.name;
       document.getElementById('i-desc').innerHTML = sc.desc;
@@ -892,7 +892,7 @@
       const fd = document.getElementById('failure-dash');
       const isFailure = sc.failureMode;
       fd.classList.toggle('visible', !!isFailure);
-      
+
       const sd = document.getElementById('scalability-dash');
       const isScaling = sc.name === 'Horizontal Scaling';
       sd.classList.toggle('visible', isScaling);
@@ -906,7 +906,7 @@
         document.getElementById('fd-phase-lbl').textContent = '';
         fdRenderNodes();
       }
-      
+
       if (isScaling) {
         renderScalingStats();
       }
@@ -941,7 +941,7 @@
       const dsc = typeof step.desc === 'function' ? step.desc() : step.desc;
       addLog(`▶ Step ${currentStep + 1}: ${lbl}`, 'li');
       if (dsc) document.getElementById('i-desc').innerHTML = dsc;
-      const ctx = makeCtx(); 
+      const ctx = makeCtx();
       try {
         await step.action(ctx);
       } catch(e) {
@@ -985,7 +985,7 @@
         addLog(`[INSPECT] ${ti.name}.tablet_${g.tnum} @ TServer-${nodeId}`, 'li');
         let rangeTxt = g.table === 'users' ? `Hash Range: ${g.range}` : `Key Range: ${g.range}`;
         addLog(`Role:${role} · Term:${g.term} · ${rangeTxt}`, '');
-        
+
         const rs = S.replicaState[g.id]?.[nodeId];
         if (rs) addLog(`Mem:${Math.round(rs.mem)}% SST:${Math.round(rs.ss)}% Segs:${rs.ssts?.length || 0} Rows:${g.data?.length || 0}`, '');
 
@@ -1054,14 +1054,14 @@
         const head = document.getElementById('data-table-head');
         const body = document.getElementById('data-table-body');
         if (!head || !body) return;
-        
+
         if (tableId === 'colocated') {
           head.innerHTML = '<th>TBL</th><th>ID</th><th>DATA</th><th>HLC</th><th>TABLET</th>';
         } else {
-          head.innerHTML = table.cols.map(c => `<th>${c.toUpperCase()}</th>`).join('') + '<th>TABLET</th>';
+          head.innerHTML = table.cols.map(c => `<th>${c.toUpperCase()}</th>`).join('') + '<th>HLC</th><th>TABLET</th>';
         }
         body.innerHTML = '';
-        
+
         const rows = [];
         for (const g of S.groups) {
           if (tableId === 'colocated') {
@@ -1073,7 +1073,7 @@
             if (g.data) for (const r of g.data) rows.push({ r, tablet: g.tnum, tId: g.id });
           }
         }
-        
+
         rows.sort((a,b) => {
           const valA = (typeof a.r[0] === 'number') ? a.r[0] : parseInt(a.r[0]);
           const valB = (typeof b.r[0] === 'number') ? b.r[0] : parseInt(b.r[0]);
@@ -1084,7 +1084,7 @@
           const tr = document.createElement('tr');
           tr.id = `dr-${tId}-${r[0]}`;
           if (selectedRow && selectedRow.tId === tId && selectedRow.pk === r[0]) tr.classList.add('active-row');
-          
+
           if (isCol) {
             const rowTable = r[5];
             const subTi = TABLES[rowTable] || { color: '#ccc', cols: [] };
@@ -1099,10 +1099,10 @@
                           `<td>${r[0]}</td><td>${dataStr}</td><td>${fmtHLC(r[4])}</td>` +
                           `<td style="color:var(--txt3)">Shared Group</td>`;
           } else {
-            tr.innerHTML = r.map((c, i) => `<td style="${i===0?'color:var(--leader)':''}">${c}</td>`).join('') + 
+            tr.innerHTML = r.map((c, i) => `<td style="${i===0?'color:var(--leader)':''}">${c}</td>`).join('') +
                           `<td style="color:${table.color}">${table.name}.t${tablet}</td>`;
           }
-          
+
           tr.onclick = () => {
             selectedRow = { tId, pk: r[0] };
             document.querySelectorAll('.tablet').forEach(el => el.classList.remove('t-hl', 't-hl2'));
@@ -1126,7 +1126,7 @@
       function hashKey(id) { return (id * 2654435761) & 0xFFFF; }
       function hashInRange(hash, range) {
         const p = range.match(/0x([0-9A-Fa-f]+)[–-]0x([0-9A-Fa-f]+)/);
-        if (!p) return false; 
+        if (!p) return false;
         return hash >= parseInt(p[1], 16) && hash <= parseInt(p[2], 16);
       }
       function rangeMatch(val, range) {
@@ -1144,17 +1144,17 @@
         const name = ['Alice', 'Bob', 'Charlie', 'David', 'Eve', 'Frank'][Math.floor(Math.random() * 6)];
         const city = ['NY', 'SF', 'CH', 'PH', 'TX', 'BO'][Math.floor(Math.random() * 6)];
         const row = [id, name, city, Math.floor(Math.random() * 100), performance.now() / 1000];
-        
+
         let tg, hashHex;
         if (isHash) {
-          const hash = hashKey(id); 
+          const hash = hashKey(id);
           hashHex = '0x' + hash.toString(16).toUpperCase().padStart(4, '0');
           tg = S.groups.find(g => g.table === 'users' && hashInRange(hash, g.range));
           addLog(`PK id=${id} → HASH(${id}) = ${hashHex}`, 'li');
           if (tg) addLog(`Hash ${hashHex} falls into range ${tg.range} → users.t${tg.tnum}`, 'ls');
         } else {
-          tg = S.groups.find(g => { 
-            const p = g.range.split(' — '); 
+          tg = S.groups.find(g => {
+            const p = g.range.split(' — ');
             if (p.length === 2) return id >= parseInt(p[0]) && id <= parseInt(p[1]);
             return false;
           });
@@ -1171,9 +1171,9 @@
             const follows = tg.replicas.filter(n => n !== tg.leaderNode);
             Promise.all(follows.map(f => ctx.pktTabletToTablet(tg.id, tg.leaderNode, tg.id, f, 'pk-raft', 400))).then(() => {
               addLog('Quorum achieved ✓', 'ls');
-              for (const nid of tg.replicas) { 
-                ctx.hlTablet(tg.id, nid, isHash ? 't-hl' : 't-hl2'); 
-                ctx.reRenderTablet(tg.id, nid, true); 
+              for (const nid of tg.replicas) {
+                ctx.hlTablet(tg.id, nid, isHash ? 't-hl' : 't-hl2');
+                ctx.reRenderTablet(tg.id, nid, true);
               }
               renderDataTable('users');
             });
