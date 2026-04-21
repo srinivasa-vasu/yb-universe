@@ -815,10 +815,7 @@
             if (region === 'us') z.textContent = `us-east-1${azSuffix}`;
             else if (region === 'eu') z.textContent = `eu-central-1${azSuffix}`;
             else if (region === 'apac') z.textContent = `ap-south-1${azSuffix}`;
-            else {
-              // Restore default zones (us-east-1)
-              z.textContent = `us-east-1${azSuffix}`;
-            }
+            else z.textContent = `ap-south-1${azSuffix}`;
 
           }
         },
@@ -1286,7 +1283,7 @@
 
         if (tg) {
           const ctx = makeCtx();
-          await ctx.renderHashCompute(id, hashHex, `${tg.table}.t${tg.tnum}`, tg.range);
+          if (isHash) await ctx.renderHashCompute(id, hashHex, `${tg.table}.t${tg.tnum}`, tg.range);
           tg.data.push(row);
           ctx.pktClientToTablet(tg.id, tg.leaderNode, 'pk-write', 500).then(() => {
             const follows = tg.replicas.filter(n => n !== tg.leaderNode);

@@ -9,7 +9,7 @@
       {
         name: 'Hash Sharding', filterTable: 'users',
         desc: 'The Primary Key is hashed to determine tablet placement. This provides uniform distribution across the cluster, preventing hotspots.',
-        latencies: [{ lbl: 'Hash Calculation', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Write RPC', cls: 'lm', max: 50 }],
+        latencies: [{ lbl: 'Hash Calculation', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-hash', label: '➕ Insert Random User', cls: 'btn-p', cb: 'insertHashUser' }, { id: 'btn-locate', label: '🔍 Locate Quorum', cls: 'btn-g', cb: 'locateHashRows' }],
         init: (ctx) => {
           showDataPanel(true);
@@ -17,12 +17,43 @@
           ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY HASH,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
         },
         steps: [
-          { label: 'Hash Mapping', desc: 'Keys map to 0x0000-0xFFFF hash space. Each tablet covers a slice of this space.', action: async (ctx) => { 
+          { label: 'Hash Mapping', desc: 'The primary key is hashed into a 0x0000–0xFFFF space. Each tablet owns a contiguous slice. YugabyteDB routes every write directly to the tablet whose range covers the hash — no scatter-gather needed.', action: async (ctx) => {
             for (const g of S.groups.filter(x => x.table === 'users')) {
               ctx.hlTablet(g.id, g.leaderNode, 't-hl');
-              await ctx.delay(400);
+              await ctx.delay(350);
             }
-          } }
+            ctx.setLat(0, 0.1); ctx.setLat(1, 0.4);
+            addLog('hash(id) → 0x0000–0xFFFF space partitioned across tg1, tg2, tg3', 'li');
+          }},
+          { label: 'Write to Leader', desc: 'Client INSERT is routed to the tablet leader that owns the key\'s hash range. The leader appends to WAL and marks the row provisional — visible on the leader immediately but not yet committed. It then fans out Raft AppendEntries to both followers.', action: async (ctx) => {
+            const pendingRow = [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            ctx.activateClient(true);
+            addLog('INSERT id=10 → hash(10)=0x3A2F → tg1 (0x0000–0x54FF), leader N1', 'li');
+            await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+            ctx.hlTablet('tg1', 1, 't-hl');
+            const rs = S.replicaState['tg1']?.[1];
+            if (rs) rs.provisionalRows = [pendingRow];
+            ctx.reRenderTablet('tg1', 1);
+            addLog('Leader N1: WAL append, row provisional ⏳ → fanning out to N2, N3', '');
+            ctx.activateClient(false);
+          }},
+          { label: 'Raft Replication', desc: 'The leader simultaneously replicates to both followers. Once a majority (2 of 3) ACKs, the provisional row is committed and becomes durable on all three replicas.', action: async (ctx) => {
+            await Promise.all([
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+            ]);
+            const g = S.groups.find(x => x.id === 'tg1');
+            const rs1 = S.replicaState['tg1']?.[1];
+            const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            if (g) {
+              g.data.push(row);
+              for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            ctx.setLat(2, 2.1);
+            addLog('Majority ACK received — write committed (RF=3, quorum=2) ✓', 'ls');
+            renderDataTable('users');
+          }}
         ]
       },
 
@@ -30,23 +61,57 @@
       {
         name: 'Range (Default)', filterTable: 'users',
         desc: 'By default, range-sharded tables start with a single tablet. Data is ordered by Primary Key.',
-        latencies: [{ lbl: 'Key Compare', cls: 'll', max: 1 }, { lbl: 'Single Tablet', cls: 'lh', max: 200 }],
+        latencies: [{ lbl: 'Key Compare', cls: 'll', max: 1 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-range', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
           showDataPanel(true);
           renderDataTable('users');
-          // Consolidate all users into a single tablet
           const allData = S.groups.filter(g => g.table === 'users').reduce((a, g) => a.concat(g.data), []);
           S.groups = S.groups.filter(g => g.table !== 'users');
-          S.groups.push({ 
-            id: 'tg1', table: 'users', tnum: 1, range: '0 — 999', leaderNode: 1, term: 4, replicas: [1, 2, 3], 
-            data: allData.sort((a, b) => a[0] - b[0]) 
+          S.groups.push({
+            id: 'tg1', table: 'users', tnum: 1, range: '0 — 999', leaderNode: 1, term: 4, replicas: [1, 2, 3],
+            data: allData.sort((a, b) => a[0] - b[0])
           });
           ctx.rebuildReplicaState();
           ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY ASC,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+          renderAllTablets(); setTimeout(renderConnections, 80);
         },
         steps: [
-          { label: 'Initial State', desc: 'New tables start on a single tablet (TServer-1). This can cause hotspots if writes are sequential.', action: async (ctx) => { ctx.hlTablet('tg1', 1, 't-hl2'); } }
+          { label: 'Initial State', desc: 'Range-sharded tables start with a single tablet on TServer-1, covering the full key range. Writes land sequentially on the same leader — efficient for reads but prone to write hotspots as load grows.', action: async (ctx) => {
+            ctx.hlTablet('tg1', 1, 't-hl2');
+            addLog('Single tablet tg1 covers 0–999 on N1 (leader)', 'li');
+            addLog('All writes route to N1 — sequential hotspot risk', 'lw');
+          }},
+          { label: 'Write to Leader', desc: 'INSERT is routed to the single tablet leader (N1). The leader B-Tree compares the key, appends to WAL, and marks the row provisional — visible on the leader immediately but not yet committed. It then fans out to followers.', action: async (ctx) => {
+            const pendingRow = [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            ctx.activateClient(true);
+            addLog('INSERT id=10 → key compare → tg1 (0–999), leader N1', 'li');
+            await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+            ctx.hlTablet('tg1', 1, 't-hl');
+            const rs = S.replicaState['tg1']?.[1];
+            if (rs) rs.provisionalRows = [pendingRow];
+            ctx.reRenderTablet('tg1', 1);
+            ctx.setLat(0, 0.1);
+            addLog('Key ordered, WAL append, row provisional ⏳ → fanning out to N2, N3', '');
+            ctx.activateClient(false);
+          }},
+          { label: 'Raft Replication', desc: 'Leader replicates in parallel to both followers. Majority ACK promotes the provisional row to committed — it becomes durable and visible on all three replicas.', action: async (ctx) => {
+            await Promise.all([
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+            ]);
+            const g = S.groups.find(x => x.id === 'tg1');
+            const rs1 = S.replicaState['tg1']?.[1];
+            const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            if (g) {
+              g.data.push(row);
+              for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            ctx.setLat(1, 2.1);
+            addLog('Majority ACK — write committed ✓', 'ls');
+            renderDataTable('users');
+          }}
         ]
       },
 
@@ -54,7 +119,7 @@
       {
         name: 'Range (Pre-split)', filterTable: 'users',
         desc: 'Optimize range sharding by pre-splitting the table into multiple tablets during creation.',
-        latencies: [{ lbl: 'Split Lookup', cls: 'll', max: 5 }, { lbl: 'Parallel Write', cls: 'll', max: 15 }],
+        latencies: [{ lbl: 'Range Lookup', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-presplit', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
           showDataPanel(true);
@@ -66,13 +131,45 @@
           S.groups.push({ id: 'tg3', table: 'users', tnum: 3, range: '200 — 999', leaderNode: 3, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] >= 200) });
           ctx.rebuildReplicaState();
           ctx.setDDL('CREATE TABLE users (...) \nSPLIT AT VALUES ((100), (200));');
+          renderAllTablets(); setTimeout(renderConnections, 80);
         },
         steps: [
-          { label: 'Multi-Tablet', desc: 'Table is pre-split into 3 tablets: 0–99, 100–199, 200–999. Distributes load from day one.', action: async (ctx) => { 
+          { label: 'Multi-Tablet', desc: 'Table is pre-split into 3 tablets: 0–99, 100–199, 200–999. Each tablet is owned by a different leader, distributing load from day one.', action: async (ctx) => {
             for (const g of S.groups.filter(x => x.table === 'users')) {
               ctx.hlTablet(g.id, g.leaderNode, 't-hl');
               await ctx.delay(400);
             }
+          } },
+          { label: 'Write → Routed', desc: 'Client inserts id=75. Range lookup maps 75 → tablet tg1 (0–99). Write goes to tg1 leader which appends to WAL and marks the row provisional — visible on the leader immediately but not yet committed.', action: async (ctx) => {
+            const pendingRow = [75, 'Jack', 'MUM', 88, Date.now()/1000];
+            ctx.activateClient(true);
+            await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+            ctx.hlTablet('tg1', 1, 't-hl');
+            const rs = S.replicaState['tg1']?.[1];
+            if (rs) rs.provisionalRows = [pendingRow];
+            ctx.reRenderTablet('tg1', 1);
+            ctx.setLat(0, 0.1);
+            ctx.setLat(1, 0.4);
+            addLog('Client INSERT id=75 → range 0–99 → tg1 (N1)', 'li');
+            addLog('Key ordered, WAL append, row provisional ⏳ → fanning out to N2, N3', '');
+            ctx.activateClient(false);
+          } },
+          { label: 'Raft Replication', desc: 'Leader fans out to both followers in parallel. Majority ACK promotes the provisional row to committed — durable and visible on all three replicas.', action: async (ctx) => {
+            await Promise.all([
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+              ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+            ]);
+            const g = S.groups.find(x => x.id === 'tg1');
+            const rs1 = S.replicaState['tg1']?.[1];
+            const row = rs1?.provisionalRows?.[0] || [75, 'Jack', 'MUM', 88, Date.now()/1000];
+            if (g) {
+              g.data.push(row);
+              for (const n of [1, 2, 3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1, 2, 3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            ctx.setLat(2, 2.1);
+            addLog('Majority ACK → committed, id=75 visible on all tg1 replicas', 'ls');
+            renderDataTable('users');
           } }
         ]
       },
@@ -84,24 +181,40 @@
         latencies: [{ lbl: 'Leader WAL', cls: 'll', max: 2 }, { lbl: 'Near Follower', cls: 'll', max: 3 }, { lbl: 'Far Follower', cls: 'lm', max: 12 }, { lbl: 'Majority ACK', cls: 'll', max: 1 }, { lbl: 'Total Latency', cls: 'lm', max: 15 }],
         extraBtns: [{ id: 'btn-tn', label: '💀 Kill Near Follower', cls: 'btn-d', cb: 'toggleNearFollower' }],
         steps: [
-          { label: 'Client INSERT', desc: 'Client sends INSERT to gateway TServer.', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 1, 'pk-write', 500); } },
-          { label: 'Leader WAL & Replicate', desc: 'Leader appends to WAL then fans out AppendEntries to both followers simultaneously.', action: async (ctx) => { ctx.setLat(0, 0.8); ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300); ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 1000); await ctx.delay(800); } },
+          { label: 'Client INSERT', desc: 'Client sends INSERT to gateway TServer. Once the write packet reaches the leader, it is appended to the WAL and shown as provisional.', action: async (ctx) => {
+            const pendingRow = [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            ctx.activateClient(true);
+            await ctx.pktClientToTablet('tg1', 1, 'pk-write', 500);
+            const rs = S.replicaState['tg1']?.[1];
+            if (rs) rs.provisionalRows = [pendingRow];
+            ctx.reRenderTablet('tg1', 1);
+            addLog('INSERT id=10 → tg1 leader N1: WAL append, row provisional ⏳', 'li');
+          } },
+          { label: 'Leader WAL & Replicate', desc: 'Leader fans out AppendEntries to both followers simultaneously — near follower (N2, ~0.8ms) and far follower (N3, ~2.5ms).', action: async (ctx) => { ctx.setLat(0, 0.8); ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300); ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 1000); await ctx.delay(800); } },
           {
             label: 'First ACK = Majority', desc: 'Near follower ACKs first (~0.8ms). Majority reached. Far follower ACK arrives later but not on critical path.', action: async (ctx) => {
-              if (S.nodes[1].alive) { 
-                ctx.setLat(1, 1.2); ctx.setLat(2, 9.5); 
-                await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 300); 
-                ctx.setLat(3, 0.5); ctx.setLat(4, 2.5); 
-              } else { 
-                await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000); 
-                ctx.setLat(1, 0); ctx.setLat(2, 10.5); ctx.setLat(3, 0.5); ctx.setLat(4, 11.8); 
+              if (S.nodes[1].alive) {
+                ctx.setLat(1, 1.2); ctx.setLat(2, 9.5);
+                await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 300);
+                ctx.setLat(3, 0.5); ctx.setLat(4, 2.5);
+              } else {
+                await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000);
+                ctx.setLat(1, 0); ctx.setLat(2, 10.5); ctx.setLat(3, 0.5); ctx.setLat(4, 11.8);
               }
             }
           },
-          { label: 'Commit & ACK Client', desc: 'Write committed to MemTable. ACK returned to client.', action: async (ctx) => {
+          { label: 'Commit & ACK Client', desc: 'Majority ACK received — provisional row is committed to MemTable on all replicas. ACK returned to client.', action: async (ctx) => {
             if (S.nodes[1].alive) { ctx.hlLatRow(0); ctx.hlLatRow(1); ctx.hlLatRow(3); ctx.hlLatRow(4); }
             else { ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3); ctx.hlLatRow(4); }
-            ctx.reRenderTablet('tg1', 1, true); ctx.reRenderTablet('tg1', 2, true); ctx.reRenderTablet('tg1', 3, true);
+            const g = S.groups.find(x => x.id === 'tg1');
+            const rs1 = S.replicaState['tg1']?.[1];
+            const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now()/1000];
+            if (g) {
+              g.data.push(row);
+              for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            addLog('Write committed — row visible on all replicas ✓', 'ls');
             await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); ctx.activateClient(false);
           } }
         ]
