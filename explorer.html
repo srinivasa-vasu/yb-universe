@@ -25,6 +25,9 @@
       </div>
     </div>
   </header>
+  <div class="notice-bar">
+    ⓘ &nbsp;Illustrative · key mechanics are depicted; some implementation nuances are intentionally simplified for brevity.
+  </div>
 
   <div class="app-main">
     <!-- SIDEBAR -->
@@ -155,6 +158,21 @@
           <div class="ssub">Shared tablet groups</div>
         </div>
       </button>
+      <div class="sgroup">xCluster</div>
+      <button class="sbtn" onclick="selectScenario(17)">
+        <span class="sicon">🔁</span>
+        <div>
+          <div class="slabel">xCluster DR</div>
+          <div class="ssub">Turnkey async replication</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(18)">
+        <span class="sicon">⚡</span>
+        <div>
+          <div class="slabel">Active-Active</div>
+          <div class="ssub">Bidirectional xCluster</div>
+        </div>
+      </button>
     </nav>
 
     <!-- CLUSTER AREA -->
@@ -242,6 +260,51 @@
           <div class="region-label">APAC</div>
           <div class="n-header"><div class="n-indicator" id="ni-9"></div><div class="n-name">TServer-9</div><div class="n-zone">ap-south-1c</div></div>
           <div class="n-body" id="nb-9"></div>
+        </div>
+
+        <!-- xCluster PRIMARY cluster label -->
+        <div class="xc-primary-bar" id="xc-primary-bar">
+          <div class="xc-badge primary">PRIMARY</div>
+          <div class="xc-region-badge" id="xc-primary-region">ap-south-1</div>
+          <div class="xc-city-lbl">Mumbai, IN</div>
+          <div class="xc-dot"></div>
+        </div>
+
+        <!-- xCluster Latency / CDC Band -->
+        <div class="xc-latency-band" id="xc-latency-band">
+          <div class="xc-wan-info">
+            <div class="xc-wan-lbl">WAN /<br>Internet</div>
+            <div class="xc-rtt" id="xc-rtt">RTT ~45ms</div>
+            <div class="xc-dir-arrow">↓ Pull</div>
+          </div>
+          <div class="xc-pollers-wrap">
+            <div class="xc-pollers-hdr" id="xc-pollers-hdr">Pollers · ap-south-2</div>
+            <div class="xc-pollers">
+              <div class="xc-poller" id="xc-p1">
+                <div class="xc-poller-dot">P-1</div>
+                <div class="xc-poller-lbl">Poller 1</div>
+              </div>
+              <div class="xc-poller" id="xc-p2">
+                <div class="xc-poller-dot">P-2</div>
+                <div class="xc-poller-lbl">Poller 2</div>
+              </div>
+              <div class="xc-poller" id="xc-p3">
+                <div class="xc-poller-dot">P-3</div>
+                <div class="xc-poller-lbl">Poller 3</div>
+              </div>
+            </div>
+          </div>
+          <div class="xc-metrics">
+            <div class="xc-metric"><span class="xc-metric-lbl">Lag</span><span class="xc-metric-val" id="xc-lag">—</span></div>
+            <div class="xc-metric"><span class="xc-metric-lbl">RPO</span><span class="xc-metric-val" id="xc-rpo">—</span></div>
+          </div>
+        </div>
+
+        <!-- xCluster SECONDARY cluster label -->
+        <div class="xc-secondary-bar" id="xc-secondary-bar">
+          <div class="xc-badge secondary" id="xc-secondary-badge">SECONDARY</div>
+          <div class="xc-region-badge" id="xc-secondary-region">ap-south-2</div>
+          <div class="xc-city-lbl">Hyderabad, IN</div>
         </div>
       </div>
 

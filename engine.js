@@ -378,7 +378,7 @@
       }
     }
 
-    function fmtHLC(t) { return t ? t.toFixed(1).split('.').join('.') : ''; }
+    function fmtHLC(t) { return t ? t.toFixed(3) : ''; }
 
     function buildTabletHTML(g, nodeId) {
       const rs = S.replicaState[g.id]?.[nodeId];
@@ -386,7 +386,7 @@
       const isPartitioned = S.partitioned.includes(nodeId);
       const isLdr = g.leaderNode === nodeId && alive && !isPartitioned;
       const role = !alive ? 'DEAD' : isPartitioned ? 'PARTITIONED' : isLdr ? 'LEADER' : 'FOLLOWER';
-      const ti = TABLES[g.table] || { name: 'Colocated', color: '#94a3b8' };
+      const ti = TABLES[g.table] || { name: g.table, color: '#94a3b8' };
       const memP = rs ? Math.min(100, rs.mem) : 0;
       const ssP = rs ? Math.min(100, rs.ss) : 0;
       const ssts = rs?.ssts || [];
@@ -403,12 +403,18 @@
       let dHtml = '';
       if (g.data?.length || rs?.provisionalRows?.length) {
         const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
+        const showReg = isGeo || !!g.showReg;
+        const hasExt = g.data && g.data.some(r => r[5] === 'ext');
         dHtml = '<div class="t-data">';
 
         // Header Row
         if (g.table === 'users') {
-          dHtml += `<div class="d-row t-data-header ${isGeo ? 'is-geo' : ''}">
-            <div class="dcell">ID</div><div class="dcell">NAME</div>${isGeo ? '<div class="dcell-reg">REG</div>' : ''}<div class="dcell-hlc">HLC</div>
+          dHtml += `<div class="d-row t-data-header ${showReg ? 'is-geo' : ''}">
+            <div class="dcell">ID</div><div class="dcell">NAME</div>${showReg ? '<div class="dcell dcell-score">SCR</div><div class="dcell dcell-reg">REG</div>' : ''}${hasExt ? '<span class="xc-ext-badge xc-ext-hdr">SRC</span>' : ''}<div class="dcell-hlc">HLC</div>
+          </div>`;
+        } else if (g.table === 'orders') {
+          dHtml += `<div class="d-row t-data-header">
+            <div class="dcell">ID</div><div class="dcell">STATUS</div>${hasExt ? '<span class="xc-ext-badge xc-ext-hdr">SRC</span>' : ''}<div class="dcell-hlc">HLC</div>
           </div>`;
         }
 
@@ -422,7 +428,7 @@
           const isN = rs?.newRows?.includes(i);
           const isR = rs?.readRow === i;
 
-          dHtml += `<div class="d-row ${isProv ? 'provisional' : ''} ${isN ? 'r-new' : ''} ${isR ? 'r-read' : ''} ${isGeo ? 'is-geo' : ''}">`;
+          dHtml += `<div class="d-row ${isProv ? 'provisional' : ''} ${isN ? 'r-new' : ''} ${isR ? 'r-read' : ''} ${showReg ? 'is-geo' : ''}">`;
 
           if (g.isColocated) {
             const rowTable = row[5] || 'users';
@@ -430,13 +436,17 @@
             dHtml += `<div class="d-col-indicator" style="background:${subTi.color}"></div>`;
             dHtml += `<div class="dcell">#${row[0]}</div><div class="dcell" style="flex:1; overflow:hidden; text-overflow:ellipsis">${row[1]}</div><div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           } else if (g.table === 'users') {
-            dHtml += `<div class="dcell">${row[0]}</div><div class="dcell">${row[1]}</div>${isGeo ? `<div class="dcell dcell-reg">${row[2]}</div>` : ''}<div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
+            const extBadge = row[5] === 'ext' ? '<span class="xc-ext-badge">EXT</span>' : '';
+            dHtml += `<div class="dcell">${row[0]}</div><div class="dcell">${row[1]}</div>${showReg ? `<div class="dcell dcell-score">${row[3]}</div><div class="dcell dcell-reg">${row[2]}</div>` : ''}${extBadge}<div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           } else if (g.table === 'products') {
             dHtml += `<div class="dcell">${row[1]}</div><div class="dcell-hlc">${fmtHLC(row[3])}</div>`;
           } else if (g.table === 'users_email_idx') {
             dHtml += `<div class="dcell">${row[0]}</div><div class="dcell-hlc">${fmtHLC(row[2])}</div>`;
           } else if (g.table === 'transactions') {
              dHtml += `<div class="dcell">${row[0]}</div><div class="dcell">${row[1]}</div>`;
+          } else if (g.table === 'orders') {
+            const extBadge = row[5] === 'ext' ? '<span class="xc-ext-badge">EXT</span>' : '';
+            dHtml += `<div class="dcell">#${row[0]}</div><div class="dcell" style="color:${row[3]==='DONE'?'var(--ok)':row[3]==='PEND'?'var(--warn)':'var(--info)'}">${row[3]}</div>${extBadge}<div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           } else {
             dHtml += `<div class="dcell">#${row[0]}</div><div class="dcell" style="color:${row[3] === 'DONE' ? 'var(--ok)' : row[3] === 'PEND' ? 'var(--warn)' : 'var(--info)'}">${row[3]}</div><div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           }
@@ -708,8 +718,20 @@
         },
         killNode: id => { S.nodes.find(n => n.id === id).alive = false; renderNodeAlive(id, false); renderAllTablets(); },
         reviveNode: id => { S.nodes.find(n => n.id === id).alive = true; renderNodeAlive(id, true); renderAllTablets(); setTimeout(renderConnections, 50); },
-        reRenderTablet: (tgId, nId, markLast) => {
-          if (markLast) { const g = S.groups.find(x => x.id === tgId); if (g) { const rs = S.replicaState[tgId][nId]; rs.newRows = [g.data.length - 1]; reRenderTabletInternal(tgId, nId); setTimeout(() => { rs.newRows = []; reRenderTabletInternal(tgId, nId); }, 2000); return; } }
+        reRenderTablet: (tgId, nId, markRow) => {
+          if (markRow !== undefined && markRow !== false) {
+            const g = S.groups.find(x => x.id === tgId);
+            if (g) {
+              const rs = S.replicaState[tgId][nId];
+              const dataIdx = (markRow === true) ? g.data.length - 1 : markRow;
+              const start = Math.max(0, g.data.length - 3);
+              const sliceIdx = dataIdx - start;
+              rs.newRows = (sliceIdx >= 0 && sliceIdx < 3) ? [sliceIdx] : [];
+              reRenderTabletInternal(tgId, nId);
+              setTimeout(() => { rs.newRows = []; reRenderTabletInternal(tgId, nId); }, 2000);
+              return;
+            }
+          }
           reRenderTabletInternal(tgId, nId);
         },
         renderHashCompute: async (id, hashHex, tabletId, range) => {
@@ -813,7 +835,105 @@
           const cw = document.getElementById('canvas-wrap');
           if (mode) cw.classList.add('geo-mode');
           else cw.classList.remove('geo-mode');
-        }
+        },
+        setXClusterMode: (mode) => {
+          const cw = document.getElementById('canvas-wrap');
+          const pb = document.getElementById('xc-primary-bar');
+          const lb = document.getElementById('xc-latency-band');
+          const sb = document.getElementById('xc-secondary-bar');
+          ['xc-p1','xc-p2','xc-p3'].forEach(id => {
+            const el = document.getElementById(id); if (el) el.classList.remove('polling', 'applying');
+          });
+          document.querySelectorAll('#lat-rows .lat-row').forEach(el => el.classList.remove('hl-lat'));
+          if (mode) {
+            cw.classList.add('xcluster-mode');
+            if (pb) pb.style.display = 'flex';
+            if (lb) lb.style.display = 'flex';
+            if (sb) sb.style.display = 'flex';
+            const badge = document.getElementById('xc-secondary-badge');
+            if (badge) { badge.textContent = 'SECONDARY'; badge.className = 'xc-badge secondary'; }
+          } else {
+            cw.classList.remove('xcluster-mode');
+            if (pb) pb.style.display = 'none';
+            if (lb) lb.style.display = 'none';
+            if (sb) sb.style.display = 'none';
+            const p3r = document.getElementById('xc-p3'); if (p3r) p3r.style.display = '';
+          }
+        },
+        hlPoller: (pollerId, state) => {
+          const el = document.getElementById(`xc-p${pollerId}`);
+          if (!el) return;
+          el.classList.remove('polling', 'applying');
+          if (state) el.classList.add(state);
+        },
+        hlLatRow: (idx) => {
+          document.querySelectorAll('#lat-rows .lat-row').forEach(el => el.classList.remove('hl-lat'));
+          if (idx !== null && idx !== undefined) {
+            const el = document.getElementById(`lat-${idx}`); if (el) el.classList.add('hl-lat');
+          }
+        },
+        setLag: (val) => {
+          const el = document.getElementById('xc-lag'); if (el) el.textContent = val;
+        },
+        setRPO: (val, warn) => {
+          const el = document.getElementById('xc-rpo');
+          if (el) { el.textContent = val; el.className = 'xc-metric-val' + (warn ? ' warn' : ''); }
+        },
+        pktXCluster: (pollerId, srcTgId, srcNode, tgtTgId, tgtNode, dur) => new Promise(async res => {
+          const cw = document.getElementById('canvas-wrap');
+          const cr = cw.getBoundingClientRect();
+          const pollerEl = document.getElementById(`xc-p${pollerId}`);
+          const src = getTC(srcTgId, srcNode, cr);
+          if (!src || !pollerEl) { res(); return; }
+          const pr = pollerEl.getBoundingClientRect();
+          const px = pr.left - cr.left + pr.width / 2 + cw.scrollLeft;
+          const py = pr.top - cr.top + pr.height / 2 + cw.scrollTop;
+          const sx = src.x + cw.scrollLeft, sy = src.y + cw.scrollTop;
+          // Phase 1: Poll request — poller reaches up to source tablet
+          await new Promise(r => animPkt({ x: px, y: py }, { x: sx, y: sy }, 'pk-xcl-req', dur * 0.2 / speedVal, r));
+          // Phase 2: Source returns data — packet travels back to poller
+          pollerEl.classList.add('polling');
+          await new Promise(r => animPkt({ x: sx, y: sy }, { x: px, y: py }, 'pk-xcl', dur * 0.3 / speedVal, r));
+          // Phase 3: Poller processes the CDC record
+          await new Promise(r => setTimeout(r, dur * 0.1 / speedVal));
+          pollerEl.classList.remove('polling'); pollerEl.classList.add('applying');
+          // Phase 4: Apply — poller pushes to target tablet in same cluster
+          const tgt = getTC(tgtTgId, tgtNode, cr);
+          if (tgt) await new Promise(r => animPkt({ x: px, y: py }, { x: tgt.x + cw.scrollLeft, y: tgt.y + cw.scrollTop }, 'pk-xcl-apply', dur * 0.4 / speedVal, r));
+          setTimeout(() => pollerEl.classList.remove('applying'), 500);
+          res();
+        }),
+        pktXClusterNM: (pollerId, sources, targets, dur, onPollComplete) => new Promise(async res => {
+          const cw = document.getElementById('canvas-wrap');
+          const cr = cw.getBoundingClientRect();
+          const pollerEl = document.getElementById(`xc-p${pollerId}`);
+          if (!pollerEl) { res(); return; }
+          const pr = pollerEl.getBoundingClientRect();
+          const px = pr.left - cr.left + pr.width / 2 + cw.scrollLeft;
+          const py = pr.top - cr.top + pr.height / 2 + cw.scrollTop;
+          // Phase 1: Poll requests to all source tablets simultaneously
+          await Promise.all(sources.map(s => {
+            const src = getTC(s.tgId, s.node, cr); if (!src) return Promise.resolve();
+            return new Promise(r => animPkt({x:px,y:py},{x:src.x+cw.scrollLeft,y:src.y+cw.scrollTop},'pk-xcl-req',dur*0.15/speedVal,r));
+          }));
+          // Phase 2: Data responses from all sources simultaneously
+          pollerEl.classList.add('polling');
+          await Promise.all(sources.map(s => {
+            const src = getTC(s.tgId, s.node, cr); if (!src) return Promise.resolve();
+            return new Promise(r => animPkt({x:src.x+cw.scrollLeft,y:src.y+cw.scrollTop},{x:px,y:py},'pk-xcl',dur*0.25/speedVal,r));
+          }));
+          if (onPollComplete) onPollComplete();
+          // Phase 3: Process at poller
+          await new Promise(r => setTimeout(r, dur*0.1/speedVal));
+          pollerEl.classList.remove('polling'); pollerEl.classList.add('applying');
+          // Phase 4: Apply to all target tablets simultaneously
+          await Promise.all(targets.map(t => {
+            const tgt = getTC(t.tgId, t.node, cr); if (!tgt) return Promise.resolve();
+            return new Promise(r => animPkt({x:px,y:py},{x:tgt.x+cw.scrollLeft,y:tgt.y+cw.scrollTop},'pk-xcl-apply',dur*0.5/speedVal,r));
+          }));
+          setTimeout(() => pollerEl.classList.remove('applying'), 500);
+          res();
+        })
       };
     }
 
@@ -850,6 +970,7 @@
       // Reset regional visuals & hide nodes 4-9 by default BEFORE scenario init
       ctx.setCanvasRegionMode(false);
       ctx.setCanvasGeoMode(false);
+      ctx.setXClusterMode(false);
       const isGeo = (sc.name === 'Geo-Partitioning');
       for (let n = 1; n <= 9; n++) {
         ctx.setNodeRegion(n, null, '');

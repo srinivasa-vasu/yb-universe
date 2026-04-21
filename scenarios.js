@@ -1198,5 +1198,394 @@
             }
           }
         ]
+      },
+
+      // 17: xCluster DR (Turnkey, Unidirectional)
+      {
+        name: 'xCluster DR',
+        desc: 'Turnkey xCluster Disaster Recovery replicates changes from a PRIMARY cluster (ap-south-1) to a SECONDARY cluster (ap-south-2) asynchronously via CDCSDK pollers. Writes commit via Raft on PRIMARY (~2ms), then stream near-realtime (~45ms) to SECONDARY. A single n:m poller bridges multiple source tablets to multiple target tablets simultaneously.',
+        latencies: [
+          { lbl: 'Raft commit', cls: 'll', max: 2 },
+          { lbl: 'CDC poll', cls: 'lm', max: 10 },
+          { lbl: 'WAN + apply', cls: 'lh', max: 55 },
+          { lbl: 'Repl lag', cls: 'lh', max: 60 },
+        ],
+        init: (ctx) => {
+          S.groups = [
+            { id: 'xpu', table: 'users',  tnum: 1, range: 'all rows', leaderNode: 1, term: 4, replicas: [1,2,3], showReg: true,
+              data: [[1,'Alice Chen','S1',87,1713289000.100],[4,'David Park','S1',95,1713289000.400]] },
+            { id: 'xpo', table: 'orders', tnum: 1, range: 'all rows', leaderNode: 2, term: 4, replicas: [1,2,3],
+              data: [[101,1,'item-A','DONE',1713289000.500],[102,4,'item-B','DONE',1713289000.600]] },
+            { id: 'xsu', table: 'users',  tnum: 1, range: 'all rows', leaderNode: 4, term: 4, replicas: [4,5,6], showReg: true,
+              data: [[1,'Alice Chen','S1',87,1713289000.100,'ext'],[4,'David Park','S1',95,1713289000.400,'ext']] },
+            { id: 'xso', table: 'orders', tnum: 1, range: 'all rows', leaderNode: 5, term: 4, replicas: [4,5,6],
+              data: [[101,1,'item-A','DONE',1713289000.500,'ext'],[102,4,'item-B','DONE',1713289000.600,'ext']] }
+          ];
+          ctx.rebuildReplicaState();
+          ctx.setXClusterMode(true);
+          [4,5,6].forEach(n => ctx.setNodeVisibility(n, true));
+          [1,2,3].forEach((n,i) => {
+            const z = document.querySelector(`#node-${n} .n-zone`); if (z) z.textContent = `ap-south-1${'abc'[i]}`;
+            const r = document.querySelector(`#node-${n} .region-label`); if (r) r.textContent = 'ap-south-1';
+          });
+          [4,5,6].forEach((n,i) => {
+            const z = document.querySelector(`#node-${n} .n-zone`); if (z) z.textContent = `ap-south-2${'abc'[i]}`;
+            const r = document.querySelector(`#node-${n} .region-label`); if (r) r.textContent = 'ap-south-2';
+          });
+          const p3el = document.getElementById('xc-p3'); if (p3el) p3el.style.display = 'none';
+          ctx.setLag('\u2014'); ctx.setRPO('\u2014', false);
+          renderAllTablets();
+        },
+        steps: [
+          {
+            label: 'Cluster Layout',
+            desc: 'PRIMARY (ap-south-1) holds a users tablet (leader N1) and an orders tablet (leader N2). SECONDARY (ap-south-2) mirrors both. P-1 is dedicated to the users source tablet leader; P-2 is dedicated to the orders source tablet leader \u2014 1 poller per source tablet leader.',
+            action: async (ctx) => {
+              addLog('PRIMARY: ap-south-1 (N1\u2013N3) \u2014 users on N1, orders on N2', 'li');
+              addLog('SECONDARY: ap-south-2 (N4\u2013N6) \u2014 mirrors users + orders', 'li');
+              addLog('P-1 \u2192 users tablet leader (N1) | P-2 \u2192 orders tablet leader (N2)', 'li');
+              addLog('Rule: 1 CDCSDK poller per source tablet leader', '');
+              for (const id of ['xpu','xpo']) {
+                const g = S.groups.find(g=>g.id===id); if (g) ctx.hlTablet(id, g.leaderNode, 't-hl');
+              }
+              await ctx.delay(500);
+              for (const id of ['xsu','xso']) {
+                const g = S.groups.find(g=>g.id===id); if (g) ctx.hlTablet(id, g.leaderNode, 't-hl2');
+              }
+            }
+          },
+          {
+            label: 'Write to PRIMARY (users)',
+            desc: 'Client inserts a new user row (id=10, Jack Russo) into the users tablet on PRIMARY. The leader N1 replicates via Raft to N2 and N3 (~2ms), achieves quorum, and ACKs the client. The write is now durably in the users WAL stream on PRIMARY.',
+            action: async (ctx) => {
+              ctx.hlLatRow(0);
+              ctx.activateClient(true);
+              const hlcU = 1713289100.100;
+              addLog('INSERT INTO users VALUES (10, "Jack Russo", "S1", 89)', 'li');
+              addLog('hash(10) \u2192 xpu leader N1, HLC='+hlcU.toFixed(3), '');
+              await ctx.pktClientToTablet('xpu', 1, 'pk-write', 300);
+              ctx.hlTablet('xpu', 1, 't-hl');
+              addLog('Raft: N1 \u2192 N2, N3 (\u22482ms)', '');
+              await Promise.all([
+                ctx.pktTabletToTablet('xpu', 1, 'xpu', 2, 'pk-raft', 300),
+                ctx.pktTabletToTablet('xpu', 1, 'xpu', 3, 'pk-raft', 300)
+              ]);
+              S.groups.find(g=>g.id==='xpu').data.push([10,'Jack Russo','S1',89,hlcU]);
+              for (const n of [1,2,3]) { ctx.hlTablet('xpu', n, 't-hl'); ctx.reRenderTablet('xpu', n, true); }
+              addLog('users id=10 committed, HLC='+hlcU.toFixed(3)+' in WAL \u2713', 'ls');
+              setLatency(0, 2);
+              await ctx.pktTabletToClient('xpu', 1, 'pk-ack', 250);
+              ctx.activateClient(false);
+              ctx.setLag('~45ms');
+            }
+          },
+          {
+            label: '1:1 Replication (P-1)',
+            desc: 'P-1 polls the users tablet leader (N1) and streams the WAL batch to xsu (N4) on SECONDARY. This is a 1:1 stream: one source tablet \u2192 one dedicated poller \u2192 one target tablet. The SECONDARY then Raft-replicates within its cluster for durability.',
+            action: async (ctx) => {
+              ctx.hlLatRow(1);
+              addLog('P-1 polls xpu (N1): finds {id=10 Jack} in WAL', 'li');
+              addLog('P-1 streams batch \u2192 xsu (N4) on SECONDARY (~45ms)', '');
+              await ctx.pktXCluster(1, 'xpu', 1, 'xsu', 4, 1000);
+              setLatency(1, 5);
+              setLatency(2, 45);
+              const hlcU = S.groups.find(g=>g.id==='xpu').data.find(r=>r[0]===10)?.[4] ?? 1713289100.100;
+              S.groups.find(g=>g.id==='xsu').data.push([10,'Jack Russo','S1',89,hlcU,'ext']);
+              for (const n of [4,5,6]) { ctx.hlTablet('xsu', n, 't-hl2'); ctx.reRenderTablet('xsu', n, true); }
+              addLog('xsu: id=10 applied (EXT, REG=S1, HLC='+hlcU.toFixed(3)+') \u2713', 'ls');
+              addLog('SECONDARY Raft: N4 \u2192 N5, N6 (\u22482ms)', '');
+              await Promise.all([
+                ctx.pktTabletToTablet('xsu', 4, 'xsu', 5, 'pk-raft', 280),
+                ctx.pktTabletToTablet('xsu', 4, 'xsu', 6, 'pk-raft', 280)
+              ]);
+              setLatency(3, 47);
+              addLog('1:1 stream complete \u2014 1 poller, 1 source tablet, 1 target tablet \u2713', 'ls');
+              ctx.setLag('~5ms');
+            }
+          },
+          {
+            label: 'Write to PRIMARY (users + orders)',
+            desc: 'Client writes two new rows simultaneously: a second user (id=11, Eva) and a new order (id=103). Each routes to its tablet leader and commits via Raft. Both WAL streams now have pending entries waiting for their respective pollers.',
+            action: async (ctx) => {
+              ctx.hlLatRow(0);
+              ctx.activateClient(true);
+              const hlcU2 = 1713289100.300, hlcO = 1713289100.400;
+              addLog('INSERT INTO users VALUES (11, "Eva Reyes", "S1", 82)', 'li');
+              addLog('INSERT INTO orders VALUES (103, 10, "item-C", "PEND")', 'li');
+              await Promise.all([
+                (async () => {
+                  await ctx.pktClientToTablet('xpu', 1, 'pk-write', 280);
+                  ctx.hlTablet('xpu', 1, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xpu', 1, 'xpu', 2, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xpu', 1, 'xpu', 3, 'pk-raft', 280)
+                  ]);
+                  S.groups.find(g=>g.id==='xpu').data.push([11,'Eva Reyes','S1',82,hlcU2]);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xpu', n, 't-hl'); ctx.reRenderTablet('xpu', n, true); }
+                  addLog('users id=11 committed, HLC='+hlcU2.toFixed(3)+' \u2713', 'ls');
+                })(),
+                (async () => {
+                  await ctx.pktClientToTablet('xpo', 2, 'pk-write', 280);
+                  ctx.hlTablet('xpo', 2, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xpo', 2, 'xpo', 1, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xpo', 2, 'xpo', 3, 'pk-raft', 280)
+                  ]);
+                  S.groups.find(g=>g.id==='xpo').data.push([103,10,'item-C','PEND',hlcO]);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xpo', n, 't-hl'); ctx.reRenderTablet('xpo', n, true); }
+                  addLog('orders id=103 committed, HLC='+hlcO.toFixed(3)+' \u2713', 'ls');
+                })()
+              ]);
+              setLatency(0, 2);
+              await ctx.pktTabletToClient('xpu', 1, 'pk-ack', 200);
+              ctx.activateClient(false);
+              ctx.setLag('~45ms');
+            }
+          },
+          {
+            label: 'Parallel Streams (P-1 \u2225 P-2)',
+            desc: 'P-1 and P-2 fire simultaneously and independently: P-1 polls the users leader (N1) and delivers id=11 to xsu; P-2 polls the orders leader (N2) and delivers id=103 to xso. Both SECONDARY tablets then Raft-replicate in parallel. This is the n:m pattern: multiple source tablets, multiple pollers, multiple targets, all in one round.',
+            action: async (ctx) => {
+              ctx.hlLatRow(1);
+              addLog('P-1 \u2225 P-2: both pollers fire simultaneously', 'li');
+              addLog('P-1: xpu (N1) \u2192 xsu (N4) | P-2: xpo (N2) \u2192 xso (N5)', '');
+              await Promise.all([
+                ctx.pktXCluster(1, 'xpu', 1, 'xsu', 4, 1000),
+                ctx.pktXCluster(2, 'xpo', 2, 'xso', 5, 1000)
+              ]);
+              setLatency(1, 5); setLatency(2, 45);
+              const hlcU2 = S.groups.find(g=>g.id==='xpu').data.find(r=>r[0]===11)?.[4] ?? 1713289100.300;
+              const hlcO  = S.groups.find(g=>g.id==='xpo').data.find(r=>r[0]===103)?.[4] ?? 1713289100.400;
+              S.groups.find(g=>g.id==='xsu').data.push([11,'Eva Reyes','S1',82,hlcU2,'ext']);
+              S.groups.find(g=>g.id==='xso').data.push([103,10,'item-C','PEND',hlcO,'ext']);
+              for (const n of [4,5,6]) { ctx.hlTablet('xsu', n, 't-hl2'); ctx.reRenderTablet('xsu', n, true); }
+              for (const n of [4,5,6]) { ctx.hlTablet('xso', n, 't-hl2'); ctx.reRenderTablet('xso', n, true); }
+              addLog('SECONDARY Raft: xsu N4\u2192N5,N6 | xso N5\u2192N4,N6 simultaneously', '');
+              await Promise.all([
+                ctx.pktTabletToTablet('xsu', 4, 'xsu', 5, 'pk-raft', 260),
+                ctx.pktTabletToTablet('xsu', 4, 'xsu', 6, 'pk-raft', 260),
+                ctx.pktTabletToTablet('xso', 5, 'xso', 4, 'pk-raft', 260),
+                ctx.pktTabletToTablet('xso', 5, 'xso', 6, 'pk-raft', 260)
+              ]);
+              setLatency(3, 52);
+              addLog('Both tablets replicated to SECONDARY RF=3 \u2713', 'ls');
+              ctx.setRPO('<1s', false);
+              ctx.setLag('~5ms');
+            }
+          },
+          {
+            label: 'Primary Failure \u2192 RPO',
+            desc: 'PRIMARY cluster becomes unavailable. WAL entries logged but not yet polled by P-1 define the RPO window. The last polled change sequence number (LSN) on SECONDARY marks the recovery point.',
+            action: async (ctx) => {
+              ctx.hlLatRow(null);
+              addLog('\u26a0 PRIMARY cluster unreachable (ap-south-1 failure)', 'le');
+              for (const n of [1,2,3]) ctx.killNode(n);
+              await ctx.delay(600);
+              ctx.setLag('\u2014');
+              ctx.setRPO('~45ms window', true);
+              addLog('RPO \u2248 CDC lag at failure \u2014 up to ~45ms of uncommitted changes', 'lw');
+              addLog('Last polled LSN on SECONDARY marks the safe recovery point', '');
+            }
+          },
+          {
+            label: 'Failover to SECONDARY',
+            desc: 'Administrator promotes the SECONDARY cluster to PRIMARY. It now accepts writes for both users and orders tablets. RTO \u224835s (detect 5s + promote 20s + redirect 10s). Old primary rejoins as new secondary after recovery.',
+            action: async (ctx) => {
+              addLog('Initiating failover: SECONDARY promoted to PRIMARY', 'li');
+              const badge = document.getElementById('xc-secondary-badge');
+              if (badge) { badge.textContent = 'PRIMARY'; badge.className = 'xc-badge primary'; }
+              await ctx.delay(600);
+              for (const id of ['xsu','xso']) {
+                const g = S.groups.find(x=>x.id===id);
+                if (g) ctx.hlTablet(id, g.leaderNode, 't-hl');
+              }
+              ctx.setRPO('Failover complete', false);
+              addLog('ap-south-2 now serving as PRIMARY \u2014 users + orders \u2713', 'ls');
+              addLog('RTO \u224835s (detect 5s + promote 20s + redirect 10s)', '');
+              addLog('Old primary will rejoin as SECONDARY after recovery', '');
+            }
+          }
+        ]
+      },
+
+      // 18: Active-Active xCluster (Bidirectional)
+      {
+        name: 'Active-Active xCluster',
+        desc: 'Bidirectional xCluster: both clusters act as PRIMARY and accept local writes simultaneously. P-1 (forward) and P-2 (reverse) stream changes in both directions. The REG column in every tablet shows the origin cluster of each row. Conflicts on the same key are resolved via Last-Writer-Wins (LWW) using Hybrid Logical Clocks (HLC).',
+        latencies: [
+          { lbl: 'Raft commit', cls: 'll', max: 2 },
+          { lbl: 'Repl lag', cls: 'lh', max: 45 },
+          { lbl: 'LWW resolve', cls: 'll', max: 1 }
+        ],
+        init: (ctx) => {
+          S.groups = [
+            { id: 'xp1', table: 'users', tnum: 1, range: '0x0000-0x7FFF', leaderNode: 1, term: 4, replicas: [1,2,3], showReg: true,
+              data: [[1,'Alice','S1',87,1713289000.100],[4,'David','S1',95,1713289000.400]] },
+            { id: 'xp2', table: 'users', tnum: 2, range: '0x8000-0xFFFF', leaderNode: 2, term: 4, replicas: [1,2,3], showReg: true,
+              data: [[2,'Bob','S1',92,1713289000.200],[3,'Carol','S1',78,1713289000.300]] },
+            { id: 'xs1', table: 'users', tnum: 1, range: '0x0000-0x7FFF', leaderNode: 4, term: 4, replicas: [4,5,6], showReg: true,
+              data: [[1,'Alice','S1',87,1713289000.100,'ext'],[4,'David','S1',95,1713289000.400,'ext']] },
+            { id: 'xs2', table: 'users', tnum: 2, range: '0x8000-0xFFFF', leaderNode: 5, term: 4, replicas: [4,5,6], showReg: true,
+              data: [[2,'Bob','S1',92,1713289000.200,'ext'],[3,'Carol','S1',78,1713289000.300,'ext']] }
+          ];
+          ctx.rebuildReplicaState();
+          ctx.setXClusterMode(true);
+          [4,5,6].forEach(n => ctx.setNodeVisibility(n, true));
+          [1,2,3].forEach((n,i) => {
+            const z = document.querySelector(`#node-${n} .n-zone`); if (z) z.textContent = `ap-south-1${'abc'[i]}`;
+            const r = document.querySelector(`#node-${n} .region-label`); if (r) r.textContent = 'ap-south-1';
+          });
+          [4,5,6].forEach((n,i) => {
+            const z = document.querySelector(`#node-${n} .n-zone`); if (z) z.textContent = `ap-south-2${'abc'[i]}`;
+            const r = document.querySelector(`#node-${n} .region-label`); if (r) r.textContent = 'ap-south-2';
+          });
+          const badge = document.getElementById('xc-secondary-badge');
+          if (badge) { badge.textContent = 'PRIMARY'; badge.className = 'xc-badge primary'; }
+          const p3aa = document.getElementById('xc-p3'); if (p3aa) p3aa.style.display = 'none';
+          ctx.setLag('\u2014'); ctx.setRPO('\u2014', false);
+          renderAllTablets();
+        },
+        steps: [
+          {
+            label: 'Active-Active Setup',
+            desc: 'Both clusters are PRIMARY and accept local writes. P-1 replicates forward (S1\u2192S2), P-2 replicates in reverse (S2\u2192S1). The REG column in each tablet shows which cluster originated the row. EXT badge marks rows that arrived via replication.',
+            action: async (ctx) => {
+              addLog('ap-south-1 (S1): PRIMARY \u2014 REG=S1 for local writes', 'li');
+              addLog('ap-south-2 (S2): PRIMARY \u2014 REG=S2 for local writes', 'li');
+              addLog('P-1: forward poller S1\u2192S2 | P-2: reverse poller S2\u2192S1', 'li');
+              addLog('REG column tracks origin cluster per row in every tablet', '');
+              for (const id of ['xp1','xp2']) ctx.hlTablet(id, S.groups.find(g=>g.id===id).leaderNode, 't-hl');
+              await ctx.delay(350);
+              for (const id of ['xs1','xs2']) ctx.hlTablet(id, S.groups.find(g=>g.id===id).leaderNode, 't-hl');
+            }
+          },
+          {
+            label: 'Local Writes \u2192 Bidirectional Replication',
+            desc: 'S1 writes a new row (id=10, Jack, REG=S1) to xp1. Simultaneously S2 writes a new row (id=11, Lena, REG=S2) to xs2. After local Raft commits, P-1 ships Jack\u2019s row to xs1, and P-2 ships Lena\u2019s row to xp2. Both clusters converge with all data.',
+            action: async (ctx) => {
+              ctx.hlLatRow(0);
+              const T10 = 1713289100.100, T11 = 1713289100.150;
+              addLog('S1: INSERT id=10 Jack REG=S1 HLC='+T10.toFixed(3)+' \u2192 xp1 (N1)', 'li');
+              addLog('S2: INSERT id=11 Lena REG=S2 HLC='+T11.toFixed(3)+' \u2192 xs2 (N5) [simultaneous]', 'li');
+              await Promise.all([
+                (async () => {
+                  ctx.hlTablet('xp1', 1, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 2, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 3, 'pk-raft', 280)
+                  ]);
+                  S.groups.find(g=>g.id==='xp1').data.push([10,'Jack','S1',89,T10]);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xp1', n, 't-hl'); ctx.reRenderTablet('xp1', n, true); }
+                  addLog('xp1 (S1): id=10 Jack committed REG=S1 HLC='+T10.toFixed(3)+' \u2713', 'ls');
+                })(),
+                (async () => {
+                  ctx.hlTablet('xs2', 5, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xs2', 5, 'xs2', 4, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xs2', 5, 'xs2', 6, 'pk-raft', 280)
+                  ]);
+                  S.groups.find(g=>g.id==='xs2').data.push([11,'Lena','S2',73,T11]);
+                  for (const n of [4,5,6]) { ctx.hlTablet('xs2', n, 't-hl'); ctx.reRenderTablet('xs2', n, true); }
+                  addLog('xs2 (S2): id=11 Lena committed REG=S2 HLC='+T11.toFixed(3)+' \u2713', 'ls');
+                })()
+              ]);
+              setLatency(0, 2);
+              await ctx.delay(300);
+              ctx.hlLatRow(1);
+              addLog('P-1 (forward): shipping id=10 Jack \u2192 xs1 (S2)', 'li');
+              addLog('P-2 (reverse): shipping id=11 Lena \u2192 xp2 (S1)', 'li');
+              await Promise.all([
+                ctx.pktXCluster(1, 'xp1', 1, 'xs1', 4, 900),
+                ctx.pktXCluster(2, 'xs2', 5, 'xp2', 2, 900)
+              ]);
+              S.groups.find(g=>g.id==='xs1').data.push([10,'Jack','S1',89,T10,'ext']);
+              for (const n of [4,5,6]) ctx.reRenderTablet('xs1', n, true);
+              S.groups.find(g=>g.id==='xp2').data.push([11,'Lena','S2',73,T11,'ext']);
+              for (const n of [1,2,3]) ctx.reRenderTablet('xp2', n, true);
+              setLatency(1, 45);
+              ctx.setLag('~10ms');
+              addLog('xs1: Jack (EXT REG=S1 HLC='+T10.toFixed(3)+') | xp2: Lena (EXT REG=S2 HLC='+T11.toFixed(3)+') \u2713', 'ls');
+              addLog('Both clusters converged \u2014 bidirectional replication complete', '');
+            }
+          },
+          {
+            label: 'Same-Row Conflict',
+            desc: 'Both clusters update the same key (id=4) concurrently. S1 sets score=99 (REG=S1, HLC=T1=1713289100.500). S2 sets score=77 (REG=S2, HLC=T2=1713289100.520 \u2014 slightly later). Each commits via Raft locally. The differing HLC values in the tablets reveal the conflict.',
+            action: async (ctx) => {
+              const T1 = 1713289100.500, T2 = 1713289100.520;
+              ctx.hlLatRow(0);
+              addLog('S1: UPDATE id=4 score=99 REG=S1 HLC='+T1.toFixed(3)+' \u2192 xp1 (N1)', 'li');
+              addLog('S2: UPDATE id=4 score=77 REG=S2 HLC='+T2.toFixed(3)+' \u2192 xs1 (N4) [simultaneous]', 'li');
+              await Promise.all([
+                (async () => {
+                  ctx.hlTablet('xp1', 1, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 2, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 3, 'pk-raft', 280)
+                  ]);
+                  const gp1 = S.groups.find(g=>g.id==='xp1');
+                  const r = gp1.data.find(x=>x[0]===4);
+                  if (r) { r[2]='S1'; r[3]=99; r[4]=T1; delete r[5]; }
+                  const di1 = gp1.data.findIndex(x=>x[0]===4);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xp1', n, 't-hl'); ctx.reRenderTablet('xp1', n, di1); }
+                  addLog('xp1: id=4 score=99 REG=S1 HLC='+T1.toFixed(3)+' \u2713', 'ls');
+                })(),
+                (async () => {
+                  ctx.hlTablet('xs1', 4, 't-hl');
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xs1', 4, 'xs1', 5, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xs1', 4, 'xs1', 6, 'pk-raft', 280)
+                  ]);
+                  const gs1 = S.groups.find(g=>g.id==='xs1');
+                  const r = gs1.data.find(x=>x[0]===4);
+                  if (r) { r[2]='S2'; r[3]=77; r[4]=T2; delete r[5]; }
+                  const di2 = gs1.data.findIndex(x=>x[0]===4);
+                  for (const n of [4,5,6]) { ctx.hlTablet('xs1', n, 't-hl'); ctx.reRenderTablet('xs1', n, di2); }
+                  addLog('xs1: id=4 score=77 REG=S2 HLC='+T2.toFixed(3)+' \u2713', 'ls');
+                })()
+              ]);
+              setLatency(0, 2);
+              addLog('xp1 HLC='+T1.toFixed(3)+' vs xs1 HLC='+T2.toFixed(3)+' \u2014 same key, different versions', 'lw');
+            }
+          },
+          {
+            label: 'Replication + LWW Resolution',
+            desc: 'P-1 ships S1\u2019s update (score=99, T1) to xs1. P-2 ships S2\u2019s update (score=77, T2) to xp1. Both clusters now see both versions. LWW: T2 (1713289100.520) > T1 (1713289100.500) \u2014 S2 write wins. The winning row is applied everywhere; WAL entries from the peer are tagged with origin_uuid to prevent re-replication loops.',
+            action: async (ctx) => {
+              const T1 = 1713289100.500, T2 = 1713289100.520;
+              ctx.hlLatRow(1);
+              addLog('P-1 (forward): id=4 S1 score=99 HLC='+T1.toFixed(3)+' \u2192 xs1', 'li');
+              addLog('P-2 (reverse): id=4 S2 score=77 HLC='+T2.toFixed(3)+' \u2192 xp1', 'li');
+              await Promise.all([
+                ctx.pktXCluster(1, 'xp1', 1, 'xs1', 4, 900),
+                ctx.pktXCluster(2, 'xs1', 4, 'xp1', 1, 900)
+              ]);
+              setLatency(1, 45);
+              addLog('Conflict: xp1 HLC='+T1.toFixed(3)+' vs xs1 HLC='+T2.toFixed(3)+' \u2014 applying LWW', 'lw');
+              ctx.hlLatRow(2);
+              await ctx.delay(400);
+              ctx.hlPoller(1, 'applying');
+              ctx.hlPoller(2, 'applying');
+              await ctx.delay(500);
+              ctx.hlPoller(1, null);
+              ctx.hlPoller(2, null);
+              const gp1 = S.groups.find(g=>g.id==='xp1');
+              const r1 = gp1.data.find(x=>x[0]===4);
+              if (r1) { r1[2]='S2'; r1[3]=77; r1[4]=T2; r1[5]='ext'; }
+              const di1 = gp1.data.findIndex(x=>x[0]===4);
+              for (const n of [1,2,3]) { ctx.hlTablet('xp1', n, 't-hl'); ctx.reRenderTablet('xp1', n, di1); }
+              const gs1 = S.groups.find(g=>g.id==='xs1');
+              const r2 = gs1.data.find(x=>x[0]===4);
+              if (r2) { r2[2]='S2'; r2[3]=77; r2[4]=T2; delete r2[5]; }
+              const di2 = gs1.data.findIndex(x=>x[0]===4);
+              for (const n of [4,5,6]) { ctx.hlTablet('xs1', n, 't-hl'); ctx.reRenderTablet('xs1', n, di2); }
+              setLatency(2, 1);
+              addLog('LWW: '+T2.toFixed(3)+' > '+T1.toFixed(3)+' \u2014 S2 write wins', 'ls');
+              addLog('xp1 id=4: REG=S2 score=77 HLC='+T2.toFixed(3)+' (EXT from S2) \u2713', 'ls');
+              addLog('xs1 id=4: REG=S2 score=77 HLC='+T2.toFixed(3)+' (local winner) \u2713', 'ls');
+              addLog('origin_uuid stamp prevents S2 re-replicating its own write back', '');
+            }
+          }
+        ]
       }
     ];
