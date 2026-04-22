@@ -1346,6 +1346,10 @@
             const r = document.querySelector(`#node-${n} .region-label`); if (r) r.textContent = 'ap-south-2';
           });
           const p3el = document.getElementById('xc-p3'); if (p3el) p3el.style.display = 'none';
+          const hdr17 = document.getElementById('xc-pollers-hdr');
+          if (hdr17) hdr17.textContent = 'Pollers · ap-south-2 (SECONDARY)';
+          const p1l17 = document.querySelector('#xc-p1 .xc-poller-lbl'); if (p1l17) p1l17.textContent = 'users leader';
+          const p2l17 = document.querySelector('#xc-p2 .xc-poller-lbl'); if (p2l17) p2l17.textContent = 'orders leader';
           ctx.setLag('\u2014'); ctx.setRPO('\u2014', false);
           renderAllTablets();
         },
@@ -1527,8 +1531,9 @@
         desc: 'Bidirectional xCluster: both clusters act as PRIMARY and accept local writes simultaneously. P-1 (forward) and P-2 (reverse) stream changes in both directions. The REG column in every tablet shows the origin cluster of each row. Conflicts on the same key are resolved via Last-Writer-Wins (LWW) using Hybrid Logical Clocks (HLC).',
         latencies: [
           { lbl: 'Raft commit', cls: 'll', max: 2 },
-          { lbl: 'Repl lag', cls: 'lh', max: 45 },
-          { lbl: 'LWW resolve', cls: 'll', max: 1 }
+          { lbl: 'Repl lag', cls: 'lh', max: 65 },
+          { lbl: 'LWW resolve', cls: 'll', max: 1 },
+          { lbl: 'Txn gap', cls: 'lh', max: 30 }
         ],
         init: (ctx) => {
           S.groups = [
@@ -1555,6 +1560,10 @@
           const badge = document.getElementById('xc-secondary-badge');
           if (badge) { badge.textContent = 'PRIMARY'; badge.className = 'xc-badge primary'; }
           const p3aa = document.getElementById('xc-p3'); if (p3aa) p3aa.style.display = 'none';
+          const hdr18 = document.getElementById('xc-pollers-hdr');
+          if (hdr18) hdr18.textContent = 'Pollers · ap-south-1 ⇄ ap-south-2';
+          const p1l18 = document.querySelector('#xc-p1 .xc-poller-lbl'); if (p1l18) p1l18.textContent = 'S1 → S2';
+          const p2l18 = document.querySelector('#xc-p2 .xc-poller-lbl'); if (p2l18) p2l18.textContent = 'S2 → S1';
           ctx.setLag('\u2014'); ctx.setRPO('\u2014', false);
           renderAllTablets();
         },
@@ -1697,6 +1706,83 @@
               addLog('xp1 id=4: REG=S2 score=77 HLC='+T2.toFixed(3)+' (EXT from S2) \u2713', 'ls');
               addLog('xs1 id=4: REG=S2 score=77 HLC='+T2.toFixed(3)+' (local winner) \u2713', 'ls');
               addLog('origin_uuid stamp prevents S2 re-replicating its own write back', '');
+            }
+          },
+          {
+            label: 'TX-1 — Atomic Commit',
+            desc: 'A single transaction on S1 updates two rows across two tablets: Alice (id=1) in xp1 and Carol (id=3) in xp2. Both changes replicate via Raft and commit simultaneously — on S1 they become visible at exactly the same moment.',
+            action: async (ctx) => {
+              const TS = 1713289300.100;
+              ctx.hlLatRow(0);
+              addLog('TX-1 (S1): BEGIN — spans xp1 (Alice id=1) and xp2 (Carol id=3)', 'li');
+              addLog('TX-1: UPDATE id=1 Alice score=100 → xp1 leader N1', 'li');
+              addLog('TX-1: UPDATE id=3 Carol score=100 → xp2 leader N2', 'li');
+              await Promise.all([
+                (async () => {
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 2, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xp1', 1, 'xp1', 3, 'pk-raft', 280)
+                  ]);
+                  const gp1 = S.groups.find(g => g.id === 'xp1');
+                  const r = gp1.data.find(x => x[0] === 1);
+                  if (r) { r[3] = 100; r[4] = TS; }
+                  const di = gp1.data.findIndex(x => x[0] === 1);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xp1', n, 't-hl'); ctx.reRenderTablet('xp1', n, di); }
+                })(),
+                (async () => {
+                  await Promise.all([
+                    ctx.pktTabletToTablet('xp2', 2, 'xp2', 1, 'pk-raft', 280),
+                    ctx.pktTabletToTablet('xp2', 2, 'xp2', 3, 'pk-raft', 280)
+                  ]);
+                  const gp2 = S.groups.find(g => g.id === 'xp2');
+                  const r = gp2.data.find(x => x[0] === 3);
+                  if (r) { r[3] = 100; r[4] = TS; }
+                  const di = gp2.data.findIndex(x => x[0] === 3);
+                  for (const n of [1,2,3]) { ctx.hlTablet('xp2', n, 't-hl'); ctx.reRenderTablet('xp2', n, di); }
+                })()
+              ]);
+              ctx.setLat(0, 2);
+              addLog('TX-1 COMMIT: Alice + Carol both visible atomically on S1 ✓', 'ls');
+              addLog('Click Next → watch what happens when P-1 replicates before P-2', '');
+            }
+          },
+          {
+            label: 'P-1 Replicates → Partial Gap',
+            desc: 'P-1 ships Alice\'s change (xp1) to xs1. xs1 immediately reflects the new value. But P-2 has not yet shipped Carol\'s change — xs2 still holds the pre-TX value of 78. A read on S2 right now sees the transaction only half-applied.',
+            action: async (ctx) => {
+              const TS = 1713289300.100;
+              ctx.hlLatRow(1);
+              addLog('P-1 polls xp1 → id=1 Alice score=100 → xs1 (ap-south-2)', 'li');
+              await ctx.pktXCluster(1, 'xp1', 1, 'xs1', 4, 900);
+              const gs1 = S.groups.find(g => g.id === 'xs1');
+              const r1 = gs1.data.find(x => x[0] === 1);
+              if (r1) { r1[3] = 100; r1[4] = TS; }
+              const di1 = gs1.data.findIndex(x => x[0] === 1);
+              for (const n of [4,5,6]) { ctx.hlTablet('xs1', n, 't-hl'); ctx.reRenderTablet('xs1', n, di1); }
+              ctx.setLat(1, 45);
+              addLog('⚠ Partial-TX window — S2 read sees inconsistent state:', 'lw');
+              addLog('  SELECT score WHERE id=1 → 100 (new) ✓', 'lw');
+              addLog('  SELECT score WHERE id=3 → 78 (pre-TX stale) ✗', 'lw');
+              for (const n of [4,5,6]) ctx.hlTablet('xs2', n, 't-hl2');
+              addLog('P-2 has not polled yet — xs2 Carol is still the old value', '');
+            }
+          },
+          {
+            label: 'P-2 Replicates → Gap Closed',
+            desc: 'P-2 now ships Carol\'s change (xp2) to xs2. The gap closes — both sides of the transaction are finally visible on S2. The "Txn gap" latency bar shows the ~20ms window during which S2 was in a partially-applied state.',
+            action: async (ctx) => {
+              const TS = 1713289300.100;
+              addLog('P-2 polls xp2 → id=3 Carol score=100 → xs2 (ap-south-2)', 'li');
+              await ctx.pktXCluster(2, 'xp2', 2, 'xs2', 5, 900);
+              const gs2 = S.groups.find(g => g.id === 'xs2');
+              const r2 = gs2.data.find(x => x[0] === 3);
+              if (r2) { r2[3] = 100; r2[4] = TS; }
+              const di2 = gs2.data.findIndex(x => x[0] === 3);
+              for (const n of [4,5,6]) { ctx.hlTablet('xs2', n, 't-hl'); ctx.reRenderTablet('xs2', n, di2); }
+              ctx.setLat(1, 65);
+              ctx.setLat(3, 20);
+              addLog('xs2 id=3 Carol score=100 ✓ — S2 now consistent', 'ls');
+              addLog('⚠ xCluster delivers no cross-tablet commit ordering — apps must tolerate this gap', 'lw');
             }
           }
         ]
