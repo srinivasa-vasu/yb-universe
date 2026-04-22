@@ -33,7 +33,7 @@
     <!-- SIDEBAR -->
     <nav class="sidebar">
       <div class="sgroup">Overview</div>
-      <button class="sbtn active" onclick="selectScenario(0)">
+      <button class="sbtn active" data-sc="0" onclick="selectScenario(0)">
         <span class="sicon">🗺️</span>
         <div>
           <div class="slabel">Cluster Overview</div>
@@ -41,21 +41,21 @@
         </div>
       </button>
       <div class="sgroup">Sharding</div>
-      <button class="sbtn" onclick="selectScenario(1)">
+      <button class="sbtn" data-sc="1" onclick="selectScenario(1)">
         <span class="sicon">🔢</span>
         <div>
           <div class="slabel">Hash Sharding</div>
           <div class="ssub">MurmurHash2 distribution</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(2)">
+      <button class="sbtn" data-sc="2" onclick="selectScenario(2)">
         <span class="sicon">📏</span>
         <div>
           <div class="slabel">Range (Default)</div>
           <div class="ssub">Single tablet start</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(3)">
+      <button class="sbtn" data-sc="3" onclick="selectScenario(3)">
         <span class="sicon">✂️</span>
         <div>
           <div class="slabel">Range (Pre-split)</div>
@@ -63,42 +63,42 @@
         </div>
       </button>
       <div class="sgroup">Write &amp; Read</div>
-      <button class="sbtn" onclick="selectScenario(4)">
+      <button class="sbtn" data-sc="4" onclick="selectScenario(4)">
         <span class="sicon">⚡</span>
         <div>
           <div class="slabel">Fast Path Write</div>
           <div class="ssub">Quorum &amp; near-follower</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(5)">
+      <button class="sbtn" data-sc="5" onclick="selectScenario(5)">
         <span class="sicon">⚖️</span>
         <div>
           <div class="slabel">Distributed Transactions (2PC)</div>
           <div class="ssub">Multi-tablet atomicity</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(6)">
+      <button class="sbtn" data-sc="6" onclick="selectScenario(6)">
         <span class="sicon">🧬</span>
         <div>
           <div class="slabel">Index Data Write</div>
           <div class="ssub">Users + Secondary Index (2PC)</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(7)">
+      <button class="sbtn" data-sc="7" onclick="selectScenario(7)">
         <span class="sicon">📖</span>
         <div>
           <div class="slabel">Consistent Read</div>
           <div class="ssub">Leader reads</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(8)">
+      <button class="sbtn" data-sc="8" onclick="selectScenario(8)">
         <span class="sicon">⚡</span>
         <div>
           <div class="slabel">Follower Reads</div>
           <div class="ssub">Bounded staleness</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(9)">
+      <button class="sbtn" data-sc="9" onclick="selectScenario(9)">
         <span class="sicon">🌎</span>
         <div>
           <div class="slabel">Geo-Partitioning</div>
@@ -106,21 +106,21 @@
         </div>
       </button>
       <div class="sgroup">Failure &amp; Recovery</div>
-      <button class="sbtn" onclick="selectScenario(10)">
+      <button class="sbtn" data-sc="10" onclick="selectScenario(10)">
         <span class="sicon">🗳️</span>
         <div>
           <div class="slabel">Leader Election</div>
           <div class="ssub">Crash → elect → recover</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(11)">
+      <button class="sbtn" data-sc="11" onclick="selectScenario(11)">
         <span class="sicon">💥</span>
         <div>
           <div class="slabel">Node Failure</div>
           <div class="ssub">Crash, re-elect, catch-up</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(12)">
+      <button class="sbtn" data-sc="12" onclick="selectScenario(12)">
         <span class="sicon">🔀</span>
         <div>
           <div class="slabel">Network Partition</div>
@@ -128,7 +128,7 @@
         </div>
       </button>
       <div class="sgroup">Scalability</div>
-      <button class="sbtn" onclick="selectScenario(13)">
+      <button class="sbtn" data-sc="13" onclick="selectScenario(13)">
         <span class="sicon">📈</span>
         <div>
           <div class="slabel">Horizontal Scaling</div>
@@ -136,22 +136,29 @@
         </div>
       </button>
       <div class="sgroup">Storage</div>
-      <button class="sbtn" onclick="selectScenario(14)">
+      <button class="sbtn" data-sc="14" onclick="selectScenario(14)">
         <span class="sicon">🔄</span>
         <div>
           <div class="slabel">Tablet Split</div>
           <div class="ssub">Auto-sharding growth</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(15)">
+      <button class="sbtn" data-sc="15" onclick="selectScenario(15)">
         <span class="sicon">🗜️</span>
         <div>
           <div class="slabel">LSM Compaction</div>
           <div class="ssub">DocDB storage engine</div>
         </div>
       </button>
+      <button class="sbtn" data-sc="19" onclick="selectScenario(19)">
+        <span class="sicon">🗄️</span>
+        <div>
+          <div class="slabel">DocDB Storage</div>
+          <div class="ssub">LSM + MVCC internals</div>
+        </div>
+      </button>
       <div class="sgroup">Schema</div>
-      <button class="sbtn" onclick="selectScenario(16)">
+      <button class="sbtn" data-sc="16" onclick="selectScenario(16)">
         <span class="sicon">📦</span>
         <div>
           <div class="slabel">Colocated Tables</div>
@@ -159,14 +166,14 @@
         </div>
       </button>
       <div class="sgroup">xCluster</div>
-      <button class="sbtn" onclick="selectScenario(17)">
+      <button class="sbtn" data-sc="17" onclick="selectScenario(17)">
         <span class="sicon">🔁</span>
         <div>
           <div class="slabel">xCluster DR</div>
           <div class="ssub">Turnkey async replication</div>
         </div>
       </button>
-      <button class="sbtn" onclick="selectScenario(18)">
+      <button class="sbtn" data-sc="18" onclick="selectScenario(18)">
         <span class="sicon">⚡</span>
         <div>
           <div class="slabel">Active-Active</div>
@@ -371,6 +378,19 @@
       <div class="split-panel" id="split-panel">
         <div class="log-hdr" style="padding: 0; margin-bottom: 8px;">Tablet Split Analysis</div>
         <div class="split-viz" id="split-viz"></div>
+      </div>
+      <!-- DOCDB PANEL -->
+      <div class="docdb-panel" id="docdb-panel" style="display:none">
+        <div class="docdb-pnl-hdr">
+          <div class="docdb-pnl-title">DocDB Internal KV Store · LSM + MVCC View</div>
+          <div class="docdb-pnl-sub">All writes are immutable appends — layers shown newest → oldest</div>
+        </div>
+        <div class="docdb-op" id="docdb-op" style="display:none"></div>
+        <div class="docdb-layers-wrap" id="docdb-layers-wrap"></div>
+        <div class="docdb-rdrs" id="docdb-readers-wrap" style="display:none">
+          <div class="docdb-rdrs-hdr">MVCC Snapshot Readers</div>
+          <div class="docdb-rdrs-list" id="docdb-readers-list"></div>
+        </div>
       </div>
     </div>
 

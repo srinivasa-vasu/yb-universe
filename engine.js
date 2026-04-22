@@ -404,13 +404,14 @@
       if (g.data?.length || rs?.provisionalRows?.length) {
         const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
         const showReg = isGeo || !!g.showReg;
+        const showScore = showReg || !!g.showScore;
         const hasExt = g.data && g.data.some(r => r[5] === 'ext');
         dHtml = '<div class="t-data">';
 
         // Header Row
         if (g.table === 'users') {
           dHtml += `<div class="d-row t-data-header ${showReg ? 'is-geo' : ''}">
-            <div class="dcell">ID</div><div class="dcell">NAME</div>${showReg ? '<div class="dcell dcell-score">SCR</div><div class="dcell dcell-reg">REG</div>' : ''}${hasExt ? '<span class="xc-ext-badge xc-ext-hdr">SRC</span>' : ''}<div class="dcell-hlc">HLC</div>
+            <div class="dcell">ID</div><div class="dcell">NAME</div>${showScore ? '<div class="dcell dcell-score">SCR</div>' : ''}${showReg ? '<div class="dcell dcell-reg">REG</div>' : ''}${hasExt ? '<span class="xc-ext-badge xc-ext-hdr">SRC</span>' : ''}<div class="dcell-hlc">HLC</div>
           </div>`;
         } else if (g.table === 'orders') {
           dHtml += `<div class="d-row t-data-header">
@@ -437,7 +438,7 @@
             dHtml += `<div class="dcell">#${row[0]}</div><div class="dcell" style="flex:1; overflow:hidden; text-overflow:ellipsis">${row[1]}</div><div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           } else if (g.table === 'users') {
             const extBadge = row[5] === 'ext' ? '<span class="xc-ext-badge">EXT</span>' : '';
-            dHtml += `<div class="dcell">${row[0]}</div><div class="dcell">${row[1]}</div>${showReg ? `<div class="dcell dcell-score">${row[3]}</div><div class="dcell dcell-reg">${row[2]}</div>` : ''}${extBadge}<div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
+            dHtml += `<div class="dcell">${row[0]}</div><div class="dcell">${row[1]}</div>${showScore ? `<div class="dcell dcell-score">${row[3]}</div>` : ''}${showReg ? `<div class="dcell dcell-reg">${row[2]}</div>` : ''}${extBadge}<div class="dcell-hlc">${fmtHLC(row[4])}</div>`;
           } else if (g.table === 'products') {
             dHtml += `<div class="dcell">${row[1]}</div><div class="dcell-hlc">${fmtHLC(row[3])}</div>`;
           } else if (g.table === 'users_email_idx') {
@@ -998,6 +999,7 @@
       document.getElementById('ddl-sec').style.display = 'none';
       showDataPanel(false);
       showSplitPanel(false);
+      showDocdbPanel(false);
       renderLatencies(sc.latencies);
       renderStepIndicator(sc.steps, -1);
       renderElectionTimeline(sc, -1);
@@ -1037,7 +1039,7 @@
         eb.appendChild(btn);
       }
 
-      document.querySelectorAll('.sidebar .sbtn').forEach((b, i) => b.classList.toggle('active', i === id));
+      document.querySelectorAll('.sidebar .sbtn').forEach(b => b.classList.toggle('active', +b.dataset.sc === id));
       const has = sc.steps?.length > 0;
       document.getElementById('btn-step').disabled = !has;
       document.getElementById('btn-play').disabled = !has;
@@ -1128,6 +1130,83 @@
         const sp = document.getElementById('split-panel');
         if (sp) sp.style.display = show ? 'flex' : 'none';
       }
+
+      function showDocdbPanel(show) {
+        const dp = document.getElementById('docdb-panel');
+        if (dp) dp.style.display = show ? 'flex' : 'none';
+        if (!show) {
+          const rw = document.getElementById('docdb-readers-wrap');
+          if (rw) rw.style.display = 'none';
+          setDocdbOp('');
+        }
+      }
+
+      function setDocdbOp(sql) {
+        const el = document.getElementById('docdb-op');
+        if (!el) return;
+        if (sql) { el.textContent = sql; el.style.display = 'block'; }
+        else { el.style.display = 'none'; }
+      }
+
+      function renderDocdbPanel() {
+        const db = S._docdb;
+        const wrap = document.getElementById('docdb-layers-wrap');
+        if (!wrap || !db) return;
+        wrap.innerHTML = '';
+        const allLayers = [];
+        if (db.memtable !== undefined) {
+          allLayers.push({ name: 'MemTable', badge: 'in-memory · mutable', entries: db.memtable, cls: 'dl-mem' });
+        }
+        for (const sst of (db.ssts || [])) {
+          allLayers.push({ name: sst.name, badge: 'on-disk · immutable', entries: sst.entries, cls: 'dl-sst' });
+        }
+        for (const layer of allLayers) {
+          const div = document.createElement('div');
+          div.className = 'docdb-layer';
+          const hdr = document.createElement('div');
+          hdr.className = `docdb-lhdr ${layer.cls}`;
+          hdr.innerHTML = `<span class="dl-name">${layer.name}</span><span class="dl-badge">${layer.badge}</span><span class="dl-count">${layer.entries.length} entries</span>`;
+          div.appendChild(hdr);
+          if (layer.entries.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'docdb-empty';
+            empty.textContent = 'empty';
+            div.appendChild(empty);
+          } else {
+            for (const e of layer.entries) {
+              const row = document.createElement('div');
+              let cls = 'docdb-entry';
+              if (e.isNew) cls += ' de-new';
+              if (e.type === 'TOMBSTONE') cls += ' de-tombstone';
+              row.className = cls;
+              const typeCls = e.type === 'TOMBSTONE' ? 'dt-tombstone' : 'dt-write';
+              const valHtml = e.type === 'TOMBSTONE'
+                ? '<span class="de-val de-tomb">— deleted —</span>'
+                : `<span class="de-val">${e.value || ''}</span>`;
+              row.innerHTML = `<span class="de-key">${e.display}</span><span class="de-type-col ${typeCls}">${e.type}</span><span class="de-hlc">@${e.hlc}</span>${valHtml}`;
+              div.appendChild(row);
+            }
+          }
+          wrap.appendChild(div);
+        }
+      }
+
+      function renderDocdbReaders(readers) {
+        const wrap = document.getElementById('docdb-readers-wrap');
+        const list = document.getElementById('docdb-readers-list');
+        if (!list || !wrap) return;
+        wrap.style.display = 'block';
+        list.innerHTML = '';
+        for (const r of readers) {
+          const div = document.createElement('div');
+          div.className = 'docdb-reader';
+          const resultCls = r.found ? 'dr-result' : 'dr-result dr-miss';
+          const resultTxt = r.found ? r.value : 'NOT FOUND';
+          div.innerHTML = `<span class="dr-lbl">${r.label}</span><span class="dr-ts">@${r.ts}</span><span class="dr-arrow">→</span><span class="${resultCls}">${resultTxt}</span>`;
+          list.appendChild(div);
+        }
+      }
+
 
       function renderSplitInfo(parentRange, splitPoint) {
         const viz = document.getElementById('split-viz');

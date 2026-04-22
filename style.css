@@ -2569,3 +2569,40 @@
       box-shadow: 0 0 10px rgba(251, 113, 133, 0.9);
       z-index: 60;
     }
+
+
+    /* ── DocDB Storage Panel ── */
+    .docdb-panel { flex-direction: column; gap: 10px; background: var(--s1); border: 1px solid var(--border-hi); border-radius: 8px; padding: 12px 14px; margin: 0 12px 10px; flex-shrink: 0; }
+    .docdb-pnl-hdr { flex-shrink: 0; margin-bottom: 4px; }
+    .docdb-pnl-title { font-size: 16px; font-weight: 700; color: var(--txt); font-family: var(--head); letter-spacing: 0.3px; }
+    .docdb-pnl-sub { font-size: 10.5px; color: var(--txt3); margin-top: 2px; }
+    .docdb-op { background: rgba(99,102,241,.1); border: 1px solid rgba(99,102,241,.25); border-radius: 4px; padding: 6px 10px; font-size: 10.5px; font-family: var(--mono); color: var(--info); letter-spacing: 0.2px; margin-top: 6px; }
+    .docdb-layers-wrap { display: flex; flex-direction: column; gap: 6px; }
+    .docdb-layer { border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
+    .docdb-lhdr { display: flex; align-items: center; gap: 8px; padding: 5px 10px; }
+    .docdb-lhdr.dl-mem { background: rgba(99,102,241,.15); border-bottom: 1px solid rgba(99,102,241,.25); }
+    .docdb-lhdr.dl-sst { background: rgba(245,158,11,.09); border-bottom: 1px solid rgba(245,158,11,.2); }
+    .dl-name { font-size: 12px; font-weight: 700; color: var(--txt); font-family: var(--mono); }
+    .dl-badge { font-size: 10.5px; color: var(--txt3); }
+    .dl-count { font-size: 10.5px; color: var(--txt2); margin-left: auto; }
+    .docdb-empty { padding: 6px 10px; font-size: 8.5px; color: var(--txt3); font-style: italic; }
+    .docdb-entry { display: grid; grid-template-columns: 170px 88px 135px 1fr; gap: 6px; padding: 5px 10px; align-items: center; border-bottom: 1px solid var(--border); font-size: 10.5px; font-family: var(--mono); transition: background .25s; }
+    .docdb-entry:last-child { border-bottom: none; }
+    .docdb-entry.de-new { background: rgba(34,197,94,.1); border-left: 2px solid var(--ok); }
+    .docdb-entry.de-tombstone { opacity: 0.6; }
+    .de-key { color: var(--txt); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .de-type-col { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; }
+    .de-type-col.dt-write { color: var(--ok); }
+    .de-type-col.dt-tombstone { color: var(--err); }
+    .de-hlc { color: var(--txt3); font-size: 10.5px; }
+    .de-val { color: var(--txt2); }
+    .de-val.de-tomb { color: var(--err); font-style: italic; opacity: 0.65; }
+    .docdb-rdrs { background: rgba(96,165,250,.05); border: 1px solid rgba(96,165,250,.2); border-radius: 6px; padding: 8px 10px; }
+    .docdb-rdrs-hdr { font-size: 11px; font-weight: 700; color: var(--txt); letter-spacing: 0.3px; margin-bottom: 6px; font-family: var(--head); }
+    .docdb-rdrs-list { display: flex; flex-direction: column; gap: 4px; }
+    .docdb-reader { display: grid; grid-template-columns: 80px 140px 16px 1fr; gap: 6px; align-items: center; font-size: 10.5px; font-family: var(--mono); padding: 3px 0; }
+    .dr-lbl { color: var(--txt); font-weight: 600; }
+    .dr-ts { color: var(--txt3); font-size: 10.5px; }
+    .dr-arrow { color: var(--txt3); text-align: center; }
+    .dr-result { color: var(--ok); font-weight: 600; }
+    .dr-result.dr-miss { color: var(--err); }

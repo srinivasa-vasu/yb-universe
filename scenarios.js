@@ -1786,5 +1786,208 @@
             }
           }
         ]
+      },
+
+      // 19: DocDB Storage — LSM + MVCC
+      {
+        name: 'DocDB Storage',
+        desc: 'DocDB is YugabyteDB’s RocksDB-based storage engine. Every write is an immutable append — updates create new versions, deletes write tombstones. MVCC keeps all versions for consistent snapshot reads without locks.',
+        latencies: [
+          { lbl: 'WAL append', cls: 'll', max: 1 },
+          { lbl: 'MemTable write', cls: 'll', max: 0.1 },
+          { lbl: 'SST flush', cls: 'lm', max: 50 },
+          { lbl: 'Compaction', cls: 'lm', max: 200 }
+        ],
+        init(ctx) {
+          S.groups = [{
+            id: 'tg1', table: 'users', tnum: 1, range: '0x0000–0xFFFF',
+            leaderNode: 1, term: 4, replicas: [1, 2, 3],
+            data: [],
+            showScore: true
+          }];
+          S._docdb = { memtable: [], ssts: [] };
+          ctx.rebuildReplicaState();
+          ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY HASH,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+          showDocdbPanel(true);
+          setDocdbOp('');
+          renderDocdbPanel();
+          renderAllTablets();
+          setTimeout(renderConnections, 80);
+        },
+        steps: [
+          {
+            label: 'INSERT → MemTable',
+            desc: 'Client inserts id=4 David Park score=95. DocDB appends an immutable WRITE entry to MemTable at T1. The write fans out via Raft to both followers before committing.',
+            action: async (ctx) => {
+              const T1 = '1713289200.100';
+              const T1num = 1713289200.1;
+              const pendingRow = [4, 'David Park', 'New York', 95, T1num];
+              setDocdbOp("INSERT INTO users VALUES (4, 'David Park', 'New York', 95)");
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+              ctx.hlTablet('tg1', 1, 't-hl');
+              const rs1 = S.replicaState['tg1']?.[1];
+              if (rs1) rs1.provisionalRows = [pendingRow];
+              ctx.reRenderTablet('tg1', 1);
+              S._docdb.memtable.unshift({ display: 'id=4 · David Park', hlc: T1, type: 'WRITE', value: 'score=95', isNew: true });
+              renderDocdbPanel();
+              ctx.setLat(0, 0.3); ctx.setLat(1, 0.05);
+              addLog('INSERT id=4 David Park score=95 → WAL + MemTable @ T1=' + T1, 'li');
+              await Promise.all([
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+              ]);
+              const g = S.groups.find(x => x.id === 'tg1');
+              if (g) {
+                g.data.push(pendingRow);
+                for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+              }
+              for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+              addLog('Majority ACK → committed on all 3 replicas ✓', 'ls');
+              ctx.activateClient(false);
+            }
+          },
+          {
+            label: 'UPDATE → New Version',
+            desc: 'UPDATE score=99 appends a brand-new WRITE entry at T2. The old version (score=95 @ T1) is NOT overwritten — both versions coexist in MemTable. Raft replicates the new version.',
+            action: async (ctx) => {
+              const T2 = '1713289200.300';
+              const T2num = 1713289200.3;
+              setDocdbOp('UPDATE users SET score = 99 WHERE id = 4');
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+              ctx.hlTablet('tg1', 1, 't-hl');
+              const g = S.groups.find(x => x.id === 'tg1');
+              const updatedRow = [4, 'David Park', 'New York', 99, T2num];
+              if (g) { const ri = g.data.findIndex(r => r[0] === 4); if (ri >= 0) g.data.splice(ri, 1); }
+              const rs1 = S.replicaState['tg1']?.[1];
+              if (rs1) rs1.provisionalRows = [updatedRow];
+              ctx.reRenderTablet('tg1', 1);
+              for (const e of S._docdb.memtable) e.isNew = false;
+              S._docdb.memtable.unshift({ display: 'id=4 · David Park', hlc: T2, type: 'WRITE', value: 'score=99', isNew: true });
+              renderDocdbPanel();
+              ctx.setLat(0, 0.3); ctx.setLat(1, 0.05);
+              addLog('UPDATE id=4 score=99 → new WRITE @ T2=' + T2 + ' (T1 version retained)', 'li');
+              await Promise.all([
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+              ]);
+              if (g) {
+                g.data.push(updatedRow);
+                for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+              }
+              for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+              addLog('Majority ACK → score=99 committed, 2 versions in MemTable ✓', 'ls');
+              ctx.activateClient(false);
+            }
+          },
+          {
+            label: 'DELETE → Tombstone',
+            desc: 'DELETE appends a TOMBSTONE marker at T3. No data is physically removed — 3 versions of id=4 now exist in MemTable. Raft replicates the tombstone.',
+            action: async (ctx) => {
+              const T3 = '1713289200.500';
+              setDocdbOp('DELETE FROM users WHERE id = 4');
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+              ctx.hlTablet('tg1', 1, 't-hl');
+              for (const e of S._docdb.memtable) e.isNew = false;
+              S._docdb.memtable.unshift({ display: 'id=4 · David Park', hlc: T3, type: 'TOMBSTONE', value: '', isNew: true });
+              renderDocdbPanel();
+              ctx.setLat(0, 0.3); ctx.setLat(1, 0.05);
+              addLog('DELETE id=4 → TOMBSTONE @ T3=' + T3 + ' (row still committed, pending Raft)', 'lw');
+              await Promise.all([
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+              ]);
+              const g = S.groups.find(x => x.id === 'tg1');
+              if (g) {
+                g.data = g.data.filter(r => r[0] !== 4);
+                for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+              }
+              for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n); }
+              addLog('Majority ACK → id=4 removed from tablet, tombstone in DocDB ✓', 'ls');
+              ctx.activateClient(false);
+            }
+          },
+          {
+            label: 'MemTable Flush + INSERT id=5',
+            desc: 'MemTable (3 versions of id=4) fills up and flushes to immutable SST-1 on disk. A fresh MemTable starts. Client inserts id=5 Eve Chen score=82 — it lands in the fresh MemTable and replicates via Raft.',
+            action: async (ctx) => {
+              const T4 = '1713289200.700';
+              const T4num = 1713289200.7;
+              setDocdbOp('-- MemTable full → background flush to SST-1');
+              for (const e of S._docdb.memtable) e.isNew = false;
+              const sst1Entries = S._docdb.memtable.map(e => ({ ...e }));
+              S._docdb.ssts = [{ name: 'SST-1', entries: sst1Entries }];
+              S._docdb.memtable = [];
+              renderDocdbPanel();
+              ctx.setLat(2, 32);
+              addLog('MemTable → SST-1 flushed (3 versions of id=4, immutable on-disk)', 'ls');
+              await new Promise(r => setTimeout(r, 400));
+              setDocdbOp("INSERT INTO users VALUES (5, 'Eve Chen', 'Boston', 82)");
+              const eveRow = [5, 'Eve Chen', 'Boston', 82, T4num];
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
+              ctx.hlTablet('tg1', 1, 't-hl');
+              const rs1 = S.replicaState['tg1']?.[1];
+              if (rs1) rs1.provisionalRows = [eveRow];
+              ctx.reRenderTablet('tg1', 1);
+              S._docdb.memtable.unshift({ display: 'id=5 · Eve Chen', hlc: T4, type: 'WRITE', value: 'score=82', isNew: true });
+              renderDocdbPanel();
+              addLog('INSERT id=5 Eve Chen score=82 → fresh MemTable @ T4=' + T4, 'li');
+              await Promise.all([
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300),
+                ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 300)
+              ]);
+              const g = S.groups.find(x => x.id === 'tg1');
+              if (g) {
+                g.data.push(eveRow);
+                for (const n of [1,2,3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+              }
+              for (const n of [1,2,3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+              addLog('Majority ACK → id=5 committed on all 3 replicas ✓', 'ls');
+              ctx.activateClient(false);
+            }
+          },
+          {
+            label: 'MVCC Snapshot Reads',
+            desc: 'Three concurrent readers each hold a different HLC snapshot timestamp. DocDB scans newest-to-oldest and returns the first version at or before the snapshot — no locks held, readers never block writers.',
+            action: async (ctx) => {
+              setDocdbOp('SELECT score FROM users WHERE id = 4  -- at T1, T2, T3 snapshots');
+              for (const e of S._docdb.memtable) e.isNew = false;
+              renderDocdbPanel();
+              const readers = [
+                { label: 'Reader-A', ts: '1713289200.200', found: true,  value: 'score=95  (T1 WRITE)' },
+                { label: 'Reader-B', ts: '1713289200.400', found: true,  value: 'score=99  (T2 WRITE)' },
+                { label: 'Reader-C', ts: '1713289200.600', found: false, value: '' }
+              ];
+              renderDocdbReaders(readers);
+              addLog('Reader-A @ T1+ε → scan MemTable+SST-1 → WRITE@T1 → score=95', 'ls');
+              addLog('Reader-B @ T2+ε → scan MemTable+SST-1 → WRITE@T2 → score=99', 'ls');
+              addLog('Reader-C @ T3+ε → scan SST-1 → TOMBSTONE@T3 → NOT FOUND', 'lw');
+              addLog('No locks — readers never block writers', '');
+            }
+          },
+          {
+            label: 'Compaction + GC',
+            desc: 'Compaction merges SST-1 and MemTable. The GC horizon is past T3 — all 3 id=4 entries (including tombstone) are pruned. Only id=5 Eve survives in the new SST-2.',
+            action: async (ctx) => {
+              setDocdbOp('-- Background compaction: SST-1 + MemTable → SST-2  (GC horizon ≥ T3)');
+              const rw = document.getElementById('docdb-readers-wrap');
+              if (rw) rw.style.display = 'none';
+              for (const e of S._docdb.memtable) e.isNew = false;
+              renderDocdbPanel();
+              await new Promise(r => setTimeout(r, 500));
+              const eveEntry = { display: 'id=5 · Eve Chen', hlc: '1713289200.700', type: 'WRITE', value: 'score=82', isNew: false };
+              S._docdb.ssts = [{ name: 'SST-2 (compacted)', entries: [eveEntry] }];
+              S._docdb.memtable = [];
+              renderDocdbPanel();
+              ctx.setLat(3, 150);
+              addLog('Compaction: SST-1 + MemTable → SST-2', 'ls');
+              addLog('GC pruned: id=4 TOMBSTONE + WRITE@T2 + WRITE@T1 (all past GC horizon)', 'ls');
+              addLog('SST-2: only id=5 Eve Chen survives — storage reclaimed ✓', 'ls');
+            }
+          }
+        ]
       }
     ];
