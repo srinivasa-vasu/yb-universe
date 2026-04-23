@@ -961,6 +961,8 @@
       currentScenario = id; currentStep = -1; stepRunning = false; stopPlay();
       S = freshState();
       fdReset();
+      _exitArchMode(true);
+      document.querySelectorAll('.sbtn[data-arch]').forEach(b => b.classList.remove('active'));
 
       const sc = SCENARIOS[id];
       const ctx = makeCtx();
@@ -1538,6 +1540,207 @@
             });
           } else addLog(`No tablet found for id=${id} in table ${tbl}`, 'le');
         } else addLog(`Try: SELECT * FROM users WHERE id = 4`, 'lw');
+      }
+
+
+      // ── ARCHITECTURE VIEW ─────────────────────────────────────────────
+
+      const ARCH_FDS = [
+        { name: 'Fault Domain 1', az: 'ap-south-1a', nodes: [1,2,3] },
+        { name: 'Fault Domain 2', az: 'ap-south-1b', nodes: [4,5,6] },
+        { name: 'Fault Domain 3', az: 'ap-south-1c', nodes: [7,8,9] },
+      ];
+
+      const ARCH_TABLETS = [
+        { color: '#f59e0b', name: 'users.tg1',    leader: 1, replicas: [1,4,7] },
+        { color: '#f59e0b', name: 'users.tg2',    leader: 2, replicas: [2,5,8] },
+        { color: '#f59e0b', name: 'users.tg3',    leader: 3, replicas: [3,6,9] },
+        { color: '#60a5fa', name: 'products.tg1', leader: 4, replicas: [1,4,7] },
+        { color: '#60a5fa', name: 'products.tg2', leader: 5, replicas: [2,5,8] },
+        { color: '#34d399', name: 'orders.tg1',   leader: 6, replicas: [3,6,9] },
+        { color: '#a78bfa', name: 'orders.tg2',   leader: 7, replicas: [1,4,7] },
+        { color: '#fb7185', name: 'idx.tg1',      leader: 8, replicas: [2,5,8] },
+        { color: '#6366f1', name: 'txns.tg1',     leader: 9, replicas: [3,6,9] },
+      ];
+
+      let _archFailedFD = -1;
+
+      function _exitArchMode(showCanvas) {
+        const av = document.getElementById('arch-view');
+        if (av) av.style.display = 'none';
+        const tb = document.querySelector('.cluster-area .toolbar');
+        if (tb) tb.style.display = showCanvas ? '' : 'none';
+        const cw = document.getElementById('canvas-wrap');
+        if (cw) cw.style.display = showCanvas ? '' : 'none';
+        const ip = document.querySelector('.info-panel');
+        if (ip) ip.style.display = showCanvas ? '' : 'none';
+      }
+
+      function selectArch(tab) {
+        document.querySelectorAll('.sidebar .sbtn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll(`.sbtn[data-arch="${tab}"]`).forEach(b => b.classList.add('active'));
+        _exitArchMode(false);
+        showDataPanel(false); showSplitPanel(false); showDocdbPanel(false);
+        const av = document.getElementById('arch-view');
+        if (!av) return;
+        av.style.display = 'flex';
+        document.getElementById('active-badge').textContent = tab === 'universe' ? 'Architecture · Global Universe' : 'Architecture · xCluster';
+        document.getElementById('i-title').textContent = tab === 'universe' ? 'Global Universe Architecture' : 'xCluster Topology';
+        _archFailedFD = -1;
+        av.innerHTML = '';
+        if (tab === 'universe') _renderArchUniverse(av);
+        else _renderArchXCluster(av);
+      }
+
+      function _renderArchUniverse(container) {
+        const stats = [
+          { val: '3', lbl: 'Fault Domains' }, { val: 'RF=3', lbl: 'Replication' },
+          { val: '9', lbl: 'TServers' }, { val: '9', lbl: 'Tablet Groups' }, { val: '27', lbl: 'Total Replicas' },
+        ];
+        let h = `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+
+        const highlights = [
+          { icon: '◎', label: 'Zero RPO',                cls: 'av-hl-green'  },
+          { icon: '⚡', label: 'Zero RTO',                cls: 'av-hl-green'  },
+          { icon: '⊘', label: 'No Split-Brain',          cls: 'av-hl-blue'   },
+          { icon: '≡', label: 'Strongly Consistent Reads &amp; Writes', cls: 'av-hl-blue' },
+          { icon: '↻', label: 'Auto Leader Election',    cls: 'av-hl-amber'  },
+          { icon: '⇄', label: 'Equal Read &amp; Write',  cls: 'av-hl-amber'  },
+          { icon: '▣', label: 'Full Copy per FD',        cls: 'av-hl-purple' },
+          { icon: '⬡', label: 'Raft Consensus',          cls: 'av-hl-purple' },
+        ];
+        h += `<div class="av-highlights">${highlights.map(hl => `<div class="av-hl ${hl.cls}"><span class="av-hl-icon">${hl.icon}</span><span class="av-hl-txt">${hl.label}</span></div>`).join('')}</div>`;
+
+        h += `<div class="av-section-title">Cluster Layout — Nodes &amp; Tablet Distribution</div>`;
+        h += `<div class="av-fd-row" id="av-fd-row">`;
+        for (let fi = 0; fi < 3; fi++) {
+          const fd = ARCH_FDS[fi];
+          h += `<div class="av-fd" id="av-fd-${fi}">`;
+          h += `<div class="av-fd-hdr"><div class="av-fd-name">${fd.name}</div><div class="av-fd-az">${fd.az}</div></div>`;
+          h += `<div class="av-fd-nodes">`;
+          for (const nid of fd.nodes) {
+            const myT = ARCH_TABLETS.filter(t => t.replicas.includes(nid));
+            h += `<div class="av-node"><div class="av-node-id">Node ${nid}</div><div class="av-chips">`;
+            for (const t of myT) {
+              const isL = t.leader === nid;
+              h += `<div class="av-chip ${isL ? 'av-chip-l' : 'av-chip-f'}" style="${isL ? `background:${t.color}` : `border-color:${t.color};color:${t.color}`}" title="${t.name} · ${isL ? 'Leader ◉' : 'Follower ○'}">${isL ? '◉' : '○'}</div>`;
+            }
+            h += `</div><div class="av-traf"><div class="av-traf-row"><span class="av-traf-r">Read</span><div class="av-tbar av-tbar-r"></div></div><div class="av-traf-row"><span class="av-traf-w">Write</span><div class="av-tbar av-tbar-w"></div></div></div></div>`;
+          }
+          h += `</div>`;
+          h += `<div class="av-fd-copy">▣ Full Data Copy #${fi + 1}</div>`;
+          h += `<button class="av-fd-fail-btn" onclick="archFailDomain(${fi})">⚡ Simulate Failure</button>`;
+          h += `</div>`;
+        }
+        h += `</div>`;
+
+        h += `<div class="av-quorum"><div class="av-q-title">Why Fault Domains Must Be Odd</div>`;
+        h += `<div class="av-q-sub">Raft requires a strict majority (&gt;50%) of replicas to commit writes &amp; elect a leader. Even counts create split-brain risk.</div>`;
+        h += `<div class="av-q-cases">`;
+        const qcases = [
+          { n: 2, fail: 1, survive: 1, pct: 50, ok: false, lbl: '2 Fault Domains (Even)' },
+          { n: 3, fail: 1, survive: 2, pct: 67, ok: true,  lbl: '3 Fault Domains (Odd) — Minimum' },
+          { n: 5, fail: 2, survive: 3, pct: 60, ok: true,  lbl: '5 Fault Domains (Odd) — Higher Tolerance' },
+        ];
+        for (const c of qcases) {
+          h += `<div class="av-qcase ${c.ok ? 'av-qcase-ok' : 'av-qcase-bad'}">`;
+          h += `<div class="av-qcase-lbl">${c.lbl}</div>`;
+          h += `<div class="av-qcase-dots">${Array.from({length:c.n},(_,i)=>`<span class="av-qd ${i<c.fail?'av-qd-fail':'av-qd-ok'}">${i<c.fail?'✕':'✓'}</span>`).join('')}</div>`;
+          h += `<div class="av-qcase-calc">${c.survive}/${c.n} = ${c.pct}% — ${c.ok ? 'majority quorum' : 'no majority'}</div>`;
+          h += `<div class="av-qcase-verdict">${c.ok ? '✓ CONTINUES' : '✗ UNAVAILABLE'}</div>`;
+          h += `</div>`;
+        }
+        h += `</div></div>`;
+
+        const tables = [
+          { color: '#f59e0b', name: 'users (tg1–3)' },
+          { color: '#60a5fa', name: 'products (tg4–5)' },
+          { color: '#34d399', name: 'orders (tg6)' },
+          { color: '#a78bfa', name: 'orders (tg7)' },
+          { color: '#fb7185', name: 'sec-index (tg8)' },
+          { color: '#6366f1', name: 'sys.txns (tg9)' },
+        ];
+        h += `<div class="av-legend"><span class="av-leg-title">Tables</span>`;
+        h += tables.map(t => `<div class="av-leg-item"><div class="av-leg-dot" style="background:${t.color}"></div><span>${t.name}</span></div>`).join('');
+        h += `<span class="av-leg-sep">|</span><div class="av-leg-item"><div class="av-chip av-chip-l" style="background:#aaa;width:14px;height:14px;font-size:8px">◉</div><span>Leader</span></div>`;
+        h += `<div class="av-leg-item"><div class="av-chip av-chip-f" style="border-color:#aaa;color:#aaa;width:14px;height:14px;font-size:8px">○</div><span>Follower</span></div>`;
+        h += `</div>`;
+
+        container.innerHTML = h;
+      }
+
+      function archFailDomain(fi) {
+        const fds = document.querySelectorAll('.av-fd');
+        let msg = document.getElementById('av-fail-msg');
+        if (_archFailedFD === fi) {
+          _archFailedFD = -1;
+          fds.forEach(el => el.classList.remove('av-fd-failed', 'av-fd-quorum'));
+          if (msg) msg.remove();
+          return;
+        }
+        _archFailedFD = fi;
+        fds.forEach((el, i) => { el.classList.toggle('av-fd-failed', i === fi); el.classList.toggle('av-fd-quorum', i !== fi); });
+        const row = document.getElementById('av-fd-row');
+        if (!msg) { msg = document.createElement('div'); msg.id = 'av-fail-msg'; msg.className = 'av-fail-msg'; row.after(msg); }
+        msg.innerHTML = `⚡ <strong>${ARCH_FDS[fi].name}</strong> (${ARCH_FDS[fi].az}) offline &nbsp;·&nbsp; 2 of 3 FDs form quorum &nbsp;·&nbsp; Leaders auto-elect on surviving nodes &nbsp;·&nbsp; <span class="av-restore-link" onclick="archFailDomain(${fi})">Restore ↺</span>`;
+      }
+
+      function _renderArchXCluster(container) {
+        const pollers = [
+          { name: 'users', color: '#f59e0b' },
+          { name: 'products', color: '#60a5fa' },
+          { name: 'orders', color: '#34d399' },
+        ];
+        function miniCluster(label, region, cls) {
+          let h = `<div class="av-xcl-cluster"><div class="av-xcl-hdr ${cls}">${label}<span class="av-xcl-region">${region}</span></div><div class="av-xcl-az-row">`;
+          for (let az = 0; az < 3; az++) {
+            h += `<div class="av-xcl-az"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes">`;
+            for (let n = 0; n < 3; n++) h += `<div class="av-xcl-node">Node<br>${az*3+n+1}</div>`;
+            h += `</div></div>`;
+          }
+          h += `</div><div class="av-xcl-rpo">${cls.includes('primary') ? '⬡ Sync Raft within cluster · 0 data loss' : '⏱ Async CDC · RPO ≈ seconds'}</div></div>`;
+          return h;
+        }
+        function midSection(label, pollerList, note, bidir) {
+          let h = `<div class="av-xcl-mid"><div class="av-xcl-mode-lbl">${label}</div>`;
+          for (const p of pollerList) {
+            h += `<div class="av-xcl-poller" style="border-color:${p.color}"><span style="color:${p.color};font-size:9px">${p.name}</span>`;
+            if (bidir) h += `<div class="av-xcl-arrows-aa"><span class="av-xcl-a-fwd">→</span><span class="av-xcl-a-rev">←</span></div>`;
+            else h += `<span class="av-xcl-a-fwd">→</span>`;
+            h += `</div>`;
+          }
+          h += `<div class="av-xcl-rpo-badge">${note}</div></div>`;
+          return h;
+        }
+        let h = `<div class="av-xcl-title">xCluster Replication Architecture</div>`;
+        h += `<div class="av-xcl-sub">Each cluster is a fully independent YugabyteDB universe with its own RF=3 Raft groups. xCluster replicates via <strong>parallel CDC WAL streams</strong> — one independent poller per tablet, running concurrently across all tablet groups.</div>`;
+        h += `<div class="av-xcl-modes">`;
+        // DR
+        h += `<div class="av-xcl-block av-xcl-block-dr"><div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">DR — Unidirectional</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ Global Ordering</span><span class="av-order-badge av-ob-ok">✓ Transactional Consistency</span><span class="av-order-badge av-ob-ok">✓ No Partial-TX Visibility</span><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span></div></div><div class="av-xcl-row">`;
+        h += miniCluster('PRIMARY', 'ap-south-1', 'av-xcl-primary');
+        h += midSection('CDC Pollers', pollers, 'RPO ≈ seconds · async WAL · ordered delivery', false);
+        h += miniCluster('SECONDARY', 'us-east-1', 'av-xcl-secondary');
+        h += `</div>`;
+        h += `<div class="av-xcl-caps">`;
+        h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
+        ['Full transactional consistency — no partial-TX windows at secondary','Global write ordering preserved across all tablets','n:m parallel CDC streams — one independent WAL poller per tablet, all running concurrently','Per-tablet ordered delivery — each stream maintains commit order end-to-end','Failover &amp; Switchover — promote on unplanned failure or planned switchover with zero data loss','Secondary serves local reads — reduces latency for read-heavy workloads'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
+        ['Secondary is a read-only standby — no writes during normal operation','RPO ≈ seconds–minutes depending on replication lag at time of failure','Controlled promotion required — failover or switchover must be explicitly triggered','Replication lag grows under high primary write load or network disruption','Large catch-up backlogs after extended network partitions','No automatic re-direction of application writes after promotion'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        h += `</div></div></div>`;
+        // Active-Active
+        h += `<div class="av-xcl-block"><div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">Active-Active — Bidirectional (BDR)</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span><span class="av-order-badge av-ob-warn">⚡ LWW Conflict Resolution</span><span class="av-order-badge av-ob-warn">⚠ No Global Ordering</span></div></div><div class="av-xcl-row">`;
+        h += miniCluster('CLUSTER S1', 'ap-south-1', 'av-xcl-primary');
+        h += midSection('Bidirectional Pollers', pollers, 'LWW by HLC · no cross-tablet ordering', true);
+        h += miniCluster('CLUSTER S2', 'eu-central-1', 'av-xcl-primary');
+        h += `</div>`;
+        h += `<div class="av-xcl-caps">`;
+        h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
+        ['Both clusters accept writes simultaneously — write-anywhere for all regions','Local low-latency writes for users in each geographic region','n:m parallel bidirectional CDC streams — one WAL poller per tablet in each direction','Replication throughput scales with tablet count — more tablets, more parallelism','Either cluster survives full failure; peer continues independently','No single point of write bottleneck across regions'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
+        ['No guaranteed global ordering across tablets — each stream is independent','Conflicting concurrent writes resolved by LWW — last-write-wins via HLC timestamp','Cross-tablet transactions may arrive at peer with visibility gaps','Additive operations (counters, inventory) risk lost updates under conflicts','Application must tolerate eventual consistency for conflicting writes','Schema changes must be coordinated across both clusters manually'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        h += `</div></div></div>`;
+        h += `</div>`;
+        container.innerHTML = h;
       }
 
       window.addEventListener('load', () => {

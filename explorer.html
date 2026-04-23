@@ -180,6 +180,21 @@
           <div class="ssub">Bidirectional xCluster</div>
         </div>
       </button>
+      <div class="sgroup">Architecture</div>
+      <button class="sbtn" data-arch="universe" onclick="selectArch('universe')">
+        <span class="sicon">🌐</span>
+        <div>
+          <div class="slabel">Global Universe</div>
+          <div class="ssub">Fault domains &amp; distribution</div>
+        </div>
+      </button>
+      <button class="sbtn" data-arch="xcl" onclick="selectArch('xcl')">
+        <span class="sicon">🔗</span>
+        <div>
+          <div class="slabel">xCluster</div>
+          <div class="ssub">Cross-cluster replication</div>
+        </div>
+      </button>
     </nav>
 
     <!-- CLUSTER AREA -->
@@ -193,6 +208,8 @@
         <span class="tchip tc-p">⟊ PARTITIONED</span>
         <span class="tterm-display" id="term-display">Raft Term: 4</span>
       </div>
+
+      <div id="arch-view" class="arch-view" style="display:none"></div>
 
       <!-- canvas -->
       <div class="canvas-wrap" id="canvas-wrap">
