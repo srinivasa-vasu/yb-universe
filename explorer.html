@@ -199,6 +199,8 @@
 
     <!-- CLUSTER AREA -->
     <div class="cluster-area">
+      <div class="pane-toggle sidebar-toggle" onclick="toggleSidebar()" title="Toggle Sidebar (Left Pane)">⋮</div>
+      <div class="pane-toggle info-toggle" onclick="toggleInfoPanel()" title="Toggle Info Panel (Right Pane)">⋮</div>
       <div class="toolbar">
         <span class="tlabel">LEGEND:</span>
         <span class="tchip tc-l">◉ LEADER</span>
@@ -461,6 +463,7 @@
     </div>
   </div>
 
+  <div class="focus-mode-hint" id="focus-hint">Focus Mode Active · Press 'F' to exit</div>
   <script src="config.js"></script>
   <script src="engine.js"></script>
   <script src="scenarios.js"></script>

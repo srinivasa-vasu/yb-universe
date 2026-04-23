@@ -1746,4 +1746,44 @@
       window.addEventListener('load', () => {
         selectScenario(0);
         window.addEventListener('resize', () => setTimeout(renderConnections, 100));
+        
+        // Keyboard shortcuts
+        window.addEventListener('keydown', (e) => {
+          // Only trigger if not in an input/textarea
+          if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+          
+          if (e.key.toLowerCase() === 'f') {
+            toggleFocusMode();
+          }
+        });
       });
+
+      function toggleSidebar() {
+        const sb = document.querySelector('.sidebar');
+        sb.classList.toggle('collapsed');
+        setTimeout(renderConnections, 310); // After transition
+      }
+
+      function toggleInfoPanel() {
+        const ip = document.querySelector('.info-panel');
+        ip.classList.toggle('collapsed');
+        setTimeout(renderConnections, 310); // After transition
+      }
+
+      function toggleFocusMode() {
+        const sb = document.querySelector('.sidebar');
+        const ip = document.querySelector('.info-panel');
+        const body = document.body;
+        
+        const isFocus = body.classList.toggle('focus-mode');
+        
+        if (isFocus) {
+          sb.classList.add('collapsed');
+          ip.classList.add('collapsed');
+        } else {
+          sb.classList.remove('collapsed');
+          ip.classList.remove('collapsed');
+        }
+        
+        setTimeout(renderConnections, 310);
+      }
