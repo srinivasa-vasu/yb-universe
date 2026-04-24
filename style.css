@@ -2848,5 +2848,14 @@
     .av-xcl-cap-cons .av-xcl-cap-hdr { color: var(--warn); }
     .av-xcl-cap-item { font-size: 12px; color: var(--txt); padding: 5px 0; border-bottom: 1px solid var(--border); line-height: 1.4; }
     .av-xcl-cap-item:last-child { border-bottom: none; }
+    .av-collapse-hdr { display:flex; justify-content:space-between; align-items:center; cursor:pointer; padding: 6px 0 4px; user-select:none; }
+    .av-collapse-hdr:hover .av-collapse-btn { background:var(--s3); color:var(--txt); }
+    .av-collapse-sub-lbl { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--txt2); }
+    .av-collapse-btn { background:none; border:1px solid var(--border); color:var(--txt2); cursor:pointer; font-size:10px; padding:2px 7px; border-radius:4px; transition:background .15s,color .15s; line-height:1.4; }
+    .av-xcl-statsbar { display:flex; background:var(--s3); border:1px solid var(--border); border-radius:7px; overflow:hidden; margin-bottom:12px; }
+    .av-xcl-stat { flex:1; padding:10px 8px; border-right:1px solid var(--border); text-align:center; }
+    .av-xcl-stat:last-child { border-right:none; }
+    .av-xcl-stat-v { display:block; font-size:20px; font-weight:700; color:var(--txt); font-family:var(--head); }
+    .av-xcl-stat-l { display:block; font-size:10px; color:var(--txt2); text-transform:uppercase; letter-spacing:.8px; margin-top:3px; }
 
     .av-fd.av-fd-failed .av-tbar { animation: none; opacity: 0.12; width: 25%; }

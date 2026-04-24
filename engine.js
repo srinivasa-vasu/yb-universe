@@ -1652,11 +1652,14 @@
         const av = document.getElementById('arch-view');
         if (!av) return;
         av.style.display = 'flex';
-        document.getElementById('active-badge').textContent = tab === 'universe' ? 'Architecture · Global Universe' : 'Architecture · xCluster';
-        document.getElementById('i-title').textContent = tab === 'universe' ? 'Global Universe Architecture' : 'xCluster Topology';
+        const badgeMap = { universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica' };
+        const titleMap = { universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology' };
+        document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
+        document.getElementById('i-title').textContent = titleMap[tab] || tab;
         _archFailedFD = -1;
         av.innerHTML = '';
         if (tab === 'universe') _renderArchUniverse(av);
+        else if (tab === 'read-replica') _renderArchReadReplica(av);
         else _renderArchXCluster(av);
       }
 
@@ -1753,20 +1756,39 @@
         msg.innerHTML = `⚡ <strong>${ARCH_FDS[fi].name}</strong> (${ARCH_FDS[fi].az}) offline &nbsp;·&nbsp; 2 of 3 FDs form quorum &nbsp;·&nbsp; Leaders auto-elect on surviving nodes &nbsp;·&nbsp; <span class="av-restore-link" onclick="archFailDomain(${fi})">Restore ↺</span>`;
       }
 
+      function archToggle(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const open = el.style.display !== 'none';
+        el.style.display = open ? 'none' : '';
+        const btn = document.querySelector(`[data-arch-toggle="${id}"]`);
+        if (btn) btn.textContent = open ? '▶' : '▼';
+      }
+
       function _renderArchXCluster(container) {
         const pollers = [
           { name: 'users', color: '#f59e0b' },
           { name: 'products', color: '#60a5fa' },
           { name: 'orders', color: '#34d399' },
         ];
+        const nodeStyle = 'width:72px;height:72px;font-size:11px';
+        function xclStatBar(stats) {
+          return `<div class="av-xcl-statsbar">${stats.map(s => `<div class="av-xcl-stat"><span class="av-xcl-stat-v">${s.val}</span><span class="av-xcl-stat-l">${s.lbl}</span></div>`).join('')}</div>`;
+        }
         function miniCluster(label, region, cls) {
-          let h = `<div class="av-xcl-cluster"><div class="av-xcl-hdr ${cls}">${label}<span class="av-xcl-region">${region}</span></div><div class="av-xcl-az-row">`;
+          let h = `<div class="av-xcl-cluster" style="display:flex;flex-direction:column">`;
+          h += `<div class="av-xcl-hdr ${cls}">${label}<span class="av-xcl-region">${region}</span></div>`;
+          h += `<div class="av-xcl-az-row" style="flex:1;align-items:stretch">`;
           for (let az = 0; az < 3; az++) {
-            h += `<div class="av-xcl-az"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes">`;
-            for (let n = 0; n < 3; n++) h += `<div class="av-xcl-node">Node<br>${az*3+n+1}</div>`;
+            h += `<div class="av-xcl-az" style="display:flex;flex-direction:column">`;
+            h += `<div class="av-xcl-az-lbl">AZ-${az+1}</div>`;
+            h += `<div class="av-xcl-nodes" style="flex:1;flex-wrap:wrap;justify-content:center;align-content:center">`;
+            for (let n = 0; n < 3; n++) h += `<div class="av-xcl-node" style="${nodeStyle}">Node<br>${az*3+n+1}</div>`;
             h += `</div></div>`;
           }
-          h += `</div><div class="av-xcl-rpo">${cls.includes('primary') ? '⬡ Sync Raft within cluster · 0 data loss' : '⏱ Async CDC · RPO ≈ seconds'}</div></div>`;
+          h += `</div>`;
+          h += `<div class="av-xcl-rpo">${cls.includes('primary') ? '⬡ Sync Raft within cluster · 0 data loss' : '⏱ Async CDC · RPO ≈ seconds'}</div>`;
+          h += `</div>`;
           return h;
         }
         function midSection(label, pollerList, note, bidir) {
@@ -1780,33 +1802,167 @@
           h += `<div class="av-xcl-rpo-badge">${note}</div></div>`;
           return h;
         }
+        function capsSection(id, pros, cons) {
+          let h = `<div class="av-collapse-hdr" onclick="archToggle('${id}')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="${id}">▶</button></div>`;
+          h += `<div id="${id}" class="av-xcl-caps" style="display:none">`;
+          h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
+          pros.forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+          h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
+          cons.forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+          h += `</div></div>`;
+          return h;
+        }
+
         let h = `<div class="av-xcl-title">xCluster Replication Architecture</div>`;
         h += `<div class="av-xcl-sub">Each cluster is a fully independent YugabyteDB universe with its own RF=3 Raft groups. xCluster replicates via <strong>parallel CDC WAL streams</strong> — one independent poller per tablet, running concurrently across all tablet groups.</div>`;
         h += `<div class="av-xcl-modes">`;
+
         // DR
-        h += `<div class="av-xcl-block av-xcl-block-dr"><div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">DR — Unidirectional</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ Global Ordering</span><span class="av-order-badge av-ob-ok">✓ Transactional Consistency</span><span class="av-order-badge av-ob-ok">✓ No Partial-TX Visibility</span><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span></div></div><div class="av-xcl-row">`;
+        h += `<div class="av-xcl-block av-xcl-block-dr">`;
+        h += `<div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">DR — Unidirectional</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ Global Ordering</span><span class="av-order-badge av-ob-ok">✓ Transactional Consistency</span><span class="av-order-badge av-ob-ok">✓ No Partial-TX Visibility</span><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span></div></div>`;
+        h += xclStatBar([
+          { val: 'RF=3', lbl: 'Replication' },
+          { val: '3',    lbl: 'Fault Domains' },
+          { val: '9',    lbl: 'Nodes/Cluster' },
+          { val: '2',    lbl: 'Clusters' },
+          { val: 'Async', lbl: 'CDC Mode' },
+        ]);
+        h += `<div class="av-xcl-row" style="min-height:280px">`;
         h += miniCluster('PRIMARY', 'ap-south-1', 'av-xcl-primary');
         h += midSection('CDC Pollers', pollers, 'RPO ≈ seconds · async WAL · ordered delivery', false);
         h += miniCluster('SECONDARY', 'us-east-1', 'av-xcl-secondary');
         h += `</div>`;
-        h += `<div class="av-xcl-caps">`;
-        h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
-        ['Full transactional consistency — no partial-TX windows at secondary','Global write ordering preserved across all tablets','n:m parallel CDC streams — one independent WAL poller per tablet, all running concurrently','Per-tablet ordered delivery — each stream maintains commit order end-to-end','Failover &amp; Switchover — promote on unplanned failure or planned switchover with zero data loss','Secondary serves local reads — reduces latency for read-heavy workloads'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
-        h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
-        ['Secondary is a read-only standby — no writes during normal operation','RPO ≈ seconds–minutes depending on replication lag at time of failure','Controlled promotion required — failover or switchover must be explicitly triggered','Replication lag grows under high primary write load or network disruption','Large catch-up backlogs after extended network partitions','No automatic re-direction of application writes after promotion'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
-        h += `</div></div></div>`;
+        h += capsSection('xcl-dr-caps',
+          ['Full transactional consistency — no partial-TX windows at secondary','Global write ordering preserved across all tablets','n:m parallel CDC streams — one independent WAL poller per tablet, all running concurrently','Per-tablet ordered delivery — each stream maintains commit order end-to-end','Failover &amp; Switchover — promote on unplanned failure or planned switchover with zero data loss','Secondary serves local reads — reduces latency for read-heavy workloads'],
+          ['Secondary is a read-only standby — no writes during normal operation','RPO ≈ seconds–minutes depending on replication lag at time of failure','Controlled promotion required — failover or switchover must be explicitly triggered','Replication lag grows under high primary write load or network disruption','Large catch-up backlogs after extended network partitions','No automatic re-direction of application writes after promotion']);
+        h += `</div>`;
+
         // Active-Active
-        h += `<div class="av-xcl-block"><div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">Active-Active — Bidirectional (BDR)</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span><span class="av-order-badge av-ob-warn">⚡ LWW Conflict Resolution</span><span class="av-order-badge av-ob-warn">⚠ No Global Ordering</span></div></div><div class="av-xcl-row">`;
+        h += `<div class="av-xcl-block">`;
+        h += `<div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">Active-Active — Bidirectional (BDR)</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ n:m Parallel Streams</span><span class="av-order-badge av-ob-warn">⚡ LWW Conflict Resolution</span><span class="av-order-badge av-ob-warn">⚠ No Global Ordering</span></div></div>`;
+        h += xclStatBar([
+          { val: 'RF=3',  lbl: 'Replication' },
+          { val: '3',     lbl: 'Fault Domains' },
+          { val: '9',     lbl: 'Nodes/Cluster' },
+          { val: '2',     lbl: 'Clusters' },
+          { val: 'Async', lbl: 'CDC Mode' },
+        ]);
+        h += `<div class="av-xcl-row" style="min-height:280px">`;
         h += miniCluster('CLUSTER S1', 'ap-south-1', 'av-xcl-primary');
         h += midSection('Bidirectional Pollers', pollers, 'LWW by HLC · no cross-tablet ordering', true);
         h += miniCluster('CLUSTER S2', 'eu-central-1', 'av-xcl-primary');
         h += `</div>`;
-        h += `<div class="av-xcl-caps">`;
+        h += capsSection('xcl-aa-caps',
+          ['Both clusters accept writes simultaneously — write-anywhere for all regions','Local low-latency writes for users in each geographic region','n:m parallel bidirectional CDC streams — one WAL poller per tablet in each direction','Replication throughput scales with tablet count — more tablets, more parallelism','Either cluster survives full failure; peer continues independently','No single point of write bottleneck across regions'],
+          ['No guaranteed global ordering across tablets — each stream is independent','Conflicting concurrent writes resolved by LWW — last-write-wins via HLC timestamp','Cross-tablet transactions may arrive at peer with visibility gaps','Additive operations (counters, inventory) risk lost updates under conflicts','Application must tolerate eventual consistency for conflicting writes','Schema changes must be coordinated across both clusters manually']);
+        h += `</div>`;
+
+        h += `</div>`;
+        container.innerHTML = h;
+      }
+
+      function _renderArchReadReplica(container) {
+        // RF=3 replica: 3 AZs × 1 observer each (spread across AZs)
+        // RF=1 replica: 1 AZ × 3 observers (all in single AZ)
+        const RR_REGIONS = [
+          { code: 'us-east-1',    name: 'Virginia',  rf: 3, numAzs: 3, nodesPerAz: 1, nw: '64px', nh: '110px', nfs: '9.5px', color: '#a78bfa', alpha: '.5'  },
+          { code: 'eu-central-1', name: 'Frankfurt', rf: 1, numAzs: 1, nodesPerAz: 3, nw: '64px', nh: '110px', nfs: '9.5px', color: '#818cf8', alpha: '.35' },
+        ];
+        const ndsS = 'justify-content:center;flex-wrap:wrap';
+
+        function primaryCluster() {
+          let azs = '';
+          for (let az = 0; az < 3; az++) {
+            let nodes = '';
+            for (let n = 0; n < 3; n++)
+              nodes += `<div class="av-xcl-node" style="width:62px;height:auto;font-size:10px">Node<br>${az*3+n+1}</div>`;
+            azs += `<div class="av-xcl-az" style="display:flex;flex-direction:column"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="flex:1;justify-content:center;align-items:stretch;flex-wrap:nowrap">${nodes}</div></div>`;
+          }
+          return `<div class="av-xcl-cluster" style="display:flex;flex-direction:column;flex:1.8"><div class="av-xcl-hdr av-xcl-primary">PRIMARY · RF=3<span class="av-xcl-region">ap-south-1 · Mumbai</span></div><div class="av-xcl-az-row" style="flex:1;align-items:stretch">${azs}</div><div class="av-xcl-rpo">⬡ Sync Raft · RF=3 · full read+write</div></div>`;
+        }
+
+        function replicaCluster(cfg) {
+          const { code, name, rf, numAzs, nodesPerAz, nw, nh, nfs, color, alpha } = cfg;
+          let azs = '';
+          for (let az = 0; az < numAzs; az++) {
+            let nodes = '';
+            for (let n = 0; n < nodesPerAz; n++)
+              nodes += `<div class="av-xcl-node" style="width:${nw};height:${nh};font-size:${nfs};border-color:${color};color:${color}">👁<br>Obs<br>${az+1}${nodesPerAz > 1 ? '.' + (n+1) : ''}</div>`;
+            azs += `<div class="av-xcl-az"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="${ndsS}">${nodes}</div></div>`;
+          }
+          const rpoNote = numAzs > 1
+            ? `RF=${rf} · ${numAzs} AZs · 1 observer/AZ · async ≈ ms–s`
+            : `RF=${rf} · 1 AZ · ${nodesPerAz} observers · async ≈ ms–s`;
+          return `<div class="av-xcl-cluster" style="display:flex;flex-direction:column;justify-content:space-between;flex:1;border-color:rgba(167,139,250,${alpha})"><div class="av-xcl-hdr" style="background:rgba(167,139,250,.1);color:${color};">READ REPLICA · RF=${rf}<span class="av-xcl-region">${code} · ${name}</span></div><div class="av-xcl-az-row">${azs}</div><div class="av-xcl-rpo" style="color:${color}">${rpoNote}</div></div>`;
+        }
+
+        function midSection() {
+          let h = `<div class="av-xcl-mid" style="width:120px">`;
+          h += `<div class="av-xcl-mode-lbl">Async WAL</div>`;
+          RR_REGIONS.forEach(r => {
+            h += `<div class="av-xcl-poller" style="border-color:${r.color}"><span style="color:${r.color};font-size:8.5px">${r.code}</span><span class="av-xcl-a-fwd" style="color:${r.color}">→</span></div>`;
+          });
+          h += `<div class="av-xcl-rpo-badge">RPO ≈ ms–s<br>read-only</div>`;
+          h += `</div>`;
+          return h;
+        }
+
+        let h = `<div class="av-xcl-title">Read Replica Architecture</div>`;
+        h += `<div class="av-xcl-sub">Observer nodes receive an async WAL stream from the primary tablet leaders. They serve <strong>low-latency local reads</strong> for remote users without joining Raft consensus — no vote, no write path, no added write latency. Each region can be configured with a different RF and node configuration.</div>`;
+        h += `<div class="av-xcl-modes">`;
+
+        function rrStatBar() {
+          const stats = [
+            { val: 'RF=3', lbl: 'Primary RF' },
+            { val: '9',    lbl: 'Primary Nodes' },
+            { val: '3',    lbl: 'Fault Domains' },
+            { val: 'RF=3', lbl: 'us-east-1' },
+            { val: 'RF=1', lbl: 'eu-central-1' },
+          ];
+          return `<div class="av-xcl-statsbar">${stats.map(s => `<div class="av-xcl-stat"><span class="av-xcl-stat-v">${s.val}</span><span class="av-xcl-stat-l">${s.lbl}</span></div>`).join('')}</div>`;
+        }
+
+        h += `<div class="av-xcl-block" style="border-color:rgba(167,139,250,.25);background:rgba(167,139,250,.02)">`;
+        h += `<div class="av-xcl-block-hdr"><div class="av-xcl-block-lbl">Topology</div><div class="av-xcl-order-badges"><span class="av-order-badge av-ob-ok">✓ Non-voting Observer</span><span class="av-order-badge av-ob-ok">✓ Per-region RF</span><span class="av-order-badge av-ob-warn">⚠ Eventual Consistency</span><span class="av-order-badge av-ob-warn">⚠ Read-Only at Replica</span></div></div>`;
+        h += rrStatBar();
+        h += `<div class="av-xcl-row">`;
+        h += primaryCluster();
+        h += midSection();
+        h += `<div style="display:flex;flex-direction:column;gap:10px;flex:1">`;
+        RR_REGIONS.forEach(r => h += replicaCluster(r));
+        h += `</div>`;
+        h += `</div></div>`;
+
+        h += `<div class="av-xcl-block">`;
+        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-caps')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="rr-caps">▶</button></div>`;
+        h += `<div id="rr-caps" class="av-xcl-caps" style="display:none">`;
         h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
-        ['Both clusters accept writes simultaneously — write-anywhere for all regions','Local low-latency writes for users in each geographic region','n:m parallel bidirectional CDC streams — one WAL poller per tablet in each direction','Replication throughput scales with tablet count — more tablets, more parallelism','Either cluster survives full failure; peer continues independently','No single point of write bottleneck across regions'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        ['Low-latency local reads for users in remote regions — read from nearby observer node','Non-voting observer — zero impact on primary write latency or Raft quorum','Async WAL streaming — continuously replicated from primary tablet leaders','Each region can use a different RF — high-traffic regions get RF=3, others RF=1','Primary retains full RF=3 Raft protection — read replicas add no quorum complexity','Lag is typically milliseconds under normal network conditions'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
         h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
-        ['No guaranteed global ordering across tablets — each stream is independent','Conflicting concurrent writes resolved by LWW — last-write-wins via HLC timestamp','Cross-tablet transactions may arrive at peer with visibility gaps','Additive operations (counters, inventory) risk lost updates under conflicts','Application must tolerate eventual consistency for conflicting writes','Schema changes must be coordinated across both clusters manually'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+        ['Read replicas are strictly read-only — application writes must go to the primary','Reads may return slightly stale data — async lag means eventual consistency only','Observer nodes do not form a standalone cluster — not a substitute for xCluster DR','Replica lag grows under high primary write throughput or network disruption','No switchover or standalone promotion path from read replica','Schema changes must be applied to the primary first and propagate via WAL'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
         h += `</div></div></div>`;
+
+        h += `<div class="av-xcl-block">`;
+        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-cmp')"><span class="av-collapse-sub-lbl">Read Replica vs xCluster DR</span><button class="av-collapse-btn" data-arch-toggle="rr-cmp">▶</button></div>`;
+        h += `<div id="rr-cmp" style="display:none;overflow-x:auto">`;
+        const rows = [
+          ['Feature',            'Read Replica',               'xCluster DR'],
+          ['Raft participation', 'Non-voting observer',         'Full RF=3 cluster'],
+          ['RF per region',      'Configurable (1, 3, …)',      'Full RF=3 always'],
+          ['Write path',         'Read-only',                   'Read-only (secondary)'],
+          ['Replication',        'Async WAL',                   'Async CDC WAL'],
+          ['Typical lag',        'ms–seconds',                  'ms–seconds'],
+          ['Use case',           'Low-latency remote reads',    'Disaster recovery'],
+        ];
+        h += `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">`;
+        rows.forEach((r, i) => {
+          const bg = i === 0 ? 'var(--s3)' : (i % 2 === 0 ? 'var(--s2)' : 'transparent');
+          h += `<tr style="background:${bg}">`;
+          r.forEach((c, j) => h += `<td style="padding:7px 10px;border-bottom:1px solid var(--border);font-weight:${i===0?'700':j===0?'600':'400'};color:${i===0?'var(--txt2)':j===1?'#a78bfa':j===2?'var(--info)':'var(--txt)'}">${c}</td>`);
+          h += `</tr>`;
+        });
+        h += `</table></div></div>`;
+
         h += `</div>`;
         container.innerHTML = h;
       }
@@ -1855,6 +2011,12 @@
           
           if (e.key.toLowerCase() === 'f') {
             toggleFocusMode();
+          }
+          if (e.key.toLowerCase() === '[') {
+            toggleSidebar();
+          }
+          if (e.key.toLowerCase() === ']') {
+            toggleInfoPanel();
           }
         });
       });
