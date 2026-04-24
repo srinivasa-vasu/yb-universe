@@ -205,8 +205,8 @@
             }
           },
           { label: 'Commit & ACK Client', desc: 'Majority ACK received — provisional row is committed to MemTable on all replicas. ACK returned to client.', action: async (ctx) => {
-            if (S.nodes[1].alive) { ctx.hlLatRow(0); ctx.hlLatRow(1); ctx.hlLatRow(3); ctx.hlLatRow(4); }
-            else { ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3); ctx.hlLatRow(4); }
+            if (S.nodes[1].alive) { ctx.hlLatRow([0, 1, 3, 4]); }
+            else { ctx.hlLatRow([0, 2, 3, 4]); }
             const g = S.groups.find(x => x.id === 'tg1');
             const rs1 = S.replicaState['tg1']?.[1];
             const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now()/1000];
@@ -225,7 +225,7 @@
       {
         name: 'Distributed Transactions', filterTable: ['users', 'transactions'],
         desc: 'Transactions spanning multiple tablets (e.g. updating users in different shards) use a high-performance 2-Phase Commit protocol (2PC). Visibility is atomic across all shards.',
-        latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Commit Latency', cls: 'lm', max: 80 }, { lbl: 'Visible to All', cls: 'li', max: 5 }],
+        latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
           {
             label: '1. Initialize Transaction',
@@ -240,6 +240,7 @@
               await Promise.all([p1, p2]);
               ctx.setLat(0, 3.2);
               S.lastTxInit5 = 3.2;
+              ctx.hlLatRow(0);
               ctx.hlTablet('ts1', 3, 't-hl');
               addLog('TX status replicated to system peers ✓', 'ls');
             }
@@ -258,6 +259,7 @@
               const provLat = parseFloat((3 + Math.random() * 7).toFixed(1));
               ctx.setLat(1, provLat);
               S.lastProvWrite5 = provLat;
+              ctx.hlLatRow([0, 1]);
               renderAllTablets();
               addLog('Provisional writes accepted by leaders.', 'li');
             }
@@ -290,8 +292,8 @@
               const commitLat = 4.1;
               ctx.setLat(2, commitLat);
               const total = parseFloat((S.lastTxInit5 + S.lastProvWrite5 + commitLat).toFixed(1));
-              ctx.setLat(3, total);
-              
+              ctx.setLat(4, total);
+              ctx.hlLatRow([0, 1, 2, 4]);
               ctx.hlTablet('ts1', 3, 't-hl');
               addLog('Transaction COMMITTED. Data is now logically visible.', 'ls');
             }
@@ -311,7 +313,8 @@
               await Promise.all([r1, r2]);
               
               renderAllTablets();
-              ctx.setLat(4, 1.2);
+              ctx.setLat(3, 1.2);
+              ctx.hlLatRow([0, 1, 2, 4]);
               await ctx.delay(800);
               S.transactions = []; renderTxPanel();
               addLog('Cleanup complete. Status record will be purged.', 'ls');
@@ -324,7 +327,7 @@
       {
         name: 'Index Data Write', filterTable: ['users', 'users_email_idx', 'transactions'],
         desc: 'Secondary indexes are stored in separate tablets. Updating a row with an index requires a distributed transaction to ensure both are updated atomically.',
-        latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Commit Latency', cls: 'lm', max: 80 }, { lbl: 'Visible to All', cls: 'li', max: 5 }],
+        latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
           {
             label: '1. TX Status Init',
@@ -340,6 +343,7 @@
               ctx.hlTablet('ts1', 3, 't-hl');
               ctx.setLat(0, 2.8);
               S.lastTxInit = 2.8;
+              ctx.hlLatRow(0);
             }
           },
           {
@@ -357,6 +361,7 @@
               const provLat = parseFloat((3 + Math.random() * 7).toFixed(1));
               ctx.setLat(1, provLat);
               S.lastProvWrite = provLat;
+              ctx.hlLatRow([0, 1]);
               renderAllTablets();
               addLog('Provisional records accepted by leaders.', 'li');
             }
@@ -390,7 +395,8 @@
               const commitLat = 3.9;
               ctx.setLat(2, commitLat);
               const total = parseFloat((S.lastTxInit + S.lastProvWrite + commitLat).toFixed(1));
-              ctx.setLat(3, total); 
+              ctx.setLat(4, total);
+              ctx.hlLatRow([0, 1, 2, 4]);
               addLog('Atomic commit: Index and Primary data logically synchronized.', 'ls');
             }
           },
@@ -409,7 +415,8 @@
               await Promise.all([r1, r2]);
               
               renderAllTablets();
-              ctx.setLat(4, 1.5);
+              ctx.setLat(3, 1.5);
+              ctx.hlLatRow([0, 1, 2, 4]);
               await ctx.delay(600);
               S.transactions = []; renderTxPanel();
               addLog('Transaction finalized and cleaned up ✓', 'ls');
@@ -424,7 +431,7 @@
         desc: 'Strong-consistency reads always go to the Raft LEADER. If request lands on a follower, it transparently redirects to the leader.',
         latencies: [{ lbl: 'Gateway Hop', cls: 'll', max: 2 }, { lbl: 'Remote Redir', cls: 'll', max: 2 }, { lbl: 'Leader Read', cls: 'll', max: 2 }, { lbl: 'Total', cls: 'll', max: 6 }],
         steps: [
-          { label: 'Local Read (Fast)', desc: 'Request lands directly on the leader (TServer-1) — no redirect needed.', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 1, 'pk-read', 400); ctx.setLat(0, 0.5); ctx.setLat(2, 0.8); ctx.setLat(3, 1.3); ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3); await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); ctx.activateClient(false); } },
+          { label: 'Local Read (Fast)', desc: 'Request lands directly on the leader (TServer-1) — no redirect needed.', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 1, 'pk-read', 400); ctx.setLat(0, 0.5); ctx.setLat(2, 0.8); ctx.setLat(3, 1.3); ctx.hlLatRow([0, 2, 3]); await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); ctx.activateClient(false); } },
           { label: 'Remote Read (Request)', desc: 'Request lands on TServer-3 (follower). It detects this is not the leader.', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 3, 'pk-read', 400); ctx.hlTablet('tg1', 3, 't-hl2'); addLog('TS-3: Received request — redirecting to leader', 'lw'); } },
           { label: 'Remote Read (Redirect)', desc: 'TServer-3 redirects the client to TServer-1 (leader). TServer-1 processes the read request.', action: async (ctx) => { ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-read', 500); await ctx.delay(600); ctx.setLat(3, 3.4); ctx.hlLatRow(3); await ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-ack', 400); await ctx.pktTabletToClient('tg1', 3, 'pk-ack', 400); ctx.activateClient(false); } }
         ]
@@ -437,7 +444,7 @@
         latencies: [{ lbl: 'Route to Follower', cls: 'll', max: 1 }, { lbl: 'Staleness Check', cls: 'll', max: 1 }, { lbl: 'Local Read', cls: 'll', max: 1 }, { lbl: 'Total', cls: 'll', max: 3 }],
         steps: [
           { label: 'Read from Nearest', desc: 'Routes to TServer-3 (follower, nearest to client), bypassing TServer-1 (leader, far).', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 3, 'pk-read', 400); ctx.setLat(0, 0.6); ctx.hlLatRow(0); } },
-          { label: 'Check & Serve', desc: 'Follower confirms HybridTime within staleness window, serves locally.', action: async (ctx) => { ctx.setLat(1, 0.5); ctx.hlRow('tg1', 3, 0); await ctx.delay(400); ctx.setLat(3, 1.8); ctx.hlLatRow(1); ctx.hlLatRow(2); ctx.hlLatRow(3); await ctx.pktTabletToClient('tg1', 3, 'pk-read', 400); ctx.activateClient(false); } }
+          { label: 'Check & Serve', desc: 'Follower confirms HybridTime within staleness window, serves locally.', action: async (ctx) => { ctx.setLat(1, 0.5); ctx.hlRow('tg1', 3, 0); await ctx.delay(400); ctx.setLat(3, 1.8); ctx.hlLatRow([1, 2, 3]); await ctx.pktTabletToClient('tg1', 3, 'pk-read', 400); ctx.activateClient(false); } }
         ]
       },
 

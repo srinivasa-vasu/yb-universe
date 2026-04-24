@@ -866,9 +866,8 @@
         },
         hlLatRow: (idx) => {
           document.querySelectorAll('#lat-rows .lat-row').forEach(el => el.classList.remove('hl-lat'));
-          if (idx !== null && idx !== undefined) {
-            const el = document.getElementById(`lat-${idx}`); if (el) el.classList.add('hl-lat');
-          }
+          const indices = Array.isArray(idx) ? idx : (idx !== null && idx !== undefined ? [idx] : []);
+          indices.forEach(i => { const el = document.getElementById(`lat-${i}`); if (el) el.classList.add('hl-lat'); });
         },
         setLag: (val) => {
           const el = document.getElementById('xc-lag'); if (el) el.textContent = val;
