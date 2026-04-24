@@ -1046,6 +1046,7 @@
       document.getElementById('btn-step').disabled = !has;
       document.getElementById('btn-play').disabled = !has;
 
+      hideHashRouting();
       if (sc.init) {
         try { sc.init(ctx); } catch (e) { console.error("Init failed", e); }
       }
@@ -1322,6 +1323,74 @@
       // ════════════════════════════════════════════
       //  SHARDING HELPERS
       // ════════════════════════════════════════════
+      let _hashHistory = [];
+
+      function initHashRouting() {
+        _hashHistory = [];
+        const sec = document.getElementById('hash-routing-sec');
+        if (sec) sec.style.display = '';
+        document.getElementById('hash-cur').style.display = 'none';
+        document.getElementById('hash-history-sec').style.display = 'none';
+        _renderHashRangeMap(null);
+      }
+
+      function hideHashRouting() {
+        const sec = document.getElementById('hash-routing-sec');
+        if (sec) sec.style.display = 'none';
+      }
+
+      function _renderHashRangeMap(targetTg) {
+        const el = document.getElementById('hash-range-map');
+        if (!el) return;
+        const groups = S.groups.filter(g => g.table === 'users');
+        el.innerHTML = `
+          <div class="hrm-hdr">
+            <span>Tablet</span><span>Hash Range</span><span>Leader</span>
+          </div>
+          ${groups.map(g => {
+            const hit = targetTg && g.id === targetTg.id;
+            return `<div class="hrm-row${hit ? ' hrm-hit' : ''}">
+              <span class="hrm-name">t${g.tnum}</span>
+              <span class="hrm-range">${g.range}</span>
+              <span class="hrm-leader">N${g.leaderNode}</span>
+              ${hit ? '<span class="hrm-ptr">◄</span>' : '<span></span>'}
+            </div>`;
+          }).join('')}`;
+      }
+
+      function renderHashRouting(id, hashHex, tg) {
+        _renderHashRangeMap(tg);
+        const cur = document.getElementById('hash-cur');
+        const flow = document.getElementById('hash-cur-flow');
+        if (cur && flow) {
+          cur.style.display = '';
+          flow.innerHTML = `
+            <div class="hcf-steps">
+              <span class="hcf-key">id = ${id}</span>
+              <span class="hcf-arr">→</span>
+              <span class="hcf-fn">HASH()</span>
+              <span class="hcf-arr">→</span>
+              <span class="hcf-res">${hashHex}</span>
+            </div>
+            <div class="hcf-dest">→ <strong>users.t${tg.tnum}</strong> &nbsp;·&nbsp; Leader N${tg.leaderNode}</div>`;
+        }
+        _hashHistory.unshift({ id, hashHex, tnum: tg.tnum });
+        if (_hashHistory.length > 8) _hashHistory.pop();
+        const histSec = document.getElementById('hash-history-sec');
+        const histList = document.getElementById('hash-history-list');
+        if (histSec && histList) {
+          histSec.style.display = '';
+          histList.innerHTML = _hashHistory.map((h, i) =>
+            `<div class="hh-row${i === 0 ? ' hh-new' : ''}">
+              <span class="hh-id">id=${h.id}</span>
+              <span class="hh-hex">${h.hashHex}</span>
+              <span class="hh-arr">→</span>
+              <span class="hh-tg">t${h.tnum}</span>
+            </div>`
+          ).join('');
+        }
+      }
+
       function hashKey(id) { return (id * 2654435761) & 0xFFFF; }
       function hashInRange(hash, range) {
         const p = range.match(/0x([0-9A-Fa-f]+)[–-]0x([0-9A-Fa-f]+)/);
@@ -1364,7 +1433,7 @@
 
         if (tg) {
           const ctx = makeCtx();
-          if (isHash) await ctx.renderHashCompute(id, hashHex, `${tg.table}.t${tg.tnum}`, tg.range);
+          if (isHash) renderHashRouting(id, hashHex, tg);
           tg.data.push(row);
           ctx.pktClientToTablet(tg.id, tg.leaderNode, 'pk-write', 500).then(() => {
             const follows = tg.replicas.filter(n => n !== tg.leaderNode);
@@ -1743,8 +1812,41 @@
         container.innerHTML = h;
       }
 
+      function initInfoPanelResize() {
+        const handle = document.getElementById('info-resize-handle');
+        const panel  = document.querySelector('.info-panel');
+        if (!handle || !panel) return;
+        let startX, startW;
+        handle.addEventListener('mousedown', e => {
+          if (panel.classList.contains('collapsed')) return;
+          startX = e.clientX;
+          startW = panel.offsetWidth;
+          handle.classList.add('dragging');
+          panel.style.transition = 'none';
+          document.body.style.cursor = 'col-resize';
+          document.body.style.userSelect = 'none';
+          function onMove(e) {
+            const w = Math.max(240, Math.min(680, startW + (startX - e.clientX)));
+            panel.style.width = w + 'px';
+          }
+          function onUp() {
+            handle.classList.remove('dragging');
+            panel.style.transition = '';
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            setTimeout(renderConnections, 50);
+          }
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+          e.preventDefault();
+        });
+      }
+
       window.addEventListener('load', () => {
         selectScenario(0);
+        initInfoPanelResize();
         window.addEventListener('resize', () => setTimeout(renderConnections, 100));
         
         // Keyboard shortcuts

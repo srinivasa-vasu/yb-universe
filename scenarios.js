@@ -15,6 +15,7 @@
           showDataPanel(true);
           renderDataTable('users');
           ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY HASH,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+          initHashRouting();
         },
         steps: [
           { label: 'Hash Mapping', desc: 'The primary key is hashed into a 0x0000–0xFFFF space. Each tablet owns a contiguous slice. YugabyteDB routes every write directly to the tablet whose range covers the hash — no scatter-gather needed.', action: async (ctx) => {

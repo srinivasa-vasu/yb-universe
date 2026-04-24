@@ -415,6 +415,7 @@
 
     <!-- INFO PANEL -->
     <aside class="info-panel">
+      <div class="info-resize-handle" id="info-resize-handle"></div>
       <div class="i-title" id="i-title">Cluster Overview</div>
       <div class="i-desc" id="i-desc">YugabyteDB distributes data across TServers using tablet-based sharding.</div>
       <div class="step-sec" id="step-sec"><span class="scount">—</span></div>
@@ -425,6 +426,18 @@
       <div class="ddl-sec" id="ddl-sec">
         <div class="lat-title">Table Schema</div>
         <div class="ddl-code" id="ddl-code"></div>
+      </div>
+      <div class="hash-routing-sec" id="hash-routing-sec" style="display:none">
+        <div class="lat-title">Hash Routing</div>
+        <div class="hrm-table" id="hash-range-map"></div>
+        <div class="hash-cur" id="hash-cur" style="display:none">
+          <div class="hash-cur-lbl">Last Insert</div>
+          <div class="hash-cur-flow" id="hash-cur-flow"></div>
+        </div>
+        <div class="hash-history-sec" id="hash-history-sec" style="display:none">
+          <div class="hash-cur-lbl">Recent Inserts</div>
+          <div id="hash-history-list"></div>
+        </div>
       </div>
       <div class="lat-sec">
         <div class="lat-title">Operation Latency</div>
