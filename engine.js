@@ -1621,14 +1621,14 @@
 
       const ARCH_TABLETS = [
         { color: '#f59e0b', name: 'users.tg1',    leader: 1, replicas: [1,4,7] },
-        { color: '#f59e0b', name: 'users.tg2',    leader: 2, replicas: [2,5,8] },
-        { color: '#f59e0b', name: 'users.tg3',    leader: 3, replicas: [3,6,9] },
+        { color: '#f59e0b', name: 'users.tg2',    leader: 5, replicas: [2,5,8] },
+        { color: '#f59e0b', name: 'users.tg3',    leader: 9, replicas: [3,6,9] },
         { color: '#60a5fa', name: 'products.tg1', leader: 4, replicas: [1,4,7] },
-        { color: '#60a5fa', name: 'products.tg2', leader: 5, replicas: [2,5,8] },
-        { color: '#34d399', name: 'orders.tg1',   leader: 6, replicas: [3,6,9] },
+        { color: '#60a5fa', name: 'products.tg2', leader: 8, replicas: [2,5,8] },
+        { color: '#34d399', name: 'orders.tg1',   leader: 3, replicas: [3,6,9] },
         { color: '#a78bfa', name: 'orders.tg2',   leader: 7, replicas: [1,4,7] },
-        { color: '#fb7185', name: 'idx.tg1',      leader: 8, replicas: [2,5,8] },
-        { color: '#6366f1', name: 'txns.tg1',     leader: 9, replicas: [3,6,9] },
+        { color: '#fb7185', name: 'idx.tg1',      leader: 2, replicas: [2,5,8] },
+        { color: '#6366f1', name: 'txns.tg1',     leader: 6, replicas: [3,6,9] },
       ];
 
       let _archFailedFD = -1;
@@ -1684,10 +1684,12 @@
 
         h += `<div class="av-section-title">Cluster Layout — Nodes &amp; Tablet Distribution</div>`;
         h += `<div class="av-fd-row" id="av-fd-row">`;
+        const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
         for (let fi = 0; fi < 3; fi++) {
           const fd = ARCH_FDS[fi];
-          h += `<div class="av-fd" id="av-fd-${fi}">`;
-          h += `<div class="av-fd-hdr"><div class="av-fd-name">${fd.name}</div><div class="av-fd-az">${fd.az}</div></div>`;
+          const fc = fdColors[fi];
+          h += `<div class="av-fd" id="av-fd-${fi}" style="border-top:3px solid ${fc}">`;
+          h += `<div class="av-fd-hdr"><div class="av-fd-name" style="color:${fc}">${fd.name}</div><div class="av-fd-az">${fd.az}</div></div>`;
           h += `<div class="av-fd-nodes">`;
           for (const nid of fd.nodes) {
             const myT = ARCH_TABLETS.filter(t => t.replicas.includes(nid));
@@ -1775,16 +1777,19 @@
         function xclStatBar(stats) {
           return `<div class="av-xcl-statsbar">${stats.map(s => `<div class="av-xcl-stat"><span class="av-xcl-stat-v">${s.val}</span><span class="av-xcl-stat-l">${s.lbl}</span></div>`).join('')}</div>`;
         }
+        const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
         function miniCluster(label, region, cls) {
           let h = `<div class="av-xcl-cluster" style="display:flex;flex-direction:column">`;
           h += `<div class="av-xcl-hdr ${cls}">${label}<span class="av-xcl-region">${region}</span></div>`;
           h += `<div class="av-xcl-az-row" style="flex:1;align-items:stretch">`;
           for (let az = 0; az < 3; az++) {
-            h += `<div class="av-xcl-az" style="display:flex;flex-direction:column">`;
+            const fc = fdColors[az];
+            h += `<div class="av-xcl-az" style="display:flex;flex-direction:column;border-left:3px solid ${fc}">`;
             h += `<div class="av-xcl-az-lbl">AZ-${az+1}</div>`;
             h += `<div class="av-xcl-nodes" style="flex:1;flex-wrap:wrap;justify-content:center;align-content:center">`;
             for (let n = 0; n < 3; n++) h += `<div class="av-xcl-node" style="${nodeStyle}">Node<br>${az*3+n+1}</div>`;
-            h += `</div></div>`;
+            h += `</div><div style="font-size:11px;font-weight:600;color:${fc};text-align:center;padding:5px 0 2px;letter-spacing:.3px">Fault Domain ${az+1}</div>`;
+            h += `</div>`;
           }
           h += `</div>`;
           h += `<div class="av-xcl-rpo">${cls.includes('primary') ? '⬡ Sync Raft within cluster · 0 data loss' : '⏱ Async CDC · RPO ≈ seconds'}</div>`;
@@ -1803,8 +1808,8 @@
           return h;
         }
         function capsSection(id, pros, cons) {
-          let h = `<div class="av-collapse-hdr" onclick="archToggle('${id}')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="${id}">▶</button></div>`;
-          h += `<div id="${id}" class="av-xcl-caps" style="display:none">`;
+          let h = `<div class="av-collapse-hdr" onclick="archToggle('${id}')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="${id}">▼</button></div>`;
+          h += `<div id="${id}" class="av-xcl-caps">`;
           h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
           pros.forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
           h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
@@ -1869,14 +1874,16 @@
           { code: 'eu-central-1', name: 'Frankfurt', rf: 1, numAzs: 1, nodesPerAz: 3, nw: '64px', nh: '110px', nfs: '9.5px', color: '#818cf8', alpha: '.35' },
         ];
         const ndsS = 'justify-content:center;flex-wrap:wrap';
+        const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
 
         function primaryCluster() {
           let azs = '';
           for (let az = 0; az < 3; az++) {
+            const fc = fdColors[az];
             let nodes = '';
             for (let n = 0; n < 3; n++)
-              nodes += `<div class="av-xcl-node" style="width:62px;height:auto;font-size:10px">Node<br>${az*3+n+1}</div>`;
-            azs += `<div class="av-xcl-az" style="display:flex;flex-direction:column"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="flex:1;justify-content:center;align-items:stretch;flex-wrap:nowrap">${nodes}</div></div>`;
+              nodes += `<div class="av-xcl-node" style="width:82px;height:auto;font-size:10px">Node<br>${az*3+n+1}</div>`;
+            azs += `<div class="av-xcl-az" style="display:flex;flex-direction:column;border-left:3px solid ${fc}"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="flex:1;justify-content:center;align-items:stretch;flex-wrap:nowrap">${nodes}</div><div style="font-size:11px;font-weight:600;color:${fc};text-align:center;padding:5px 0 2px;letter-spacing:.3px">Fault Domain ${az+1}</div></div>`;
           }
           return `<div class="av-xcl-cluster" style="display:flex;flex-direction:column;flex:1.8"><div class="av-xcl-hdr av-xcl-primary">PRIMARY · RF=3<span class="av-xcl-region">ap-south-1 · Mumbai</span></div><div class="av-xcl-az-row" style="flex:1;align-items:stretch">${azs}</div><div class="av-xcl-rpo">⬡ Sync Raft · RF=3 · full read+write</div></div>`;
         }
@@ -1885,10 +1892,11 @@
           const { code, name, rf, numAzs, nodesPerAz, nw, nh, nfs, color, alpha } = cfg;
           let azs = '';
           for (let az = 0; az < numAzs; az++) {
+            const fc = fdColors[az];
             let nodes = '';
             for (let n = 0; n < nodesPerAz; n++)
               nodes += `<div class="av-xcl-node" style="width:${nw};height:${nh};font-size:${nfs};border-color:${color};color:${color}">👁<br>Obs<br>${az+1}${nodesPerAz > 1 ? '.' + (n+1) : ''}</div>`;
-            azs += `<div class="av-xcl-az"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="${ndsS}">${nodes}</div></div>`;
+            azs += `<div class="av-xcl-az" style="display:flex;flex-direction:column;border-left:3px solid ${fc}"><div class="av-xcl-az-lbl">AZ-${az+1}</div><div class="av-xcl-nodes" style="${ndsS}">${nodes}</div><div style="font-size:11px;font-weight:600;color:${fc};text-align:center;padding:5px 0 2px;letter-spacing:.3px">Fault Domain ${az+1}</div></div>`;
           }
           const rpoNote = numAzs > 1
             ? `RF=${rf} · ${numAzs} AZs · 1 observer/AZ · async ≈ ms–s`
@@ -1934,8 +1942,8 @@
         h += `</div></div>`;
 
         h += `<div class="av-xcl-block">`;
-        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-caps')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="rr-caps">▶</button></div>`;
-        h += `<div id="rr-caps" class="av-xcl-caps" style="display:none">`;
+        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-caps')"><span class="av-collapse-sub-lbl">Capabilities &amp; Trade-offs</span><button class="av-collapse-btn" data-arch-toggle="rr-caps">▼</button></div>`;
+        h += `<div id="rr-caps" class="av-xcl-caps">`;
         h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
         ['Low-latency local reads for users in remote regions — read from nearby observer node','Non-voting observer — zero impact on primary write latency or Raft quorum','Async WAL streaming — continuously replicated from primary tablet leaders','Each region can use a different RF — high-traffic regions get RF=3, others RF=1','Primary retains full RF=3 Raft protection — read replicas add no quorum complexity','Lag is typically milliseconds under normal network conditions'].forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
         h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
@@ -1943,12 +1951,12 @@
         h += `</div></div></div>`;
 
         h += `<div class="av-xcl-block">`;
-        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-cmp')"><span class="av-collapse-sub-lbl">Read Replica vs xCluster DR</span><button class="av-collapse-btn" data-arch-toggle="rr-cmp">▶</button></div>`;
-        h += `<div id="rr-cmp" style="display:none;overflow-x:auto">`;
+        h += `<div class="av-collapse-hdr" onclick="archToggle('rr-cmp')"><span class="av-collapse-sub-lbl">Read Replica vs xCluster DR</span><button class="av-collapse-btn" data-arch-toggle="rr-cmp">▼</button></div>`;
+        h += `<div id="rr-cmp" style="overflow-x:auto">`;
         const rows = [
           ['Feature',            'Read Replica',               'xCluster DR'],
-          ['Raft participation', 'Non-voting observer',         'Full RF=3 cluster'],
-          ['RF per region',      'Configurable (1, 3, …)',      'Full RF=3 always'],
+          ['Raft participation', 'Non-voting observer',         'Full RF=3|5|7 cluster'],
+          ['RF per region',      'Configurable (1, 3, …)',      'Full RF=3|5|7 always'],
           ['Write path',         'Read-only',                   'Read-only (secondary)'],
           ['Replication',        'Async WAL',                   'Async CDC WAL'],
           ['Typical lag',        'ms–seconds',                  'ms–seconds'],

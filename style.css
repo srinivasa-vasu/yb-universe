@@ -2796,9 +2796,9 @@
     .av-qcase-bad .av-qcase-verdict { color: var(--err); }
 
     .av-legend { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 9px 14px; background: var(--s1); border: 1px solid var(--border); border-radius: 7px; }
-    .av-leg-title { font-size: 12px; font-weight: 700; color: var(--txt2); text-transform: uppercase; letter-spacing: 1px; margin-right: 4px; }
+    .av-leg-title { font-size: 13px; font-weight: 700; color: var(--txt2); text-transform: uppercase; letter-spacing: 1px; margin-right: 4px; }
     .av-leg-sep { color: var(--border-hi); }
-    .av-leg-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--txt); }
+    .av-leg-item { display: flex; align-items: center; gap: 5px; font-size: 13px; color: var(--txt); }
     .av-leg-dot { width: 11px; height: 11px; border-radius: 50%; }
 
     /* xCluster arch */
