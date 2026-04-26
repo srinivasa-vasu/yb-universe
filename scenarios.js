@@ -2,33 +2,58 @@
       "home": {
         group: "Home", icon: "🏠", title: "Architecture Explorer", subtitle: "Interactive Distributed SQL Visualizer",
         description: "Dive deep into YugabyteDB's distributed architecture. Explore interactive modules for Sharding, Raft-based replication, High Availability, and Global Data Distribution through real-time visualizations.",
-        visual: { type: "home" }
+        visual: { type: "home" },
+        guidedTour: [
+          { text: "Welcome to the Architecture Explorer! Select a module from the sidebar to begin.", element: ".sidebar" },
+          { text: "Press <b>?</b> for keyboard shortcuts to quickly step through simulations.", element: ".help-trigger" },
+          { text: "Use <b>F</b> to enter Focus Mode for a clearer view of the animations.", element: ".canvas-wrap" }
+        ]
       },
       // 0: Overview
       "0": {
         group: "Architecture", icon: "🗺️",
         name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
         steps: [], latencies: [],
-        desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.'
+        desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.',
+        guidedTour: [
+          { text: "Explore the nodes in the cluster. Each box represents a <b>TServer</b>.", element: ".node-card" },
+          { text: "Look at the small circles inside. These are <b>Tablets</b> — the unit of sharding.", element: ".n-body" },
+          { text: "The filled circles (◉) are <b>Raft Leaders</b>; the empty ones (○) are followers.", element: ".toolbar" }
+        ]
       },
 
       "universe": {
         group: "Architecture", icon: "🌐",
         name: 'Global Universe', title: 'Global Universe Architecture', subtitle: 'Fault domains',
         isArch: true,
-        desc: 'A single logical database spanning multiple fault domains (zones or regions). Highly available with Zero RPO and Zero RTO, using synchronous replication.'
+        desc: 'A single logical database spanning multiple fault domains (zones or regions). Highly available with Zero RPO and Zero RTO, using synchronous replication.',
+        guidedTour: [
+          { text: "This view shows a <b>Global Universe</b> spanning 3 regions.", element: ".arch-view" },
+          { text: "Each region hosts a full copy of the data across 3 nodes.", element: ".av-stats-bar" },
+          { text: "Synchronous replication ensures <b>Zero RPO</b> — no data is lost during a region failure.", element: ".av-highlights" }
+        ]
       },
       "xcl": {
         group: "Architecture", icon: "🔗",
         name: 'xCluster', title: 'xCluster Topology', subtitle: 'Cross-cluster',
         isArch: true,
-        desc: 'Asynchronous replication between independent clusters. Used for disaster recovery (DR), low-latency local reads in multiple regions, and data migration.'
+        desc: 'Asynchronous replication between independent clusters. Used for disaster recovery (DR), low-latency local reads in multiple regions, and data migration.',
+        guidedTour: [
+          { text: "xCluster links <b>independent clusters</b> together via async replication.", element: ".arch-view" },
+          { text: "Writes happen locally in each cluster, then replicate across the link.", element: ".av-sv" },
+          { text: "Ideal for <b>Disaster Recovery</b> scenarios where clusters are thousands of miles apart.", element: ".av-highlights" }
+        ]
       },
       "read-replica": {
         group: "Architecture", icon: "📖",
         name: 'Read Replica', title: 'Read Replica Topology', subtitle: 'Low-latency reads',
         isArch: true,
-        desc: 'Read-only clones of a primary universe. They provide low-latency reads in remote regions without affecting the write performance of the primary cluster.'
+        desc: 'Read-only clones of a primary universe. They provide low-latency reads in remote regions without affecting the write performance of the primary cluster.',
+        guidedTour: [
+          { text: "Read Replicas are <b>read-only</b> copies of your data.", element: ".arch-view" },
+          { text: "They don't participate in Raft quorums, so they don't add write latency.", element: ".av-stats-bar" },
+          { text: "Use them to provide <b>local read latency</b> in regions far from your primary cluster.", element: ".av-highlights" }
+        ]
       },
 
       // 1: Hash Sharding
@@ -213,6 +238,11 @@
         desc: 'YSQL INSERT flows to Raft LEADER → WAL append → replicate to followers → majority ACK → commit. Near follower (TServer-2, ~0.8ms) enables fast majority. If near follower is down, must wait for far follower (TServer-3, ~2.5ms).',
         latencies: [{ lbl: 'Leader WAL', cls: 'll', max: 2 }, { lbl: 'Near Follower', cls: 'll', max: 3 }, { lbl: 'Far Follower', cls: 'lm', max: 12 }, { lbl: 'Majority ACK', cls: 'll', max: 1 }, { lbl: 'Total Latency', cls: 'lm', max: 15 }],
         extraBtns: [{ id: 'btn-tn', label: '💀 Kill Near Follower', cls: 'btn-d', cb: 'toggleNearFollower' }],
+        guidedTour: [
+          { text: "This module demonstrates the <b>Raft Consensus</b> write path.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to see the 5-phase write process (RPC → WAL → Majority → Commit).", element: "#btn-step" },
+          { text: "Try <b>Kill Near Follower</b> and notice how latency increases because the leader must wait for the 'Far' follower.", element: "#btn-tn" }
+        ],
         steps: [
           { label: 'Client INSERT', desc: 'Client sends INSERT to gateway TServer. Once the write packet reaches the leader, it is appended to the WAL and shown as provisional.', action: async (ctx) => {
             const pendingRow = [10, 'Jack', 'MUM', 88, Date.now()/1000];
@@ -619,6 +649,12 @@
         group: "Global & High Availability", icon: "🗳️",
         name: 'Leader Election', title: 'Leader Election', subtitle: 'Raft lifecycle & recovery',
         desc: 'Full Raft lifecycle: 6 consecutive heartbeat failures → node declared dead → election timeout → Follower→Candidate→Leader. Leaders are distributed fairly across surviving peers. Also supports graceful Blacklist/Drain for planned maintenance.',
+        guidedTour: [
+          { text: "Raft ensures there is always exactly one <b>Leader</b> per tablet.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to witness the heartbeat failure and re-election logic.", element: "#btn-step" },
+          { text: "Watch the <b>Raft Term</b> increment in the toolbar as new leaders are elected.", element: "#term-display" },
+          { text: "Try <b>Blacklist TS-2</b> to see how leaders are gracefully moved away before maintenance.", element: "#btn-bl" }
+        ],
         latencies: [{ lbl: 'Heartbeat RTT', cls: 'll', max: 2 }, { lbl: 'HB Failures', cls: 'lh', max: 6 }, { lbl: 'Crash Detection', cls: 'lh', max: 400 }, { lbl: 'Leader Lease Expiry', cls: 'lm', max: 2000 }, { lbl: 'Vote RPCs', cls: 'lm', max: 10 }, { lbl: 'New Leaders Up', cls: 'll', max: 5 }, { lbl: 'Re-replication', cls: 'lm', max: 200 }, { lbl: 'Leader Balancing', cls: 'll', max: 15 }],
         electionSteps: ['Heartbeats', 'Miss ×1-3', 'Miss ×4-6', 'Timeout', 'Candidate', 'RequestVote', 'Vote Grant', 'Elected', 'Recovery', 'Balancing'],
         extraBtns: [{ id: 'btn-bl', label: '🚫 Blacklist TS-2', cls: 'btn-d', cb: 'blacklistDrainNode' }],
@@ -769,6 +805,12 @@
         group: "Global & High Availability", icon: "💥",
         name: 'Node Failure', title: 'Node Failure', subtitle: 'Crash & catch-up',
         desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.t3) & tg6 (products.t2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
+        guidedTour: [
+          { text: "This module simulates a <b>TServer-3 crash</b> and Raft recovery.", element: ".canvas-wrap" },
+          { text: "Click <b>💀 Kill TServer-3</b> to trigger the failure.", element: "#btn-k3" },
+          { text: "Watch the 'Follower' tablets on other nodes become <b>Leaders</b> (◉) to maintain availability.", element: ".n-body" },
+          { text: "Click <b>Start Writes</b> in the Failure Dashboard to see how the cluster handles traffic during an outage.", element: "#btn-fd-run" }
+        ],
         latencies: [{ lbl: 'Crash Detection', cls: 'lh', max: 500 }, { lbl: 'Re-election', cls: 'lm', max: 20 }, { lbl: 'Write during fail', cls: 'lm', max: 8 }, { lbl: 'Re-replication', cls: 'lm', max: 200 }],
         failureMode: 'node',
         extraBtns: [

@@ -1,4 +1,53 @@
 'use strict';
+
+//  HELP & KEYBOARD SHORTCUTS
+// ════════════════════════════════════════════
+
+let guideEnabled = true;
+
+function toggleHelp() {
+    const modal = document.getElementById('help-modal');
+    if (modal) modal.classList.toggle('active');
+}
+
+window.toggleGuideSetting = function() {
+    const check = document.getElementById('guide-toggle-check');
+    guideEnabled = check ? check.checked : false;
+    
+    if (!guideEnabled) {
+        closeTour();
+    } else if (currentScenario && currentScenario.guidedTour) {
+        renderTour(currentScenario);
+    }
+}
+
+function renderTour(s) {
+    if (!guideEnabled) return;
+    const guide = document.getElementById('tour-guide');
+    const content = document.getElementById('tour-content');
+    if (!guide || !content) return;
+
+    if (!s || !s.guidedTour) {
+        guide.classList.remove('active');
+        return;
+    }
+
+    content.innerHTML = s.guidedTour.map((step, idx) => `
+        <div class="tour-step">
+            <div class="tour-step-num">${idx + 1}</div>
+            <div class="tour-step-txt">${step.text}</div>
+        </div>
+    `).join('');
+    
+    guide.classList.add('active');
+}
+
+function closeTour() {
+    const guide = document.getElementById('tour-guide');
+    if (guide) guide.classList.remove('active');
+}
+
+
     let S;
     function freshState(numNodes = 9) {
       const nodes = [];
@@ -1242,6 +1291,7 @@
       if (sc.init) {
         try { sc.init(ctx); } catch (e) { console.error("Init failed", e); }
       }
+      renderTour(sc);
     }
 
     async function stepForward() {
@@ -1859,6 +1909,8 @@
         if (tab === 'universe') _renderArchUniverse(av);
         else if (tab === 'read-replica') _renderArchReadReplica(av);
         else _renderArchXCluster(av);
+        
+        if (SCENARIOS[tab]) renderTour(SCENARIOS[tab]);
       }
 
       function _renderArchUniverse(container) {
@@ -2213,20 +2265,28 @@
         
         // Keyboard shortcuts
         window.addEventListener('keydown', (e) => {
-          // Only trigger if not in an input/textarea
           if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
           
-          if (e.key.toLowerCase() === 'f') {
-            toggleFocusMode();
+          const key = e.key.toLowerCase();
+          if (key === 'f') toggleFocusMode();
+          if (key === '[') toggleSidebar();
+          if (key === ']') toggleInfoPanel();
+          if (key === 'h') selectScenario('home');
+          if (key === '?' || key === '/') toggleHelp();
+          if (key === 's') stepForward();
+          if (key === 'r') resetScenario();
+          if (key === ' ') { e.preventDefault(); togglePlay(); }
+          if (key === 'g') {
+            const check = document.getElementById('guide-toggle-check');
+            if (check) {
+              check.checked = !check.checked;
+              toggleGuideSetting();
+            }
           }
-          if (e.key.toLowerCase() === '[') {
-            toggleSidebar();
-          }
-          if (e.key.toLowerCase() === ']') {
-            toggleInfoPanel();
-          }
-          if (e.key.toLowerCase() === 'h') {
-            selectScenario('home');
+          if (key === 'escape') {
+            const modal = document.getElementById('help-modal');
+            if (modal && modal.classList.contains('active')) modal.classList.remove('active');
+            closeTour();
           }
         });
       });
