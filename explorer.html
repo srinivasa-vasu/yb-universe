@@ -75,6 +75,11 @@
         <div class="region-divider d-v2" style="left: 66%"></div>
         <div class="client-box" id="client-box">⬡ YB-TServer Gateway</div>
 
+        <!-- Geo-Partitioning: region-pinned client boxes -->
+        <div class="geo-client-box" id="geo-client-us">⬡ US-East<br>Client</div>
+        <div class="geo-client-box" id="geo-client-eu">⬡ EU-West<br>Client</div>
+        <div class="geo-client-box" id="geo-client-apac">⬡ APAC<br>Client</div>
+
         <!-- Region Info Column (Visible only in Geo-mode) -->
         <div class="region-info-card" id="ric-us">
           <div class="ric-flag">🇺🇸</div>
@@ -236,6 +241,9 @@
           <div id="sd-stats-grid" class="sd-stats-grid"></div>
         </div>
       </div>
+
+      <!-- MULTI-REGION LATENCY PANEL -->
+      <div class="mr-lat-panel" id="mr-lat-panel"></div>
 
       <!-- DATA PANEL -->
       <div class="data-panel" id="data-panel">

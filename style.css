@@ -180,8 +180,8 @@
 
     .canvas-wrap.geo-mode {
       display: grid;
-      grid-template-columns: 180px 1fr 1fr 1fr;
-      grid-template-rows: repeat(3, auto) auto;
+      grid-template-columns: 180px 1fr 1fr 1fr 120px;
+      grid-template-rows: repeat(3, auto);
       gap: 24px 20px;
       padding: 40px 20px 20px;
       width: 100%;
@@ -459,10 +459,15 @@
       left: auto;
       top: auto;
       transform: none;
-      grid-column: 2 / 5;
-      grid-row: 4;
-      margin: 8px auto;
+      grid-column: 5;
+      grid-row: 1;
+      align-self: center;
       justify-self: center;
+      margin: 0;
+      text-align: center;
+      max-width: 110px;
+      white-space: normal;
+      line-height: 1.4;
     }
 
     .client-box.active {
@@ -470,6 +475,35 @@
       color: var(--leader);
       box-shadow: 0 0 12px rgba(245, 158, 11, .2)
     }
+
+    /* ── GEO-PARTITION REGION CLIENTS ── */
+    .geo-client-box {
+      display: none;
+      background: var(--s2);
+      border: 1px solid var(--border-hi);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--txt2);
+      text-align: center;
+      white-space: normal;
+      line-height: 1.5;
+      max-width: 110px;
+      transition: all .25s;
+      align-self: center;
+      justify-self: center;
+    }
+    .geo-client-box.active {
+      border-color: var(--leader);
+      color: var(--leader);
+      box-shadow: 0 0 12px rgba(245, 158, 11, .2);
+    }
+    /* In geo-partition mode: hide global client-box, show region clients */
+    .geo-mode.geo-partition .client-box { display: none; }
+    .geo-mode.geo-partition #geo-client-us   { display: block; grid-column: 5; grid-row: 1; }
+    .geo-mode.geo-partition #geo-client-eu   { display: block; grid-column: 5; grid-row: 2; }
+    .geo-mode.geo-partition #geo-client-apac { display: block; grid-column: 5; grid-row: 3; }
 
     /* ── NODE CARDS ── */
     .node-card {
@@ -1876,6 +1910,65 @@
       background: rgba(232, 121, 249, .18)
     }
 
+    .btn-info {
+      background: rgba(96, 165, 250, .1);
+      color: #60a5fa;
+      border-color: rgba(96, 165, 250, .3)
+    }
+    .btn-info:hover { background: rgba(96, 165, 250, .2) }
+    .btn-info.active {
+      background: #60a5fa;
+      color: #0f172a;
+      border-color: #60a5fa
+    }
+
+    .btn-warn {
+      background: rgba(251, 113, 133, .1);
+      color: #fb7185;
+      border-color: rgba(251, 113, 133, .3)
+    }
+    .btn-warn:hover { background: rgba(251, 113, 133, .2) }
+
+    .btn-ok {
+      background: rgba(52, 211, 153, .1);
+      color: #34d399;
+      border-color: rgba(52, 211, 153, .3)
+    }
+    .btn-ok:hover { background: rgba(52, 211, 153, .2) }
+
+    /* ── Multi-Region Latency Comparison Panel ─────────────────────────────── */
+    .mr-lat-panel {
+      display: none;
+      flex-direction: column;
+      background: var(--surface2);
+      border-top: 1px solid var(--border);
+      padding: 10px 14px 12px;
+      flex-shrink: 0;
+    }
+    .mr-lat-panel.visible { display: flex; }
+    .mr-lat-hdr-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .mr-lat-title { font-size: 11px; font-weight: 600; color: var(--txt1); text-transform: uppercase; letter-spacing: .05em; }
+    .mr-lat-sub   { font-size: 10px; color: var(--txt3); }
+    .mr-lat-tbl   { width: 100%; border-collapse: collapse; }
+    .mr-lat-th {
+      font-size: 10px; font-weight: 600; color: var(--txt3);
+      text-align: left; padding: 3px 8px 4px; text-transform: uppercase; letter-spacing: .04em;
+      border-bottom: 1px solid var(--border);
+    }
+    .mr-lat-td    { font-size: 11px; color: var(--txt2); padding: 4px 8px; white-space: nowrap; }
+    .mr-lat-tr    { transition: background .15s; }
+    .mr-lat-tr-eff { background: rgba(255,255,255,.03); }
+    .mr-lat-rname { font-weight: 600; }
+    .mr-st-pin  { color: #60a5fa; font-weight: 600; }
+    .mr-st-eff  { color: #a78bfa; font-weight: 600; }
+    .mr-st-fail { color: var(--err); font-weight: 600; }
+    .mr-st-idle { color: var(--txt3); }
+
     .spd-wrap {
       display: flex;
       align-items: center;
@@ -2781,6 +2874,13 @@
 
     .av-fail-msg { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.35); border-radius: 7px; padding: 10px 14px; font-size: 13px; color: var(--err); }
     .av-restore-link { cursor: pointer; text-decoration: underline; color: var(--info); }
+
+    .av-lp-bar { display:flex; align-items:center; gap:8px; padding:6px 0 10px; flex-wrap:wrap; }
+    .av-lp-lbl { font-size:11px; font-weight:700; color:var(--txt2); text-transform:uppercase; letter-spacing:.8px; flex-shrink:0; }
+    .av-lp-btn { font-size:11px; padding:4px 11px; border-radius:5px; border:1px solid var(--border); background:none; cursor:pointer; transition:all .18s; font-family:var(--mono); font-weight:600; }
+    .av-lp-btn:hover { opacity:.85; }
+    @keyframes av-chip-promote { 0%{transform:scale(.7);opacity:.2;box-shadow:none} 55%{transform:scale(1.18)} 100%{transform:scale(1);opacity:1;box-shadow:0 0 10px rgba(255,255,255,.25)} }
+    .av-chip-promoted { animation: av-chip-promote 0.45s cubic-bezier(0.34,1.56,0.64,1) forwards; }
 
     .av-quorum { background: var(--s1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
     .av-q-title { font-size: 20px; font-weight: 700; color: var(--txt); font-family: var(--head); margin-bottom: 4px; }

@@ -838,6 +838,25 @@ function closeTour() {
           const from = getTC(tgId, nId, cr); if (!from) { res(); return; }
           animPkt({ x: from.x + cw.scrollLeft, y: from.y + cw.scrollTop }, to, cls, dur / speedVal, res);
         }),
+        pktFromElToTablet: (elId, tgId, nId, cls, dur) => new Promise(res => {
+          const cw = document.getElementById('canvas-wrap');
+          const cr = cw.getBoundingClientRect();
+          const el = document.getElementById(elId); if (!el) { res(); return; }
+          const eb = el.getBoundingClientRect();
+          const from = { x: eb.left - cr.left + eb.width / 2 + cw.scrollLeft, y: eb.top - cr.top + eb.height / 2 + cw.scrollTop };
+          const to = getTC(tgId, nId, cr); if (!to) { res(); return; }
+          animPkt(from, { x: to.x + cw.scrollLeft, y: to.y + cw.scrollTop }, cls, dur / speedVal, res);
+        }),
+        pktTabletToEl: (tgId, nId, elId, cls, dur) => new Promise(res => {
+          const cw = document.getElementById('canvas-wrap');
+          const cr = cw.getBoundingClientRect();
+          const el = document.getElementById(elId); if (!el) { res(); return; }
+          const eb = el.getBoundingClientRect();
+          const to = { x: eb.left - cr.left + eb.width / 2 + cw.scrollLeft, y: eb.top - cr.top + eb.height / 2 + cw.scrollTop };
+          const from = getTC(tgId, nId, cr); if (!from) { res(); return; }
+          animPkt({ x: from.x + cw.scrollLeft, y: from.y + cw.scrollTop }, to, cls, dur / speedVal, res);
+        }),
+        activateEl: (elId, on) => { const el = document.getElementById(elId); if (el) el.classList.toggle('active', on); },
         pktTabletToTablet: (fTg, fN, tTg, tN, cls, dur) => new Promise(res => {
           const cw = document.getElementById('canvas-wrap');
           const cr = cw.getBoundingClientRect();
@@ -1023,7 +1042,7 @@ function closeTour() {
       `;
       sb.appendChild(homeBtn);
 
-      const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-Partitioning", "Storage & Scalability", "Multi-Cluster & DR"];
+      const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-distribution", "Storage & Scalability", "Multi-Cluster & DR"];
       const groups = {};
       Object.keys(SCENARIOS).forEach(id => {
         if (id === 'home') return;
@@ -1087,7 +1106,7 @@ function closeTour() {
         "Write & Read Paths",
         "Global & High Availability",
         "Horizontal Scalability",
-        "Geo-Partitioning",
+        "Geo-distribution",
         "Storage & Scalability",
         "Multi-Cluster & DR"
       ];
@@ -1097,7 +1116,7 @@ function closeTour() {
         "Write & Read Paths": { chapter: "CHAPTER 3", icon: "⚡", desc: "How requests flow through the distributed Raft layers." },
         "Global & High Availability": { chapter: "CHAPTER 4", icon: "🌎", desc: "Resilience, election, and multi-region patterns." },
         "Horizontal Scalability": { chapter: "CHAPTER 5", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
-        "Geo-Partitioning": { chapter: "CHAPTER 6", icon: "📍", desc: "Pinning data to regions for latency and compliance." },
+        "Geo-distribution": { chapter: "CHAPTER 6", icon: "📍", desc: "Multi-region clusters, data pinning, and leader preference." },
         "Storage & Scalability": { chapter: "CHAPTER 7", icon: "🗄️", desc: "Compaction, partitioning, and storage internals." },
         "Multi-Cluster & DR": { chapter: "CHAPTER 8", icon: "🔁", desc: "Disaster recovery and active-active replication." }
       };
@@ -1185,6 +1204,8 @@ function closeTour() {
         ip.style.display = 'none';
         fd.classList.remove('visible'); fd.style.display = '';
         sd.classList.remove('visible'); sd.style.display = '';
+        const _mrp = document.getElementById('mr-lat-panel');
+        if (_mrp) { _mrp.classList.remove('visible'); _mrp.style.display = ''; }
         dp.style.display = 'none';
         sp.style.display = 'none';
         dbp.style.display = 'none';
@@ -1211,7 +1232,8 @@ function closeTour() {
       ctx.setCanvasRegionMode(false);
       ctx.setCanvasGeoMode(false);
       ctx.setXClusterMode(false);
-      const isGeo = (sc.name === 'Geo-Partitioning');
+      document.getElementById('canvas-wrap').classList.remove('geo-partition');
+      const isGeo = sc.name === 'Geo-Partitioning' || sc.name === 'Multi-Region Cluster' || sc.name === 'Multi-Region';
       for (let n = 1; n <= 9; n++) {
         ctx.setNodeRegion(n, null, '');
         if (isGeo || n <= 3) {
@@ -1256,6 +1278,9 @@ function closeTour() {
 
       const isScaling = sc.name === 'Horizontal Scaling';
       sd.style.display = ''; sd.classList.toggle('visible', isScaling);
+
+      const mrp = document.getElementById('mr-lat-panel');
+      if (mrp) { mrp.style.display = ''; mrp.classList.toggle('visible', sc.name === 'Multi-Region'); }
 
       document.getElementById('canvas-wrap').style.flex = (isFailure || isScaling) ? '1' : '1';
 
@@ -1875,6 +1900,60 @@ function closeTour() {
       ];
 
       let _archFailedFD = -1;
+      let _archLeaderPref = -1; // -1=balanced, 0/1/2=preferred FD index
+
+      function _archEffectiveLeader(tablet) {
+        const getFD = (nid) => ARCH_FDS.findIndex(fd => fd.nodes.includes(nid));
+        let targetFD = _archLeaderPref;
+        if (targetFD === -1) {
+          if (_archFailedFD !== -1 && getFD(tablet.leader) === _archFailedFD)
+            return tablet.replicas.find(n => getFD(n) !== _archFailedFD) ?? tablet.leader;
+          return tablet.leader;
+        }
+        if (targetFD === _archFailedFD) {
+          const survFDs = [0, 1, 2].filter(x => x !== _archFailedFD);
+          targetFD = survFDs[ARCH_TABLETS.indexOf(tablet) % 2];
+        }
+        return tablet.replicas.find(n => getFD(n) === targetFD) ?? tablet.leader;
+      }
+
+      function _archRerenderChips(animate) {
+        document.querySelectorAll('.av-node').forEach(nodeEl => {
+          const nid = parseInt(nodeEl.querySelector('.av-node-id')?.textContent?.match(/\d+/)?.[0]);
+          if (!nid) return;
+          const chipsEl = nodeEl.querySelector('.av-chips');
+          if (!chipsEl) return;
+          const myT = ARCH_TABLETS.filter(t => t.replicas.includes(nid));
+          const render = (promoted) => {
+            chipsEl.innerHTML = myT.map(t => {
+              const isL = _archEffectiveLeader(t) === nid;
+              return `<div class="av-chip ${isL ? 'av-chip-l' + (promoted ? ' av-chip-promoted' : '') : 'av-chip-f'}" style="${isL ? `background:${t.color}` : `border-color:${t.color};color:${t.color}`}" title="${t.name} · ${isL ? 'Leader ◉' : 'Follower ○'}">${isL ? '◉' : '○'}</div>`;
+            }).join('');
+          };
+          if (animate) {
+            chipsEl.style.cssText = 'opacity:.15;transform:scale(.75);transition:opacity .15s,transform .15s';
+            setTimeout(() => { render(true); chipsEl.style.cssText = 'opacity:1;transform:scale(1);transition:opacity .2s,transform .2s'; }, 190);
+          } else {
+            render(false);
+          }
+        });
+      }
+
+      const _archFdColors = ['#f59e0b', '#60a5fa', '#34d399'];
+
+      window.archSetLeaderPref = function(fi) {
+        _archLeaderPref = (_archLeaderPref === fi) ? -1 : fi;
+        document.querySelectorAll('.av-lp-btn').forEach(btn => {
+          const bfi = parseInt(btn.dataset.fd);
+          const isActive = bfi === _archLeaderPref;
+          btn.classList.toggle('active', isActive);
+          const fc = bfi >= 0 ? _archFdColors[bfi] : 'var(--txt2)';
+          btn.style.background = isActive ? fc : '';
+          btn.style.color = isActive ? '#0f172a' : (bfi >= 0 ? fc : '');
+          btn.style.borderColor = isActive ? fc : (bfi >= 0 ? fc + '55' : '');
+        });
+        _archRerenderChips(true);
+      };
 
       function _exitArchMode(showCanvas) {
         const av = document.getElementById('arch-view');
@@ -1905,6 +1984,7 @@ function closeTour() {
         document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
         document.getElementById('i-title').textContent = titleMap[tab] || tab;
         _archFailedFD = -1;
+        _archLeaderPref = -1;
         av.innerHTML = '';
         if (tab === 'universe') _renderArchUniverse(av);
         else if (tab === 'read-replica') _renderArchReadReplica(av);
@@ -1933,8 +2013,20 @@ function closeTour() {
         h += `<div class="av-highlights">${highlights.map(hl => `<div class="av-hl ${hl.cls}"><span class="av-hl-icon">${hl.icon}</span><span class="av-hl-txt">${hl.label}</span></div>`).join('')}</div>`;
 
         h += `<div class="av-section-title">Cluster Layout — Nodes &amp; Tablet Distribution</div>`;
+
+        h += `<div class="av-lp-bar">`;
+        h += `<span class="av-lp-lbl">Leader Preference:</span>`;
+        for (let i = 0; i < 3; i++) {
+          const fc = _archFdColors[i];
+          const isActive = _archLeaderPref === i;
+          h += `<button class="av-lp-btn${isActive ? ' active' : ''}" data-fd="${i}" onclick="archSetLeaderPref(${i})" style="border-color:${fc}55;color:${fc}${isActive ? `;background:${fc};color:#0f172a` : ''}">◎ Fault Domain ${i+1}</button>`;
+        }
+        const balActive = _archLeaderPref === -1;
+        h += `<button class="av-lp-btn${balActive ? ' active' : ''}" data-fd="-1" onclick="archSetLeaderPref(-1)" style="${balActive ? 'background:var(--txt2);color:#0f172a;border-color:var(--txt2)' : ''}">⚖ Balanced</button>`;
+        h += `</div>`;
+
         h += `<div class="av-fd-row" id="av-fd-row">`;
-        const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
+        const fdColors = _archFdColors;
         for (let fi = 0; fi < 3; fi++) {
           const fd = ARCH_FDS[fi];
           const fc = fdColors[fi];
@@ -1945,7 +2037,7 @@ function closeTour() {
             const myT = ARCH_TABLETS.filter(t => t.replicas.includes(nid));
             h += `<div class="av-node"><div class="av-node-id">Node ${nid}</div><div class="av-chips">`;
             for (const t of myT) {
-              const isL = t.leader === nid;
+              const isL = _archEffectiveLeader(t) === nid;
               h += `<div class="av-chip ${isL ? 'av-chip-l' : 'av-chip-f'}" style="${isL ? `background:${t.color}` : `border-color:${t.color};color:${t.color}`}" title="${t.name} · ${isL ? 'Leader ◉' : 'Follower ○'}">${isL ? '◉' : '○'}</div>`;
             }
             h += `</div><div class="av-traf"><div class="av-traf-row"><span class="av-traf-r">Read</span><div class="av-tbar av-tbar-r"></div></div><div class="av-traf-row"><span class="av-traf-w">Write</span><div class="av-tbar av-tbar-w"></div></div></div></div>`;
@@ -1999,13 +2091,24 @@ function closeTour() {
           _archFailedFD = -1;
           fds.forEach(el => el.classList.remove('av-fd-failed', 'av-fd-quorum'));
           if (msg) msg.remove();
+          _archRerenderChips(true);
           return;
         }
         _archFailedFD = fi;
         fds.forEach((el, i) => { el.classList.toggle('av-fd-failed', i === fi); el.classList.toggle('av-fd-quorum', i !== fi); });
         const row = document.getElementById('av-fd-row');
         if (!msg) { msg = document.createElement('div'); msg.id = 'av-fail-msg'; msg.className = 'av-fail-msg'; row.after(msg); }
-        msg.innerHTML = `⚡ <strong>${ARCH_FDS[fi].name}</strong> (${ARCH_FDS[fi].az}) offline &nbsp;·&nbsp; 2 of 3 FDs form quorum &nbsp;·&nbsp; Leaders auto-elect on surviving nodes &nbsp;·&nbsp; <span class="av-restore-link" onclick="archFailDomain(${fi})">Restore ↺</span>`;
+        let prefNote = '';
+        if (_archLeaderPref === fi) {
+          const survFDs = [0, 1, 2].filter(x => x !== fi).map(x => x + 1);
+          prefNote = ` &nbsp;·&nbsp; <strong>Preferred FD down</strong> — leaders balanced across FD ${survFDs[0]} &amp; FD ${survFDs[1]}`;
+        } else if (_archLeaderPref !== -1) {
+          prefNote = ` &nbsp;·&nbsp; Leaders remain pinned to <strong>Fault Domain ${_archLeaderPref + 1}</strong>`;
+        } else {
+          prefNote = ` &nbsp;·&nbsp; Leaders auto-elect on surviving nodes`;
+        }
+        msg.innerHTML = `⚡ <strong>${ARCH_FDS[fi].name}</strong> (${ARCH_FDS[fi].az}) offline &nbsp;·&nbsp; 2 of 3 FDs form quorum${prefNote} &nbsp;·&nbsp; <span class="av-restore-link" onclick="archFailDomain(${fi})">Restore ↺</span>`;
+        _archRerenderChips(true);
       }
 
       function archToggle(id) {

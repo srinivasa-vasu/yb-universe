@@ -1,3 +1,244 @@
+// ── Multi-Region Cluster interactive state ──────────────────────────────────
+window._mrPrefs  = ['us']; // array of preferred regions (multi-select)
+window._mrFailed = null;   // currently failed region (null | 'us' | 'eu' | 'apac')
+window._mrCtx    = null;   // live ctx reference set in scenario init
+
+const _mrNodes  = { us: [1,2,3], eu: [4,5,6], apac: [7,8,9] };
+const _mrLabel  = { us: 'US-East', eu: 'EU-West', apac: 'APAC' };
+const _mrColors = { us: '#60a5fa', eu: '#34d399', apac: '#f59e0b' };
+const _mrAll    = ['us', 'eu', 'apac'];
+
+function _mrEffRegs() {
+  const active = window._mrPrefs.filter(r => r !== window._mrFailed);
+  return active.length ? active : _mrAll.filter(r => r !== window._mrFailed);
+}
+
+function _mrEffReg(gi = 0) { const e = _mrEffRegs(); return e[gi % e.length]; }
+function _mrLeader(gi)      { return _mrNodes[_mrEffReg(gi)][gi]; }
+function _mrNodeReg(nid)    { return _mrAll.find(r => _mrNodes[r].includes(nid)); }
+
+function _mrOW(a, b) {
+  if (a === b) return 2;
+  const t = { us:{ eu:45, apac:90 }, eu:{ us:45, apac:70 }, apac:{ us:90, eu:70 } };
+  return t[a]?.[b] || 45;
+}
+
+function _mrLatsAll() {
+  const fail = window._mrFailed;
+  return [0,1,2].map(gi => {
+    const eff = _mrEffReg(gi);
+    const cl  = _mrOW('us', eff);
+    const followers = _mrAll.filter(r => r !== eff && r !== fail);
+    const minRaft   = followers.length ? Math.min(...followers.map(r => _mrOW(eff, r))) : 0;
+    const read  = cl < 5 ? 2 : cl * 2;
+    const write = cl < 5 ? (2 + minRaft) : (cl + minRaft + cl);
+    return { region: eff, cl: cl < 5 ? 2 : cl, read, raft: minRaft, write };
+  });
+}
+
+// Returns [clientHop, read, raft, write] — raft listed before write (bar display order)
+function _mrLats() {
+  const l = _mrLatsAll()[0];
+  return [l.cl, l.read, l.raft, l.write];
+}
+
+// Per-region latency as if that region were the leader (for comparison table)
+function _mrRegionLats(reg) {
+  const fail = window._mrFailed;
+  if (reg === fail) return null;
+  const cl        = _mrOW('us', reg);
+  const followers = _mrAll.filter(r => r !== reg && r !== fail);
+  const minRaft   = followers.length ? Math.min(...followers.map(r => _mrOW(reg, r))) : 0;
+  const read  = cl < 5 ? 2 : cl * 2;
+  const write = cl < 5 ? (2 + minRaft) : (cl + minRaft + cl);
+  return { read, write };
+}
+
+function _mrAnimDur(owMs) { return Math.max(300, owMs * 6); }
+
+// ── Bottom comparison panel ──────────────────────────────────────────────────
+function _mrRenderLatPanel() {
+  const panel = document.getElementById('mr-lat-panel');
+  if (!panel) return;
+  const effRegs = _mrEffRegs();
+  const failed  = window._mrFailed;
+  const prefs   = window._mrPrefs;
+
+  let rows = '';
+  _mrAll.forEach(reg => {
+    const isEff    = effRegs.includes(reg);
+    const isFailed = reg === failed;
+    const isPref   = prefs.includes(reg);
+    const done  = window._mrPanelDone || {};
+    const lats  = !isFailed ? _mrRegionLats(reg) : null;
+    const c     = _mrColors[reg];
+
+    let st, stCls;
+    if (isFailed)             { st = '✕ OFFLINE';   stCls = 'mr-st-fail'; }
+    else if (isEff && isPref) { st = '● Pinned';    stCls = 'mr-st-pin'; }
+    else if (isEff)           { st = '◉ Balancing'; stCls = 'mr-st-eff'; }
+    else                      { st = '—';            stCls = 'mr-st-idle'; }
+
+    const readVal  = (lats && done[reg + ':read'])  ? lats.read  + 'ms' : '—';
+    const writeVal = (lats && done[reg + ':write']) ? lats.write + 'ms' : '—';
+    const bl  = isEff ? `border-left:3px solid ${c}` : isFailed ? 'border-left:3px solid var(--err)' : 'border-left:3px solid transparent';
+    const dim = isFailed ? 'opacity:.38' : '';
+    rows += `<tr class="mr-lat-tr ${isEff ? 'mr-lat-tr-eff' : ''}" style="${bl};${dim}">
+      <td class="mr-lat-td mr-lat-rname" style="color:${isFailed ? 'var(--txt3)' : c}">${_mrLabel[reg]}</td>
+      <td class="mr-lat-td">${readVal}</td>
+      <td class="mr-lat-td">${writeVal}</td>
+      <td class="mr-lat-td ${stCls}">${st}</td>
+    </tr>`;
+  });
+
+  panel.innerHTML = `
+    <div class="mr-lat-hdr-row">
+      <span class="mr-lat-title">Latency Comparison</span>
+      <span class="mr-lat-sub">· client in US-East · reads served from leader · writes include Raft quorum</span>
+    </div>
+    <table class="mr-lat-tbl">
+      <thead><tr>
+        <th class="mr-lat-th">Region</th>
+        <th class="mr-lat-th">Read (RTT)</th>
+        <th class="mr-lat-th">Write (end-to-end)</th>
+        <th class="mr-lat-th">Leader Status</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _mrRenderAll() { _mrUpdateBtns(); _mrRenderLatPanel(); }
+
+function _mrResetLatBars() {
+  for (let i = 0; i < 4; i++) {
+    const fill = document.getElementById(`lat-fill-${i}`);
+    const val  = document.getElementById(`lat-val-${i}`);
+    if (fill) fill.style.width = '0%';
+    if (val)  val.textContent = '—';
+  }
+  document.querySelectorAll('#lat-rows .lat-row').forEach(el => el.classList.remove('hl-lat'));
+}
+
+function _mrUpdateBtns() {
+  const prefs = window._mrPrefs, failed = window._mrFailed;
+  _mrAll.forEach(r => {
+    const btn = document.getElementById(`mr-pref-${r}`);
+    if (!btn) return;
+    const active = prefs.includes(r), c = _mrColors[r];
+    btn.classList.toggle('active', active);
+    btn.style.background  = active ? c : '';
+    btn.style.color       = active ? '#0f172a' : c;
+    btn.style.borderColor = active ? c : `${c}55`;
+    btn.disabled = r === failed;
+  });
+  const toFail = prefs.find(r => r !== failed) || prefs[0];
+  const failBtn = document.getElementById('mr-fail');
+  if (failBtn) { failBtn.disabled = !!failed; failBtn.innerHTML = `⚡ Fail ${_mrLabel[toFail]}`; }
+  const restBtn = document.getElementById('mr-restore');
+  if (restBtn) { restBtn.disabled = !failed; restBtn.innerHTML = failed ? `↺ Restore ${_mrLabel[failed]}` : '↺ Restore'; }
+}
+
+function _mrApplyLeaders(ctx) {
+  ['mr1','mr2','mr3'].forEach((id, i) => ctx.setRole(id, _mrLeader(i), 'LEADER'));
+}
+
+function _mrAnimateLeaderTransfer(ctx, oldLeaders, newLeaders) {
+  [0,1,2].filter(gi => oldLeaders[gi] !== newLeaders[gi]).forEach(gi => {
+    const oldR = _mrNodeReg(oldLeaders[gi]), newR = _mrNodeReg(newLeaders[gi]);
+    ctx.pktTabletToTablet(`mr${gi+1}`, oldLeaders[gi], `mr${gi+1}`, newLeaders[gi], 'pk-vote', _mrAnimDur(_mrOW(oldR, newR)));
+  });
+}
+
+function _mrLogShards() {
+  const effRegs = _mrEffRegs();
+  if (effRegs.length > 1) {
+    [0,1,2].forEach(gi => {
+      const l = _mrLatsAll()[gi];
+      addLog(`  shard-${gi+1} → ${_mrLabel[l.region]} (Node ${_mrLeader(gi)}) · read ~${l.read}ms · write ~${l.write}ms`, 'li');
+    });
+  }
+}
+
+window.mrSetPrefUs   = () => window.mrSetPref('us');
+window.mrSetPrefEu   = () => window.mrSetPref('eu');
+window.mrSetPrefApac = () => window.mrSetPref('apac');
+
+window.mrSetPref = function(reg) {
+  if (window._mrFailed === reg) return;
+  window._mrPanelDone = {};
+  _mrResetLatBars();
+  const oldLeaders = [0,1,2].map(gi => _mrLeader(gi));
+
+  const idx = window._mrPrefs.indexOf(reg);
+  if (idx === -1) {
+    window._mrPrefs.push(reg);
+    window._mrPrefs.sort((a, b) => _mrAll.indexOf(a) - _mrAll.indexOf(b));
+  } else {
+    if (window._mrPrefs.length === 1) return;
+    window._mrPrefs.splice(idx, 1);
+  }
+
+  const newLeaders = [0,1,2].map(gi => _mrLeader(gi));
+  const ctx = window._mrCtx; if (!ctx) return;
+
+  _mrAnimateLeaderTransfer(ctx, oldLeaders, newLeaders); // leader transfer packets
+  _mrApplyLeaders(ctx);
+  _mrRenderAll();
+
+  const effRegs = _mrEffRegs();
+  const [cl, read, raft, write] = _mrLats();
+  addLog(`Leader preference → ${effRegs.map(r => _mrLabel[r]).join(' & ')}`, 'ls');
+  _mrLogShards();
+  if (effRegs.length === 1) addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'li');
+};
+
+window.mrFailRegion = function() {
+  const ctx = window._mrCtx; if (!ctx || window._mrFailed) return;
+  window._mrPanelDone = {};
+  _mrResetLatBars();
+  const toFail     = window._mrPrefs.find(r => r !== window._mrFailed) || window._mrPrefs[0];
+  const oldLeaders = [0,1,2].map(gi => _mrLeader(gi));
+
+  window._mrFailed = toFail;
+  _mrNodes[toFail].forEach(n => ctx.killNode(n));
+
+  const newLeaders = [0,1,2].map(gi => _mrLeader(gi));
+  _mrAnimateLeaderTransfer(ctx, oldLeaders, newLeaders);
+  _mrApplyLeaders(ctx);
+  _mrRenderAll();
+
+  const effRegs = _mrEffRegs();
+  const [cl, read, raft, write] = _mrLats();
+  addLog(`⚡ ${_mrLabel[toFail]} OFFLINE — nodes ${_mrNodes[toFail].join(', ')} unreachable`, 'le');
+  addLog(`Raft re-election: leaders balanced across ${effRegs.map(r => _mrLabel[r]).join(' & ')}`, 'lw');
+  _mrLogShards();
+  addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'lw');
+};
+
+window.mrRestore = function() {
+  const ctx = window._mrCtx; if (!ctx || !window._mrFailed) return;
+  window._mrPanelDone = {};
+  _mrResetLatBars();
+  const failed     = window._mrFailed;
+  const oldLeaders = [0,1,2].map(gi => _mrLeader(gi));
+
+  window._mrFailed = null;
+  _mrNodes[failed].forEach(n => ctx.reviveNode(n));
+
+  const newLeaders = [0,1,2].map(gi => _mrLeader(gi));
+  _mrAnimateLeaderTransfer(ctx, oldLeaders, newLeaders);
+  _mrApplyLeaders(ctx);
+  _mrRenderAll();
+
+  const effRegs = _mrEffRegs();
+  const [cl, read, raft, write] = _mrLats();
+  addLog(`↺ ${_mrLabel[failed]} RESTORED — rejoining cluster`, 'ls');
+  addLog(`Leaders rebalanced across ${effRegs.map(r => _mrLabel[r]).join(' & ')}`, 'ls');
+  _mrLogShards();
+  if (effRegs.length === 1) addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'li');
+};
+// ────────────────────────────────────────────────────────────────────────────
+
     const SCENARIOS = {
       "home": {
         group: "Home", icon: "🏠", title: "Architecture Explorer", subtitle: "Interactive Distributed SQL Visualizer",
@@ -318,7 +559,7 @@
               const c1 = ctx.pktClientToTablet('tg1', 1, 'pk-write', 500);
               const c2 = ctx.pktClientToTablet('tg2', 2, 'pk-write', 500);
               await Promise.all([c1, c2]);
-              
+
               const provLat = parseFloat((3 + Math.random() * 7).toFixed(1));
               ctx.setLat(1, provLat);
               S.lastProvWrite5 = provLat;
@@ -351,7 +592,7 @@
               const p1 = ctx.pktTabletToTablet('ts1', 3, 'ts1', 1, 'pk-raft', 400);
               const p2 = ctx.pktTabletToTablet('ts1', 3, 'ts1', 2, 'pk-raft', 400);
               await Promise.all([p1, p2]);
-              
+
               const commitLat = 4.1;
               ctx.setLat(2, commitLat);
               const total = parseFloat((S.lastTxInit5 + S.lastProvWrite5 + commitLat).toFixed(1));
@@ -370,11 +611,11 @@
               S.groups.find(g => g.id === 'tg2').data.push([2, 'Bob Martinez', 'Chicago', 92, 101.5]);
               S.replicaState['tg1'][1].provisionalRows = [];
               S.replicaState['tg2'][2].provisionalRows = [];
-              
+
               const r1 = ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300);
               const r2 = ctx.pktTabletToTablet('tg2', 2, 'tg2', 3, 'pk-raft', 300);
               await Promise.all([r1, r2]);
-              
+
               renderAllTablets();
               ctx.setLat(3, 1.2);
               ctx.hlLatRow([0, 1, 2, 4]);
@@ -417,11 +658,11 @@
               addLog('Writing to Primary and Index leaders in parallel...', 'li');
               S.replicaState['tg1'][1].provisionalRows = [[1, 'Alice Chen', 'NY', 87, 102.0]];
               S.replicaState['tg8'][2].provisionalRows = [['alice@yugabyte.com', 1, 102.0]];
-              
+
               const c1 = ctx.pktClientToTablet('tg1', 1, 'pk-write', 500);
               const c2 = ctx.pktClientToTablet('tg8', 2, 'pk-write', 500);
               await Promise.all([c1, c2]);
-              
+
               const provLat = parseFloat((3 + Math.random() * 7).toFixed(1));
               ctx.setLat(1, provLat);
               S.lastProvWrite = provLat;
@@ -455,7 +696,7 @@
               const p1 = ctx.pktTabletToTablet('ts1', 3, 'ts1', 1, 'pk-raft', 350);
               const p2 = ctx.pktTabletToTablet('ts1', 3, 'ts1', 2, 'pk-raft', 350);
               await Promise.all([p1, p2]);
-              
+
               const commitLat = 3.9;
               ctx.setLat(2, commitLat);
               const total = parseFloat((S.lastTxInit + S.lastProvWrite + commitLat).toFixed(1));
@@ -473,11 +714,11 @@
               S.groups.find(g => g.id === 'tg8').data.push(['alice@yugabyte.com', 1, 102.0]);
               S.replicaState['tg1'][1].provisionalRows = [];
               S.replicaState['tg8'][2].provisionalRows = [];
-              
+
               const r1 = ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300);
               const r2 = ctx.pktTabletToTablet('tg8', 2, 'tg8', 1, 'pk-raft', 300);
               await Promise.all([r1, r2]);
-              
+
               renderAllTablets();
               ctx.setLat(3, 1.5);
               ctx.hlLatRow([0, 1, 2, 4]);
@@ -515,133 +756,90 @@
       },
 
       "9": {
-        group: "Geo-Partitioning", icon: "🌎",
-        name: 'Geo-Partitioning', title: 'Geo-Partitioning', subtitle: 'Multi-region row pinning',
+        group: "Geo-distribution", icon: "🌎",
+        name: 'Geo-Partitioning', title: 'Geo-Partitioning', subtitle: 'Multi-region geo(row) pinning',
         filterTable: 'users',
-        desc: 'YugabyteDB pins tablet leaders and followers to specific regions. Each region has its own Raft group with 3 local replicas. Client is in APAC — local requests are fast, cross-region requests show increasing latency.',
+        desc: 'YugabyteDB pins rows to specific regions via a <b>tablegroup</b> per region. Each Raft group has 3 replicas in the same region — reads and writes are always local. Region-specific clients see sub-5ms latency; a global client crossing regions pays the full cross-region RTT penalty.',
         latencies: [
-          { lbl: 'APAC Read', cls: 'll', max: 10 },
-          { lbl: 'APAC Write', cls: 'll', max: 10 },
-          { lbl: 'EU Read', cls: 'lm', max: 200 },
-          { lbl: 'EU Write', cls: 'lm', max: 200 },
-          { lbl: 'US Read', cls: 'lh', max: 300 },
-          { lbl: 'US Write', cls: 'lh', max: 300 }
+          { lbl: 'Client → Leader', cls: 'll', max: 200 },
+          { lbl: 'Read Latency',    cls: 'll', max: 200 },
+          { lbl: 'Raft Replication', cls: 'lm', max: 50  },
+          { lbl: 'Write Latency',   cls: 'lm', max: 200 },
         ],
         init: (ctx) => {
           ctx.setCanvasGeoMode(true);
-          // Show 3 nodes per region
-          for(let n=1; n<=9; n++) ctx.setNodeVisibility(n, true);
-          // Set proper region labels & zone names
+          document.getElementById('canvas-wrap').classList.add('geo-partition');
+          for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
           ctx.setNodeRegion(1, 'us', 'US-East'); ctx.setNodeRegion(2, 'us', 'US-East'); ctx.setNodeRegion(3, 'us', 'US-East');
-          ctx.setNodeRegion(4, 'eu', 'Europe'); ctx.setNodeRegion(5, 'eu', 'Europe'); ctx.setNodeRegion(6, 'eu', 'Europe');
-          ctx.setNodeRegion(7, 'apac', 'APAC'); ctx.setNodeRegion(8, 'apac', 'APAC'); ctx.setNodeRegion(9, 'apac', 'APAC');
-          // Use GEO_GROUPS
+          ctx.setNodeRegion(4, 'eu', 'Europe');  ctx.setNodeRegion(5, 'eu', 'Europe');  ctx.setNodeRegion(6, 'eu', 'Europe');
+          ctx.setNodeRegion(7, 'apac', 'APAC');  ctx.setNodeRegion(8, 'apac', 'APAC');  ctx.setNodeRegion(9, 'apac', 'APAC');
           S.groups = JSON.parse(JSON.stringify(GEO_GROUPS));
           S.replicaState = buildRS(S.groups);
-          // Client is in APAC
-          document.getElementById('client-box').textContent = '⬡ APAC Client Gateway';
-          // Render tablets for geo groups (selectScenario rendered with INITIAL_GROUPS before init ran)
           renderAllTablets();
           setTimeout(renderConnections, 100);
         },
         steps: [
+          // ── Setup ──
           {
-            label: 'APAC — Local Read + Write',
-            desc: 'Client in APAC reads and writes to the local tg-apac Raft group (Nodes 7, 8, 9). All operations stay within ap-south-1 with ~2ms latency.',
+            label: 'Setup — 3 Geo-Partitions · 3 Local Raft Groups',
+            desc: '9 nodes across 3 regions, RF=3 per region. The <b>users</b> table is geo-partitioned: <b>tg-us</b> (Nodes 1–3), <b>tg-eu</b> (Nodes 4–6), <b>tg-apac</b> (Nodes 7–9). Each region-specific client reads and writes only to its local Raft group — no cross-region traffic.',
             action: async (ctx) => {
-              // SELECT
-              addLog('APAC Client: SELECT * FROM users WHERE region=\'SG\'', 'li');
-              ctx.activateClient(true);
-              await ctx.pktClientToTablet('tg-apac', 7, 'pk-read', 400);
-              ctx.hlTablet('tg-apac', 7, 't-hl');
-              ctx.setLat(0, 1.8);
-              ctx.hlLatRow(0);
-              addLog('Local read from tg-apac LEADER (Node 7) — 1.8ms ✓', 'ls');
-              await ctx.pktTabletToClient('tg-apac', 7, 'pk-ack', 400);
-
-              await ctx.delay(400);
-
-              // INSERT + replication
-              addLog('APAC Client: INSERT INTO users VALUES (10, \'Raj\', \'SG\', 85)', 'li');
-              await ctx.pktClientToTablet('tg-apac', 7, 'pk-write', 400);
-              addLog('Leader WAL → replicate to local followers (Node 8, 9)', 'li');
-              const p1 = ctx.pktTabletToTablet('tg-apac', 7, 'tg-apac', 8, 'pk-raft', 400);
-              const p2 = ctx.pktTabletToTablet('tg-apac', 7, 'tg-apac', 9, 'pk-raft', 400);
-              await Promise.all([p1, p2]);
-              ctx.setLat(1, 2.5);
-              ctx.hlLatRow(1);
-              S.groups.find(g => g.id === 'tg-apac').data.push([10, 'Raj', 'SG', 85, performance.now() / 1000]);
-              for (const nid of [7, 8, 9]) ctx.reRenderTablet('tg-apac', nid, true);
-              addLog('Intra-region quorum (3/3 in APAC) — 2.5ms ✓', 'ls');
-              await ctx.pktTabletToClient('tg-apac', 7, 'pk-ack', 400);
-              ctx.activateClient(false);
+              addLog('Geo-Partitioning: users table split into 3 region-local Raft groups', 'ls');
+              addLog('  tg-us   → Nodes 1, 2, 3 (us-east-1)   · leader: Node 1', 'li');
+              addLog('  tg-eu   → Nodes 4, 5, 6 (eu-central-1) · leader: Node 4', 'li');
+              addLog('  tg-apac → Nodes 7, 8, 9 (ap-south-1)  · leader: Node 7', 'li');
+              addLog('Each client is co-located with its region\'s leader — reads/writes stay local', 'ls');
             }
           },
-          {
-            label: 'EU — Cross-Region Read + Write',
-            desc: 'Client in APAC accesses EU data. Requests cross from ap-south-1 to eu-central-1 (~80ms RTT). Write still replicates locally within EU, but the cross-region client hop adds latency.',
-            action: async (ctx) => {
-              // SELECT
-              addLog('APAC Client: SELECT * FROM users WHERE region=\'DE\'', 'li');
-              ctx.activateClient(true);
-              await ctx.pktClientToTablet('tg-eu', 4, 'pk-read', 900);
-              ctx.hlTablet('tg-eu', 4, 't-hl');
-              ctx.setLat(2, 80);
-              ctx.hlLatRow(2);
-              addLog('Cross-region read: APAC → EU (Node 4) — 80ms ⚠', 'lw');
-              await ctx.pktTabletToClient('tg-eu', 4, 'pk-ack', 900);
-
-              await ctx.delay(400);
-
-              // INSERT + replication
-              addLog('APAC Client: INSERT INTO users VALUES (11, \'Anna\', \'DE\', 90)', 'li');
-              await ctx.pktClientToTablet('tg-eu', 4, 'pk-write', 900);
-              addLog('EU Leader WAL → replicate to EU followers (Node 5, 6)', 'li');
-              const p1 = ctx.pktTabletToTablet('tg-eu', 4, 'tg-eu', 5, 'pk-raft', 400);
-              const p2 = ctx.pktTabletToTablet('tg-eu', 4, 'tg-eu', 6, 'pk-raft', 400);
-              await Promise.all([p1, p2]);
-              ctx.setLat(3, 85);
-              ctx.hlLatRow(3);
-              S.groups.find(g => g.id === 'tg-eu').data.push([11, 'Anna', 'DE', 90, performance.now() / 1000]);
-              for (const nid of [4, 5, 6]) ctx.reRenderTablet('tg-eu', nid, true);
-              addLog('Cross-region write: APAC → EU + EU quorum — 85ms ⚠', 'lw');
-              await ctx.pktTabletToClient('tg-eu', 4, 'pk-ack', 900);
-              ctx.activateClient(false);
+          // ── US steps ──
+          ...[
+            { reg: 'us',   elId: 'geo-client-us',   tg: 'tg-us',   leader: 1, followers: [2,3], lbl: 'US-East', raft: 2 },
+            { reg: 'eu',   elId: 'geo-client-eu',   tg: 'tg-eu',   leader: 4, followers: [5,6], lbl: 'EU-West', raft: 2 },
+            { reg: 'apac', elId: 'geo-client-apac', tg: 'tg-apac', leader: 7, followers: [8,9], lbl: 'APAC',    raft: 2 },
+          ].flatMap(({ reg, elId, tg, leader, followers, lbl, raft }) => [
+            // ── READ step ──
+            {
+              label: `${lbl} Client — Read`,
+              desc: `The <b>${lbl} client</b> reads from the local <b>${tg}</b> leader (Node ${leader}). All 3 replicas are in the same region — the round-trip never leaves <b>${lbl}</b>. Expected latency: <b>~2ms</b>.`,
+              action: async (ctx) => {
+                _mrResetLatBars();
+                addLog(`${lbl} Client: SELECT * FROM users WHERE region='${reg.toUpperCase()}'`, 'li');
+                ctx.activateEl(elId, true);
+                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-read', 300);
+                ctx.hlTablet(tg, leader, 't-hl');
+                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
+                ctx.setLat(0, 2); ctx.setLat(1, 2);
+                ctx.hlLatRow([0, 1]);
+                addLog(`  ✓ local read ~2ms — no cross-region hop`, 'ls');
+                ctx.activateEl(elId, false);
+              }
+            },
+            // ── WRITE step ──
+            {
+              label: `${lbl} Client — Write`,
+              desc: `The <b>${lbl} client</b> writes to the local <b>${tg}</b> leader (Node ${leader}). Raft replicates to Nodes ${followers.join(' & ')} within <b>${lbl}</b> — intra-region quorum in ~${raft}ms. End-to-end write: <b>~${2 + raft}ms</b>.`,
+              action: async (ctx) => {
+                _mrResetLatBars();
+                const names = { us: ['Alice','Bob'], eu: ['Anna','Hans'], apac: ['Raj','Mei'] };
+                const data  = { us: [12,'US',79], eu: [11,'DE',90], apac: [10,'SG',85] };
+                const [score, regCode, id2] = data[reg];
+                const newRow = [score, names[reg][0], regCode, id2, performance.now() / 1000];
+                addLog(`${lbl} Client: INSERT INTO users (…) region='${reg.toUpperCase()}'`, 'li');
+                ctx.activateEl(elId, true);
+                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-write', 300);
+                addLog(`  WAL → Raft → ${lbl} followers (Nodes ${followers.join(', ')})`, 'li');
+                const raftPkts = followers.map(fn => ctx.pktTabletToTablet(tg, leader, tg, fn, 'pk-raft', 300));
+                await Promise.all(raftPkts);
+                ctx.setLat(0, 2); ctx.setLat(2, raft); ctx.setLat(3, 2 + raft);
+                ctx.hlLatRow([0, 2, 3]);
+                S.groups.find(g => g.id === tg).data.push(newRow);
+                for (const nid of [leader, ...followers]) ctx.reRenderTablet(tg, nid, true);
+                addLog(`  ✓ intra-region quorum — write ~${2 + raft}ms`, 'ls');
+                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
+                ctx.activateEl(elId, false);
+              }
             }
-          },
-          {
-            label: 'US — Cross-Region Read + Write',
-            desc: 'Client in APAC accesses US data — maximum cross-region penalty (~145ms RTT). This demonstrates why geo-partitioning keeps data local to users.',
-            action: async (ctx) => {
-              // SELECT
-              addLog('APAC Client: SELECT * FROM users WHERE region=\'US\'', 'li');
-              ctx.activateClient(true);
-              await ctx.pktClientToTablet('tg-us', 1, 'pk-read', 1200);
-              ctx.hlTablet('tg-us', 1, 't-hl');
-              ctx.setLat(4, 145);
-              ctx.hlLatRow(4);
-              addLog('Cross-region read: APAC → US (Node 1) — 145ms ⚠', 'lw');
-              await ctx.pktTabletToClient('tg-us', 1, 'pk-ack', 1200);
-
-              await ctx.delay(400);
-
-              // INSERT + replication
-              addLog('APAC Client: INSERT INTO users VALUES (12, \'Mike\', \'US\', 79)', 'li');
-              await ctx.pktClientToTablet('tg-us', 1, 'pk-write', 1200);
-              addLog('US Leader WAL → replicate to US followers (Node 2, 3)', 'li');
-              const p1 = ctx.pktTabletToTablet('tg-us', 1, 'tg-us', 2, 'pk-raft', 400);
-              const p2 = ctx.pktTabletToTablet('tg-us', 1, 'tg-us', 3, 'pk-raft', 400);
-              await Promise.all([p1, p2]);
-              ctx.setLat(5, 150);
-              ctx.hlLatRow(5);
-              S.groups.find(g => g.id === 'tg-us').data.push([12, 'Mike', 'US', 79, performance.now() / 1000]);
-              for (const nid of [1, 2, 3]) ctx.reRenderTablet('tg-us', nid, true);
-              addLog('Cross-region write: APAC → US + US quorum — 150ms ⚠', 'lw');
-              addLog('Geo-partitioning keeps data local to avoid these penalties ✓', 'ls');
-              await ctx.pktTabletToClient('tg-us', 1, 'pk-ack', 1200);
-              ctx.activateClient(false);
-            }
-          }
+          ])
         ]
       },
 
@@ -1002,10 +1200,10 @@
           ctx.setNodeRegion(1, 'apac', 'Zone A'); ctx.setNodeRegion(4, 'apac', 'Zone A');
           ctx.setNodeRegion(2, 'apac', 'Zone B'); ctx.setNodeRegion(5, 'apac', 'Zone B');
           ctx.setNodeRegion(3, 'apac', 'Zone C'); ctx.setNodeRegion(6, 'apac', 'Zone C');
-          
+
           // Initial 3 nodes: 1, 2, 3 (One per zone)
           for(let n=1; n<=9; n++) ctx.setNodeVisibility(n, n <= 3);
-          
+
           // 7 Tables/tablets, RF=3, initially on nodes 1,2,3
           const scalingGroups = [
             { id: 's1', table: 'users', tnum: 1, range: '0x0000–0x54FF', leaderNode: 1, term: 4, replicas: [1, 2, 3], data: [] },
@@ -1028,7 +1226,7 @@
               addLog('Node 4 joined Zone A', 'ls');
               renderScalingStats();
               await ctx.delay(800);
-              
+
               const moves = [
                 { id: 's2', from: 1, to: 4, role: 'LEADER' },
                 { id: 's4', from: 1, to: 4, role: 'FOLLOWER' },
@@ -1038,18 +1236,18 @@
               for (const m of moves) {
                 addLog(`Rebalancing ${m.id}: Moving ${m.role} to Node 4`, 'li');
                 await ctx.pktTabletToTablet(m.id, m.from, m.id, m.to, 'pk-raft', 800);
-                
+
                 const g = S.groups.find(x => x.id === m.id);
                 g.replicas = g.replicas.map(r => r === m.from ? m.to : r);
                 if (m.role === 'LEADER') g.leaderNode = m.to;
-                
+
                 ctx.rebuildReplicaState();
                 renderAllTablets(); renderConnections();
                 renderScalingStats();
                 ctx.hlTablet(m.id, m.to, 't-new');
                 await ctx.delay(600);
               }
-              
+
               addLog('Node 4 balance complete ✓', 'ls');
               ctx.setLat(0, 15);
             }
@@ -1062,7 +1260,7 @@
               addLog('Node 5 joined Zone B', 'ls');
               renderScalingStats();
               await ctx.delay(800);
-              
+
               const moves = [
                 { id: 's4', from: 2, to: 5, role: 'LEADER' },
                 { id: 's2', from: 2, to: 5, role: 'FOLLOWER' },
@@ -1072,18 +1270,18 @@
               for (const m of moves) {
                 addLog(`Rebalancing ${m.id}: Moving ${m.role} to Node 5`, 'li');
                 await ctx.pktTabletToTablet(m.id, m.from, m.id, m.to, 'pk-raft', 800);
-                
+
                 const g = S.groups.find(x => x.id === m.id);
                 g.replicas = g.replicas.map(r => r === m.from ? m.to : r);
                 if (m.role === 'LEADER') g.leaderNode = m.to;
-                
+
                 ctx.rebuildReplicaState();
                 renderAllTablets(); renderConnections();
                 renderScalingStats();
                 ctx.hlTablet(m.id, m.to, 't-new');
                 await ctx.delay(600);
               }
-              
+
               addLog('Node 5 balance complete ✓', 'ls');
               ctx.setLat(0, 12);
             }
@@ -1096,7 +1294,7 @@
               addLog('Node 6 joined Zone C', 'ls');
               renderScalingStats();
               await ctx.delay(800);
-              
+
               const moves = [
                 { id: 's5', from: 3, to: 6, role: 'LEADER' },
                 { id: 's1', from: 3, to: 6, role: 'FOLLOWER' },
@@ -1106,18 +1304,18 @@
               for (const m of moves) {
                 addLog(`Rebalancing ${m.id}: Moving ${m.role} to Node 6`, 'li');
                 await ctx.pktTabletToTablet(m.id, m.from, m.id, m.to, 'pk-raft', 800);
-                
+
                 const g = S.groups.find(x => x.id === m.id);
                 g.replicas = g.replicas.map(r => r === m.from ? m.to : r);
                 if (m.role === 'LEADER') g.leaderNode = m.to;
-                
+
                 ctx.rebuildReplicaState();
                 renderAllTablets(); renderConnections();
                 renderScalingStats();
                 ctx.hlTablet(m.id, m.to, 't-new');
                 await ctx.delay(600);
               }
-              
+
               addLog('Cluster fully balanced across 6 nodes ✓', 'ls');
               ctx.setLat(0, 8);
               document.getElementById('health-txt').textContent = 'Healthy · 6 TServers · Fully Balanced';
@@ -1129,7 +1327,7 @@
             action: async (ctx) => {
               addLog('Scale-in: Removing Node 6...', 'lw');
               await ctx.delay(600);
-              
+
               const moves = [
                 { id: 's5', from: 6, to: 3, role: 'LEADER' },
                 { id: 's1', from: 6, to: 3, role: 'FOLLOWER' },
@@ -1147,7 +1345,7 @@
                 renderScalingStats();
                 await ctx.delay(400);
               }
-              
+
               ctx.setNodeVisibility(6, false);
               renderScalingStats();
               addLog('Node 6 decommissioned ✓', 'ls');
@@ -1177,7 +1375,7 @@
                 renderScalingStats();
                 await ctx.delay(400);
               }
-              
+
               ctx.setNodeVisibility(5, false);
               renderScalingStats();
               addLog('Node 5 decommissioned ✓', 'ls');
@@ -1207,7 +1405,7 @@
                 renderScalingStats();
                 await ctx.delay(400);
               }
-              
+
               ctx.setNodeVisibility(4, false);
               renderScalingStats();
               addLog('Cluster returned to steady 3-node state ✓', 'ls');
@@ -1225,7 +1423,7 @@
         latencies: [{ lbl: 'Size Check', cls: 'll', max: 1 }, { lbl: 'Split Point', cls: 'll', max: 2 }, { lbl: 'New Group', cls: 'lm', max: 50 }],
         steps: [
           { label: 'Growth', desc: 'Bulk writes fill the tablet beyond the 64MB threshold.', action: async (ctx) => { for (let i = 0; i < 3; i++) { await ctx.pktClientToTablet('tg1', 1, 'pk-write', 300); ctx.addMem('tg1', 1, 20); } } },
-          { label: 'Analyze Range', desc: 'TServer identifies the median split point for the hash range.', action: async (ctx) => { 
+          { label: 'Analyze Range', desc: 'TServer identifies the median split point for the hash range.', action: async (ctx) => {
             ctx.setLat(0, 0.8); ctx.setLat(1, 1.2);
             showSplitPanel(true);
             renderSplitInfo('0x0000–0x54FF', '0x2A87');
@@ -1265,31 +1463,31 @@
         desc: 'DocDB (RocksDB LSM-tree): writes → MemTable → L0 SSTable flush → L0→L1 compaction → lower read amplification.',
         latencies: [{ lbl: 'L0 Flush', cls: 'lm', max: 50 }, { lbl: 'Compaction', cls: 'lm', max: 200 }, { lbl: 'Final Read', cls: 'll', max: 2 }],
         steps: [
-          { label: 'Writes & Flush #1', desc: 'Incoming writes fill MemTable (TS-1). When full, it flushes as an immutable L0 SSTable.', action: async (ctx) => { 
-            for (let n of [1, 2, 3]) { 
+          { label: 'Writes & Flush #1', desc: 'Incoming writes fill MemTable (TS-1). When full, it flushes as an immutable L0 SSTable.', action: async (ctx) => {
+            for (let n of [1, 2, 3]) {
               const rs = S.replicaState['tg1'][n];
               rs.mem = 90; reRenderTabletInternal('tg1', n);
               await ctx.delay(400);
               rs.mem = 5; rs.ssts.push(25); rs.ss = rs.ssts.reduce((a,b)=>a+b, 0);
               reRenderTabletInternal('tg1', n);
-            } 
+            }
             ctx.setLat(0, 32); addLog('L0 Flush complete: SST segment #1 created', 'ls');
           } },
-          { label: 'Writes & Flush #2', desc: 'Another burst of writes creates a second L0 file. Multiple L0 files increase read amplification.', action: async (ctx) => { 
-            for (let n of [1, 2, 3]) { 
+          { label: 'Writes & Flush #2', desc: 'Another burst of writes creates a second L0 file. Multiple L0 files increase read amplification.', action: async (ctx) => {
+            for (let n of [1, 2, 3]) {
               const rs = S.replicaState['tg1'][n];
               rs.mem = 85; reRenderTabletInternal('tg1', n);
               await ctx.delay(400);
               rs.mem = 5; rs.ssts.push(30); rs.ss = rs.ssts.reduce((a,b)=>a+b, 0);
               reRenderTabletInternal('tg1', n);
-            } 
+            }
             ctx.setLat(0, 41); addLog('L0 Flush complete: SST segment #2 created', 'ls');
           } },
-          { label: 'Compaction (Merge)', desc: 'DocDB triggers compaction to merge small L0 files into a larger L1 file, removing duplicates/deleted keys.', action: async (ctx) => { 
+          { label: 'Compaction (Merge)', desc: 'DocDB triggers compaction to merge small L0 files into a larger L1 file, removing duplicates/deleted keys.', action: async (ctx) => {
             for (let n of [1, 2, 3]) { S.replicaState['tg1'][n].compacting = true; reRenderTabletInternal('tg1', n); }
             addLog('Compaction started: Merging SST segments...', 'li');
             await ctx.delay(1200);
-            for (let n of [1, 2, 3]) { 
+            for (let n of [1, 2, 3]) {
               const rs = S.replicaState['tg1'][n]; rs.compacting = false;
               const total = rs.ssts.reduce((a,b)=>a+b, 0);
               rs.ssts = [Math.min(95, total * 0.85)]; // Compressed merge
@@ -1298,10 +1496,10 @@
             }
             ctx.setLat(1, 185); addLog('Compaction complete: Segments merged into optimized L1 SST', 'ls');
           } },
-          { label: 'Fast Read', desc: 'With fewer SST files to check, the read request completes much faster.', action: async (ctx) => { 
-            await ctx.pktClientToTablet('tg1', 1, 'pk-read', 400); 
-            ctx.setLat(2, 0.8); 
-            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); 
+          { label: 'Fast Read', desc: 'With fewer SST files to check, the read request completes much faster.', action: async (ctx) => {
+            await ctx.pktClientToTablet('tg1', 1, 'pk-read', 400);
+            ctx.setLat(2, 0.8);
+            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
             addLog('Read complete: 0.8ms (optimized by compaction)', 'ls');
           } }
         ]
@@ -1319,14 +1517,14 @@
         ],
         init: (ctx) => {
           S.groups = [
-            { 
-              id: 'tg-col', table: 'colocated', isColocated: true, tnum: 1, range: 'MIN — MAX', 
-              leaderNode: 1, term: 4, replicas: [1, 2, 3], 
+            {
+              id: 'tg-col', table: 'colocated', isColocated: true, tnum: 1, range: 'MIN — MAX',
+              leaderNode: 1, term: 4, replicas: [1, 2, 3],
               data: [
                 [1, 'Electronics', 'Gadgets', '', 1.1, 'categories'],
                 [101, 'Product A', '$10', '', 1.2, 'products'],
                 [102, 'Product B', '$20', '', 1.3, 'products']
-              ] 
+              ]
             }
           ];
           S.replicaState = buildRS(S.groups);
@@ -1338,13 +1536,13 @@
           }, 100);
         },
         steps: [
-          { 
-            label: 'Shared Storage (Range Sharded)', 
-            desc: 'Colocated tables share a single Raft group. Unlike standard tables that might use hash sharding, colocated tables are range-sharded by default, keeping data sorted by the entire row key.', 
-            action: async (ctx) => { 
+          {
+            label: 'Shared Storage (Range Sharded)',
+            desc: 'Colocated tables share a single Raft group. Unlike standard tables that might use hash sharding, colocated tables are range-sharded by default, keeping data sorted by the entire row key.',
+            action: async (ctx) => {
               ctx.hlTablet('tg-col', 1, 't-hl');
               addLog('Shared tablet tg-col is range-sharded based on the entire row key', 'li');
-            } 
+            }
           },
           {
             label: 'Write Path',
@@ -1370,12 +1568,12 @@
             action: async (ctx) => {
               addLog('DDL: CREATE TABLE customers (...) COLOCATED = true;', 'li');
               ctx.setDDL('CREATE DATABASE my_app WITH colocation = true;\n\nCREATE TABLE products (...) COLOCATED = true;\nCREATE TABLE categories (...) COLOCATED = true;\nCREATE TABLE customers (...) COLOCATED = true;');
-              
+
               const eb = document.getElementById('extra-btns');
               if (!document.getElementById('btn-ins-c3')) {
-                const btn = document.createElement('button'); 
+                const btn = document.createElement('button');
                 btn.className = 'btn btn-o'; btn.id = 'btn-ins-c3';
-                btn.innerHTML = '➕ Insert (Customer)'; 
+                btn.innerHTML = '➕ Insert (Customer)';
                 btn.onclick = () => window.insertColocatedC();
                 eb.appendChild(btn);
               }
@@ -2077,6 +2275,141 @@
               addLog('SST-2: only id=5 Eve Chen survives — storage reclaimed ✓', 'ls');
             }
           }
+        ]
+      },
+
+      "20": {
+        group: "Geo-distribution", icon: "🌍",
+        name: 'Multi-Region', title: 'Multi-Region', subtitle: 'RF=3 · Leader preference · Failure simulation',
+        desc: 'A single YugabyteDB cluster spanning US-East, EU-West, and APAC. The <b>orders</b> table has 3 shards, each replicated to all 3 regions (RF=3). Pin leaders to any region, simulate a regional outage, and observe Raft re-election and latency impact in real time.',
+        latencies: [
+          { lbl: 'Client → Leader',  cls: 'll', max: 200 },
+          { lbl: 'Read Latency',     cls: 'll', max: 200 },
+          { lbl: 'Raft Replication', cls: 'lm', max: 300 },
+          { lbl: 'Write Latency',    cls: 'lm', max: 300 },
+        ],
+        guidedTour: [
+          { text: "9 nodes across 3 regions. The <b>orders</b> table has 3 shards — each replicated to all 3 regions (RF=3).", element: ".canvas-wrap" },
+          { text: "Use <b>📍 preference buttons</b> to pin leaders to any region. Leaders move instantly and latency reflects the new topology.", element: "#extra-btns" },
+          { text: "Click <b>⚡ Fail</b> to take the preferred region offline. Raft elects new leaders in a surviving region automatically.", element: "#extra-btns" },
+          { text: "Step through <b>Read</b> and <b>Write</b> to see animated packets and live latency updates reflecting the current state.", element: ".step-bar" }
+        ],
+        extraBtns: [
+          { id: 'mr-pref-us',   label: '📍 US-East',    cls: 'btn-info', cb: 'mrSetPrefUs',   disabled: false },
+          { id: 'mr-pref-eu',   label: '📍 EU-West',    cls: 'btn-info', cb: 'mrSetPrefEu',   disabled: false },
+          { id: 'mr-pref-apac', label: '📍 APAC',       cls: 'btn-info', cb: 'mrSetPrefApac', disabled: false },
+          { id: 'mr-fail',      label: '⚡ Fail US-East', cls: 'btn-warn', cb: 'mrFailRegion', disabled: false },
+          { id: 'mr-restore',   label: '↺ Restore',     cls: 'btn-ok',   cb: 'mrRestore',     disabled: true  },
+        ],
+        init: (ctx) => {
+          window._mrPrefs  = ['us']; // reset to single-region default
+          window._mrFailed = null;
+          window._mrCtx    = ctx;
+          window._mrPanelDone = {};
+
+          ctx.setCanvasGeoMode(true);
+          for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
+          ctx.setNodeRegion(1, 'us', 'us-east-1a'); ctx.setNodeRegion(2, 'us', 'us-east-1b'); ctx.setNodeRegion(3, 'us', 'us-east-1c');
+          ctx.setNodeRegion(4, 'eu', 'eu-central-1a'); ctx.setNodeRegion(5, 'eu', 'eu-central-1b'); ctx.setNodeRegion(6, 'eu', 'eu-central-1c');
+          ctx.setNodeRegion(7, 'apac', 'ap-south-1a'); ctx.setNodeRegion(8, 'apac', 'ap-south-1b'); ctx.setNodeRegion(9, 'apac', 'ap-south-1c');
+
+          S.groups = [
+            { id: 'mr1', table: 'orders', tnum: 1, range: '[0x0000, 0x5554]', leaderNode: 1, term: 4, replicas: [1,4,7],
+              data: [[1042,'Widget Pro','Alice','DONE',1713.241],[1087,'Keyboard','Bob','SHIP',1713.298],[1103,'Monitor','Carol','PEND',1713.341]] },
+            { id: 'mr2', table: 'orders', tnum: 2, range: '[0x5555, 0xAAA9]', leaderNode: 2, term: 4, replicas: [2,5,8],
+              data: [[2011,'Headset','Dave','DONE',1713.188],[2056,'SSD 1TB','Eve','DONE',1713.221],[2098,'Cable','Frank','PEND',1713.317]] },
+            { id: 'mr3', table: 'orders', tnum: 3, range: '[0xAAAA, 0xFFFF]', leaderNode: 3, term: 4, replicas: [3,6,9],
+              data: [[3007,'Desk Lamp','Grace','SHIP',1713.163],[3049,'Notebook','Hank','DONE',1713.275],[3091,'Pen Set','Iris','PEND',1713.359]] },
+          ];
+          S.replicaState = buildRS(S.groups);
+          document.getElementById('client-box').textContent = '⬡ US-East Client';
+
+          renderAllTablets();
+          _mrRenderAll();
+          setTimeout(() => { renderConnections(); }, 100);
+        },
+        steps: [
+          // ── Step 0: Setup ────────────────────────────────────────────────────
+          {
+            label: () => `Setup — RF=3 · Leaders in ${_mrEffRegs().map(r => _mrLabel[r]).join(' & ')}`,
+            desc: () => {
+              const regs = _mrEffRegs(), multi = regs.length > 1;
+              return `9 nodes across 3 regions, RF=3 (1 replica per region). The <b>orders</b> table has 3 hash-sharded tablets, each leader pinned to <b>${regs.map(r => _mrLabel[r]).join(' &amp; ')}</b>${multi ? ' (round-robin across shards)' : ''}. Toggle <b>📍 preference buttons</b> to move leaders, or click <b>⚡ Fail</b> to simulate a regional outage.`;
+            },
+            action: async (ctx) => {
+              const regs = _mrEffRegs();
+              const healthEl = document.getElementById('health-txt');
+              if (healthEl) healthEl.textContent = `${window._mrFailed ? '⚠️ Degraded' : 'Healthy'} · RF=3 · 9 TServers · Leaders: ${regs.map(r => _mrLabel[r]).join(' & ')}`;
+              addLog(`Cluster ${window._mrFailed ? `degraded — ${_mrLabel[window._mrFailed]} offline` : 'healthy — all regions up'}`, window._mrFailed ? 'lw' : 'ls');
+              addLog(`orders table · 3 shards · RF=3 · leaders → ${regs.map(r => _mrLabel[r]).join(' & ')}`, 'li');
+              _mrLogShards();
+            }
+          },
+          // ── Steps 1-6: Read then Write as separate steps, per shard ─────────
+          ...[0,1,2].flatMap(gi => {
+            const ranges = ['[0x0000,0x5554]','[0x5555,0xAAA9]','[0xAAAA,0xFFFF]'];
+            const hrange = ['0x0000–0x5554','0x5555–0xAAA9','0xAAAA–0xFFFF'][gi];
+            return [
+              // ── READ step ──
+              {
+                label: () => `Shard-${gi+1} Read · ${ranges[gi]} · ${_mrLabel[_mrEffReg(gi)]}`,
+                desc: () => {
+                  const eff = _mrEffReg(gi);
+                  const { cl, read } = _mrLatsAll()[gi];
+                  return `Client sends a <b>read</b> to the <b>shard-${gi+1}</b> leader in <b>${_mrLabel[eff]}</b>. ${eff === 'us' ? 'Leader is in the same region — minimal latency.' : `Cross-region hop to ${_mrLabel[eff]} — round-trip ~${read}ms.`} Latency bars update on completion.`;
+                },
+                action: async (ctx) => {
+                  _mrResetLatBars();
+                  const eff = _mrEffReg(gi), leaderNode = _mrLeader(gi);
+                  const { cl, read } = _mrLatsAll()[gi];
+                  const tid = `mr${gi+1}`;
+                  addLog(`READ  shard-${gi+1} → Node ${leaderNode} (${_mrLabel[eff]}) [${hrange}]`, 'li');
+                  ctx.activateClient(true);
+                  await ctx.pktClientToTablet(tid, leaderNode, 'pk-read', _mrAnimDur(cl));
+                  ctx.hlTablet(tid, leaderNode, 't-hl');
+                  await ctx.pktTabletToClient(tid, leaderNode, 'pk-ack', _mrAnimDur(cl));
+                  ctx.setLat(0, cl); ctx.setLat(1, read);
+                  ctx.hlLatRow(0); ctx.hlLatRow(1);
+                  addLog(`  ✓ read ~${read}ms${read > 10 ? ' (cross-region RTT)' : ' (local)'}`, read > 10 ? 'lw' : 'ls');
+                  window._mrPanelDone[eff + ':read'] = true; _mrRenderLatPanel();
+                  ctx.activateClient(false);
+                }
+              },
+              // ── WRITE step ──
+              {
+                label: () => `Shard-${gi+1} Write · ${ranges[gi]} · ${_mrLabel[_mrEffReg(gi)]}`,
+                desc: () => {
+                  const eff = _mrEffReg(gi), fail = window._mrFailed;
+                  const { cl, raft, write } = _mrLatsAll()[gi];
+                  const followers = _mrAll.filter(r => r !== eff && r !== fail);
+                  return `Client sends a <b>write</b> to the <b>shard-${gi+1}</b> leader in <b>${_mrLabel[eff]}</b>. The leader replicates via Raft to <b>${followers.map(r => _mrLabel[r]).join(' &amp; ')}</b> — quorum in ~${raft}ms, end-to-end write ~${write}ms.`;
+                },
+                action: async (ctx) => {
+                  _mrResetLatBars();
+                  const eff = _mrEffReg(gi), leaderNode = _mrLeader(gi), fail = window._mrFailed;
+                  const { cl, raft, write } = _mrLatsAll()[gi];
+                  const followers = _mrAll.filter(r => r !== eff && r !== fail);
+                  const followerNodes = followers.map(r => _mrNodes[r][gi]);
+                  const tid = `mr${gi+1}`;
+                  addLog(`WRITE shard-${gi+1} → Node ${leaderNode} (${_mrLabel[eff]}) [${hrange}]`, 'li');
+                  ctx.activateClient(true);
+                  await ctx.pktClientToTablet(tid, leaderNode, 'pk-write', _mrAnimDur(cl));
+                  addLog(`  WAL → Raft → ${followers.map(r => _mrLabel[r]).join(', ')}`, 'li');
+                  const raftPkts = followerNodes.map((fn, i) =>
+                    ctx.pktTabletToTablet(tid, leaderNode, tid, fn, 'pk-raft', _mrAnimDur(_mrOW(eff, followers[i])))
+                  );
+                  await raftPkts[0];
+                  ctx.setLat(0, cl); ctx.setLat(2, raft); ctx.setLat(3, write);
+                  ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3);
+                  addLog(`  ✓ quorum (${_mrLabel[followers[0]]} acked ~${raft}ms) — write ~${write}ms${write > 100 ? ' ⚠' : ''}`, write > 100 ? 'lw' : 'ls');
+                  if (raftPkts.length > 1) { await raftPkts[1]; addLog(`  ${_mrLabel[followers[1]]} synced`, 'li'); }
+                  await ctx.pktTabletToClient(tid, leaderNode, 'pk-ack', _mrAnimDur(cl));
+                  window._mrPanelDone[eff + ':write'] = true; _mrRenderLatPanel();
+                  ctx.activateClient(false);
+                }
+              }
+            ];
+          })
         ]
       }
     };
