@@ -2193,7 +2193,7 @@ window.mrRestore = function() {
 
       "20": {
         group: "Geo-distribution", icon: "🌍",
-        name: 'Multi-Region', title: 'Multi-Region', subtitle: 'RF=3 · Leader preference · Failure simulation',
+        name: 'Multi-Region', title: 'Multi-Region', subtitle: 'Leader preference',
         desc: 'A single YugabyteDB cluster spanning US-East, EU-West, and APAC. The <b>orders</b> table has 3 shards, each replicated to all 3 regions (RF=3). Pin leaders to any region, simulate a regional outage, and observe Raft re-election and latency impact in real time.',
         latencies: [
           { lbl: 'Client → Leader',  cls: 'll', max: 200 },
