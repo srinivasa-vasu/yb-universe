@@ -2246,18 +2246,20 @@
     .split-panel {
       border-top: 1px solid var(--border);
       background: var(--s2);
-      height: 180px;
+      height: 230px;
       flex-direction: column;
       display: none;
       padding: 12px 18px;
+      overflow-y: auto;
     }
 
     .split-viz {
       display: flex;
-      flex-direction: column;
-      gap: 15px;
+      flex-direction: row;
+      gap: 30px;
       margin-top: 10px;
-      max-width: 600px;
+      width: 100%;
+      align-items: flex-start;
     }
 
     .rs-row {

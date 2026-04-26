@@ -755,93 +755,6 @@ window.mrRestore = function() {
         ]
       },
 
-      "9": {
-        group: "Geo-distribution", icon: "🌎",
-        name: 'Geo-Partitioning', title: 'Geo-Partitioning', subtitle: 'Multi-region geo(row) pinning',
-        filterTable: 'users',
-        desc: 'YugabyteDB pins rows to specific regions via a <b>tablegroup</b> per region. Each Raft group has 3 replicas in the same region — reads and writes are always local. Region-specific clients see sub-5ms latency; a global client crossing regions pays the full cross-region RTT penalty.',
-        latencies: [
-          { lbl: 'Client → Leader', cls: 'll', max: 200 },
-          { lbl: 'Read Latency',    cls: 'll', max: 200 },
-          { lbl: 'Raft Replication', cls: 'lm', max: 50  },
-          { lbl: 'Write Latency',   cls: 'lm', max: 200 },
-        ],
-        init: (ctx) => {
-          ctx.setCanvasGeoMode(true);
-          document.getElementById('canvas-wrap').classList.add('geo-partition');
-          for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
-          ctx.setNodeRegion(1, 'us', 'US-East'); ctx.setNodeRegion(2, 'us', 'US-East'); ctx.setNodeRegion(3, 'us', 'US-East');
-          ctx.setNodeRegion(4, 'eu', 'Europe');  ctx.setNodeRegion(5, 'eu', 'Europe');  ctx.setNodeRegion(6, 'eu', 'Europe');
-          ctx.setNodeRegion(7, 'apac', 'APAC');  ctx.setNodeRegion(8, 'apac', 'APAC');  ctx.setNodeRegion(9, 'apac', 'APAC');
-          S.groups = JSON.parse(JSON.stringify(GEO_GROUPS));
-          S.replicaState = buildRS(S.groups);
-          renderAllTablets();
-          setTimeout(renderConnections, 100);
-        },
-        steps: [
-          // ── Setup ──
-          {
-            label: 'Setup — 3 Geo-Partitions · 3 Local Raft Groups',
-            desc: '9 nodes across 3 regions, RF=3 per region. The <b>users</b> table is geo-partitioned: <b>tg-us</b> (Nodes 1–3), <b>tg-eu</b> (Nodes 4–6), <b>tg-apac</b> (Nodes 7–9). Each region-specific client reads and writes only to its local Raft group — no cross-region traffic.',
-            action: async (ctx) => {
-              addLog('Geo-Partitioning: users table split into 3 region-local Raft groups', 'ls');
-              addLog('  tg-us   → Nodes 1, 2, 3 (us-east-1)   · leader: Node 1', 'li');
-              addLog('  tg-eu   → Nodes 4, 5, 6 (eu-central-1) · leader: Node 4', 'li');
-              addLog('  tg-apac → Nodes 7, 8, 9 (ap-south-1)  · leader: Node 7', 'li');
-              addLog('Each client is co-located with its region\'s leader — reads/writes stay local', 'ls');
-            }
-          },
-          // ── US steps ──
-          ...[
-            { reg: 'us',   elId: 'geo-client-us',   tg: 'tg-us',   leader: 1, followers: [2,3], lbl: 'US-East', raft: 2 },
-            { reg: 'eu',   elId: 'geo-client-eu',   tg: 'tg-eu',   leader: 4, followers: [5,6], lbl: 'EU-West', raft: 2 },
-            { reg: 'apac', elId: 'geo-client-apac', tg: 'tg-apac', leader: 7, followers: [8,9], lbl: 'APAC',    raft: 2 },
-          ].flatMap(({ reg, elId, tg, leader, followers, lbl, raft }) => [
-            // ── READ step ──
-            {
-              label: `${lbl} Client — Read`,
-              desc: `The <b>${lbl} client</b> reads from the local <b>${tg}</b> leader (Node ${leader}). All 3 replicas are in the same region — the round-trip never leaves <b>${lbl}</b>. Expected latency: <b>~2ms</b>.`,
-              action: async (ctx) => {
-                _mrResetLatBars();
-                addLog(`${lbl} Client: SELECT * FROM users WHERE region='${reg.toUpperCase()}'`, 'li');
-                ctx.activateEl(elId, true);
-                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-read', 300);
-                ctx.hlTablet(tg, leader, 't-hl');
-                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
-                ctx.setLat(0, 2); ctx.setLat(1, 2);
-                ctx.hlLatRow([0, 1]);
-                addLog(`  ✓ local read ~2ms — no cross-region hop`, 'ls');
-                ctx.activateEl(elId, false);
-              }
-            },
-            // ── WRITE step ──
-            {
-              label: `${lbl} Client — Write`,
-              desc: `The <b>${lbl} client</b> writes to the local <b>${tg}</b> leader (Node ${leader}). Raft replicates to Nodes ${followers.join(' & ')} within <b>${lbl}</b> — intra-region quorum in ~${raft}ms. End-to-end write: <b>~${2 + raft}ms</b>.`,
-              action: async (ctx) => {
-                _mrResetLatBars();
-                const names = { us: ['Alice','Bob'], eu: ['Anna','Hans'], apac: ['Raj','Mei'] };
-                const data  = { us: [12,'US',79], eu: [11,'DE',90], apac: [10,'SG',85] };
-                const [score, regCode, id2] = data[reg];
-                const newRow = [score, names[reg][0], regCode, id2, performance.now() / 1000];
-                addLog(`${lbl} Client: INSERT INTO users (…) region='${reg.toUpperCase()}'`, 'li');
-                ctx.activateEl(elId, true);
-                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-write', 300);
-                addLog(`  WAL → Raft → ${lbl} followers (Nodes ${followers.join(', ')})`, 'li');
-                const raftPkts = followers.map(fn => ctx.pktTabletToTablet(tg, leader, tg, fn, 'pk-raft', 300));
-                await Promise.all(raftPkts);
-                ctx.setLat(0, 2); ctx.setLat(2, raft); ctx.setLat(3, 2 + raft);
-                ctx.hlLatRow([0, 2, 3]);
-                S.groups.find(g => g.id === tg).data.push(newRow);
-                for (const nid of [leader, ...followers]) ctx.reRenderTablet(tg, nid, true);
-                addLog(`  ✓ intra-region quorum — write ~${2 + raft}ms`, 'ls');
-                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
-                ctx.activateEl(elId, false);
-              }
-            }
-          ])
-        ]
-      },
 
       "10": {
         group: "Global & High Availability", icon: "🗳️",
@@ -2401,6 +2314,15 @@ window.mrRestore = function() {
                   await raftPkts[0];
                   ctx.setLat(0, cl); ctx.setLat(2, raft); ctx.setLat(3, write);
                   ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3);
+                  
+                  const g = S.groups.find(x => x.id === tid);
+                  const nextId = 4000 + Math.floor(Math.random() * 999);
+                  const items = ['Laptop', 'Phone', 'Tablet', 'Camera', 'Watch'];
+                  const customers = ['Zara', 'Yusuf', 'Xavier', 'Wendy', 'Victor'];
+                  const newRow = [nextId, items[Math.floor(Math.random()*5)], customers[Math.floor(Math.random()*5)], 'PEND', performance.now()/1000];
+                  g.data.push(newRow);
+                  [leaderNode, ...followerNodes].forEach(nid => ctx.reRenderTablet(tid, nid, true));
+
                   addLog(`  ✓ quorum (${_mrLabel[followers[0]]} acked ~${raft}ms) — write ~${write}ms${write > 100 ? ' ⚠' : ''}`, write > 100 ? 'lw' : 'ls');
                   if (raftPkts.length > 1) { await raftPkts[1]; addLog(`  ${_mrLabel[followers[1]]} synced`, 'li'); }
                   await ctx.pktTabletToClient(tid, leaderNode, 'pk-ack', _mrAnimDur(cl));
@@ -2410,6 +2332,93 @@ window.mrRestore = function() {
               }
             ];
           })
+        ]
+      },
+
+      "21": {
+        group: "Geo-distribution", icon: "🌎",
+        name: 'Geo-Partition', title: 'Geo-Partition', subtitle: 'Multi-region geo(row) pinning',
+        filterTable: 'users',
+        desc: 'YugabyteDB pins rows to specific regions via a <b>tablegroup</b> per region. Each Raft group has 3 replicas in the same region — reads and writes are always local. Region-specific clients see sub-5ms latency; a global client crossing regions pays the full cross-region RTT penalty.',
+        latencies: [
+          { lbl: 'Client → Leader', cls: 'll', max: 200 },
+          { lbl: 'Read Latency',    cls: 'll', max: 200 },
+          { lbl: 'Raft Replication', cls: 'lm', max: 50  },
+          { lbl: 'Write Latency',   cls: 'lm', max: 200 },
+        ],
+        init: (ctx) => {
+          ctx.setCanvasGeoMode(true);
+          document.getElementById('canvas-wrap').classList.add('geo-partition');
+          for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
+          ctx.setNodeRegion(1, 'us', 'US-East'); ctx.setNodeRegion(2, 'us', 'US-East'); ctx.setNodeRegion(3, 'us', 'US-East');
+          ctx.setNodeRegion(4, 'eu', 'Europe');  ctx.setNodeRegion(5, 'eu', 'Europe');  ctx.setNodeRegion(6, 'eu', 'Europe');
+          ctx.setNodeRegion(7, 'apac', 'APAC');  ctx.setNodeRegion(8, 'apac', 'APAC');  ctx.setNodeRegion(9, 'apac', 'APAC');
+          S.groups = JSON.parse(JSON.stringify(GEO_GROUPS));
+          S.replicaState = buildRS(S.groups);
+          renderAllTablets();
+          setTimeout(renderConnections, 100);
+        },
+        steps: [
+          // ── Setup ──
+          {
+            label: 'Setup — 3 Geo-Partitions · 3 Local Raft Groups',
+            desc: '9 nodes across 3 regions, RF=3 per region. The <b>users</b> table is geo-partitioned: <b>tg-us</b> (Nodes 1–3), <b>tg-eu</b> (Nodes 4–6), <b>tg-apac</b> (Nodes 7–9). Each region-specific client reads and writes only to its local Raft group — no cross-region traffic.',
+            action: async (ctx) => {
+              addLog('Geo-Partition: users table split into 3 region-local Raft groups', 'ls');
+              addLog('  tg-us   → Nodes 1, 2, 3 (us-east-1)   · leader: Node 1', 'li');
+              addLog('  tg-eu   → Nodes 4, 5, 6 (eu-central-1) · leader: Node 4', 'li');
+              addLog('  tg-apac → Nodes 7, 8, 9 (ap-south-1)  · leader: Node 7', 'li');
+              addLog('Each client is co-located with its region\'s leader — reads/writes stay local', 'ls');
+            }
+          },
+          // ── US steps ──
+          ...[
+            { reg: 'us',   elId: 'geo-client-us',   tg: 'tg-us',   leader: 1, followers: [2,3], lbl: 'US-East', raft: 2 },
+            { reg: 'eu',   elId: 'geo-client-eu',   tg: 'tg-eu',   leader: 4, followers: [5,6], lbl: 'EU-West', raft: 2 },
+            { reg: 'apac', elId: 'geo-client-apac', tg: 'tg-apac', leader: 7, followers: [8,9], lbl: 'APAC',    raft: 2 },
+          ].flatMap(({ reg, elId, tg, leader, followers, lbl, raft }) => [
+            // ── READ step ──
+            {
+              label: `${lbl} Client — Read`,
+              desc: `The <b>${lbl} client</b> reads from the local <b>${tg}</b> leader (Node ${leader}). All 3 replicas are in the same region — the round-trip never leaves <b>${lbl}</b>. Expected latency: <b>~2ms</b>.`,
+              action: async (ctx) => {
+                _mrResetLatBars();
+                addLog(`${lbl} Client: SELECT * FROM users WHERE region='${reg.toUpperCase()}'`, 'li');
+                ctx.activateEl(elId, true);
+                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-read', 300);
+                ctx.hlTablet(tg, leader, 't-hl');
+                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
+                ctx.setLat(0, 2); ctx.setLat(1, 2);
+                ctx.hlLatRow([0, 1]);
+                addLog(`  ✓ local read ~2ms — no cross-region hop`, 'ls');
+                ctx.activateEl(elId, false);
+              }
+            },
+            // ── WRITE step ──
+            {
+              label: `${lbl} Client — Write`,
+              desc: `The <b>${lbl} client</b> writes to the local <b>${tg}</b> leader (Node ${leader}). Raft replicates to Nodes ${followers.join(' & ')} within <b>${lbl}</b> — intra-region quorum in ~${raft}ms. End-to-end write: <b>~${2 + raft}ms</b>.`,
+              action: async (ctx) => {
+                _mrResetLatBars();
+                const names = { us: ['Alice','Bob'], eu: ['Anna','Hans'], apac: ['Raj','Mei'] };
+                const data  = { us: [12,'US',79], eu: [11,'DE',90], apac: [10,'IN',85] };                const [score, regCode, id2] = data[reg];
+                const newRow = [score, names[reg][0], regCode, id2, performance.now() / 1000];
+                addLog(`${lbl} Client: INSERT INTO users (…) region='${reg.toUpperCase()}'`, 'li');
+                ctx.activateEl(elId, true);
+                await ctx.pktFromElToTablet(elId, tg, leader, 'pk-write', 300);
+                addLog(`  WAL → Raft → ${lbl} followers (Nodes ${followers.join(', ')})`, 'li');
+                const raftPkts = followers.map(fn => ctx.pktTabletToTablet(tg, leader, tg, fn, 'pk-raft', 300));
+                await Promise.all(raftPkts);
+                ctx.setLat(0, 2); ctx.setLat(2, raft); ctx.setLat(3, 2 + raft);
+                ctx.hlLatRow([0, 2, 3]);
+                S.groups.find(g => g.id === tg).data.push(newRow);
+                for (const nid of [leader, ...followers]) ctx.reRenderTablet(tg, nid, true);
+                addLog(`  ✓ intra-region quorum — write ~${2 + raft}ms`, 'ls');
+                await ctx.pktTabletToEl(tg, leader, elId, 'pk-ack', 300);
+                ctx.activateEl(elId, false);
+              }
+            }
+          ])
         ]
       }
     };

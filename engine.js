@@ -3,7 +3,7 @@
 //  HELP & KEYBOARD SHORTCUTS
 // ════════════════════════════════════════════
 
-let guideEnabled = true;
+let guideEnabled = false;
 
 function toggleHelp() {
     const modal = document.getElementById('help-modal');
@@ -1117,7 +1117,7 @@ function closeTour() {
         "Global & High Availability": { chapter: "CHAPTER 4", icon: "🌎", desc: "Resilience, election, and multi-region patterns." },
         "Horizontal Scalability": { chapter: "CHAPTER 5", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
         "Geo-distribution": { chapter: "CHAPTER 6", icon: "📍", desc: "Multi-region clusters, data pinning, and leader preference." },
-        "Storage & Scalability": { chapter: "CHAPTER 7", icon: "🗄️", desc: "Compaction, partitioning, and storage internals." },
+        "Storage & Scalability": { chapter: "CHAPTER 7", icon: "🗄️", desc: "Compaction, and storage internals." },
         "Multi-Cluster & DR": { chapter: "CHAPTER 8", icon: "🔁", desc: "Disaster recovery and active-active replication." }
       };
 
@@ -1233,7 +1233,7 @@ function closeTour() {
       ctx.setCanvasGeoMode(false);
       ctx.setXClusterMode(false);
       document.getElementById('canvas-wrap').classList.remove('geo-partition');
-      const isGeo = sc.name === 'Geo-Partitioning' || sc.name === 'Multi-Region Cluster' || sc.name === 'Multi-Region';
+      const isGeo = sc.name === 'Geo-Partition' || sc.name === 'Multi-Region';
       for (let n = 1; n <= 9; n++) {
         ctx.setNodeRegion(n, null, '');
         if (isGeo || n <= 3) {
@@ -1482,34 +1482,64 @@ function closeTour() {
         const viz = document.getElementById('split-viz');
         if (!viz) return;
 
-        const matches = parentRange.match(/0x([0-9A-Fa-f]+)[–-]0x([0-9A-Fa-f]+)/);
-        if (!matches) return;
+        let start, end, split, p1, p2, nextSplit, endHex, startHex;
+        const isHash = parentRange.includes('0x');
 
-        const start = parseInt(matches[1], 16);
-        const end = parseInt(matches[2], 16);
-        const split = parseInt(splitPoint.replace('0x', ''), 16);
-
-        const total = end - start;
-        const p1 = Math.round(((split - start) / total) * 100);
-        const p2 = 100 - p1;
-
-        const nextSplit = '0x' + (split + 1).toString(16).toUpperCase().padStart(4, '0');
-        const endHex = '0x' + end.toString(16).toUpperCase().padStart(4, '0');
-        const startHex = '0x' + start.toString(16).toUpperCase().padStart(4, '0');
+        if (isHash) {
+          const matches = parentRange.match(/0x([0-9A-Fa-f]+)[–-]0x([0-9A-Fa-f]+)/);
+          if (!matches) return;
+          start = parseInt(matches[1], 16);
+          end = parseInt(matches[2], 16);
+          split = parseInt(splitPoint.replace('0x', ''), 16);
+          const total = end - start;
+          p1 = Math.round(((split - start) / total) * 100);
+          p2 = 100 - p1;
+          nextSplit = '0x' + (split + 1).toString(16).toUpperCase().padStart(4, '0');
+          endHex = '0x' + end.toString(16).toUpperCase().padStart(4, '0');
+          startHex = '0x' + start.toString(16).toUpperCase().padStart(4, '0');
+        } else {
+          // Range split (e.g., "0 — 999")
+          const matches = parentRange.match(/(\d+)\s*[–—\-]\s*(\d+)/);
+          if (!matches) return;
+          start = parseInt(matches[1]);
+          end = parseInt(matches[2]);
+          split = parseInt(splitPoint);
+          const total = end - start;
+          p1 = Math.round(((split - start) / total) * 100);
+          p2 = 100 - p1;
+          startHex = start.toString();
+          splitPoint = split.toString();
+          nextSplit = (split + 1).toString();
+          endHex = end.toString();
+        }
 
         viz.innerHTML = `
-          <div class="rs-row">
-            <div class="rs-label">Parent Tablet</div>
-            <div class="rs-bar-wrap">
-              <div class="rs-bar rs-parent" style="width:100%">${parentRange}</div>
-              <div class="rs-point" style="left:${p1}%"><span class="rs-point-lbl">Split Point: ${splitPoint}</span></div>
+          <div style="flex: 1.2; min-width: 300px;">
+            <div class="rs-row">
+              <div class="rs-label">Parent Tablet</div>
+              <div class="rs-bar-wrap">
+                <div class="rs-bar rs-parent" style="width:100%">${parentRange}</div>
+                <div class="rs-point" style="left:${p1}%"><span class="rs-point-lbl">Split Point: ${splitPoint}</span></div>
+              </div>
+            </div>
+            <div class="rs-row" style="margin-top: 20px;">
+              <div class="rs-label">Child Tablets</div>
+              <div class="rs-bar-wrap" style="display:flex; gap:2px; background:transparent; border:none;">
+                <div class="rs-bar rs-child1" style="width:${p1}%; position:relative;">${startHex}–${splitPoint}</div>
+                <div class="rs-bar rs-child2" style="width:${p2}%; position:relative;">${nextSplit}–${endHex}</div>
+              </div>
             </div>
           </div>
-          <div class="rs-row" style="margin-top: 15px;">
-            <div class="rs-label">Child Tablets</div>
-            <div class="rs-bar-wrap" style="display:flex; gap:2px; background:transparent; border:none;">
-              <div class="rs-bar rs-child1" style="width:${p1}%; position:relative;">${startHex}–${splitPoint}</div>
-              <div class="rs-bar rs-child2" style="width:${p2}%; position:relative;">${nextSplit}–${endHex}</div>
+          
+          <div class="rs-note" style="flex: 1; min-width: 250px; padding: 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--info); border-radius: 4px; font-size: 12.5px; line-height: 1.5; color: var(--txt2); margin-top: 0;">
+            <div style="font-weight: 700; color: var(--info); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 14px;">💡</span> Split Logic Note
+            </div>
+            <div style="margin-bottom: 12px;">
+              <b>HASH split</b> is based on the <b>mid of the current hash values</b> found in the tablet (not just the theoretical tablet range). This ensures child tablets are balanced by actual record count.
+            </div>
+            <div style="padding-top: 10px; border-top: 1px dashed rgba(59, 130, 246, 0.2);">
+              <b>RANGE split</b> is based on the <b>mid of the entire range key row space</b> (the median key). This splits data based on actual distribution while preserving sequential order for scans.
             </div>
           </div>
         `;
@@ -1881,11 +1911,26 @@ function closeTour() {
 
       // ── ARCHITECTURE VIEW ─────────────────────────────────────────────
 
-      const ARCH_FDS = [
-        { name: 'Fault Domain 1', az: 'ap-south-1a', nodes: [1,2,3] },
-        { name: 'Fault Domain 2', az: 'ap-south-1b', nodes: [4,5,6] },
-        { name: 'Fault Domain 3', az: 'ap-south-1c', nodes: [7,8,9] },
-      ];
+      const ARCH_FDS_MODES = {
+        zone: [
+          { name: 'AZ 1', az: 'ap-south-1a', nodes: [1,2,3], label: 'Fault Domain' },
+          { name: 'AZ 2', az: 'ap-south-1b', nodes: [4,5,6], label: 'Fault Domain' },
+          { name: 'AZ 3', az: 'ap-south-1c', nodes: [7,8,9], label: 'Fault Domain' },
+        ],
+        region: [
+          { name: 'Region 1', az: 'ap-south-1', nodes: [1,2,3], label: 'Fault Domain' },
+          { name: 'Region 2', az: 'us-east-1', nodes: [4,5,6], label: 'Fault Domain' },
+          { name: 'Region 3', az: 'eu-west-1', nodes: [7,8,9], label: 'Fault Domain' },
+        ],
+        cloud: [
+          { name: 'AWS', az: 'Global', nodes: [1,2,3], label: 'Fault Domain' },
+          { name: 'GCP', az: 'Global', nodes: [4,5,6], label: 'Fault Domain' },
+          { name: 'Azure', az: 'Global', nodes: [7,8,9], label: 'Fault Domain' },
+        ]
+      };
+
+      let _archViewMode = 'zone';
+      let ARCH_FDS = [...ARCH_FDS_MODES.zone];
 
       const ARCH_TABLETS = [
         { color: '#f59e0b', name: 'users.tg1',    leader: 1, replicas: [1,4,7] },
@@ -1945,6 +1990,7 @@ function closeTour() {
         _archLeaderPref = (_archLeaderPref === fi) ? -1 : fi;
         document.querySelectorAll('.av-lp-btn').forEach(btn => {
           const bfi = parseInt(btn.dataset.fd);
+          if (isNaN(bfi)) return; // Skip view mode buttons
           const isActive = bfi === _archLeaderPref;
           btn.classList.toggle('active', isActive);
           const fc = bfi >= 0 ? _archFdColors[bfi] : 'var(--txt2)';
@@ -1953,6 +1999,14 @@ function closeTour() {
           btn.style.borderColor = isActive ? fc : (bfi >= 0 ? fc + '55' : '');
         });
         _archRerenderChips(true);
+      };
+
+      window.archSetViewMode = function(mode) {
+        _archViewMode = mode;
+        ARCH_FDS = [...ARCH_FDS_MODES[mode]];
+        _archFailedFD = -1; // Reset failure state when switching modes
+        const av = document.getElementById('arch-view');
+        if (av) _renderArchUniverse(av);
       };
 
       function _exitArchMode(showCanvas) {
@@ -1985,6 +2039,8 @@ function closeTour() {
         document.getElementById('i-title').textContent = titleMap[tab] || tab;
         _archFailedFD = -1;
         _archLeaderPref = -1;
+        _archViewMode = 'zone';
+        ARCH_FDS = [...ARCH_FDS_MODES.zone];
         av.innerHTML = '';
         if (tab === 'universe') _renderArchUniverse(av);
         else if (tab === 'read-replica') _renderArchReadReplica(av);
@@ -2023,15 +2079,33 @@ function closeTour() {
         }
         const balActive = _archLeaderPref === -1;
         h += `<button class="av-lp-btn${balActive ? ' active' : ''}" data-fd="-1" onclick="archSetLeaderPref(-1)" style="${balActive ? 'background:var(--txt2);color:#0f172a;border-color:var(--txt2)' : ''}">⚖ Balanced</button>`;
+        
+        h += `<div style="margin-left:auto; display:flex; gap:8px; align-items:center">`;
+        h += `<span class="av-lp-lbl">View By:</span>`;
+        const modeLabels = { zone: 'Zone/Rack', region: 'Region/DC', cloud: 'Cloud' };
+        ['zone', 'region', 'cloud'].forEach(m => {
+          const isActive = _archViewMode === m;
+          const label = modeLabels[m];
+          h += `<button class="av-lp-btn${isActive ? ' active' : ''}" onclick="archSetViewMode('${m}')" style="${isActive ? 'background:var(--near);color:#0f172a;border-color:var(--near)' : 'border-color:var(--near)55;color:var(--near)'}">${label}</button>`;
+        });
+        h += `</div>`;
         h += `</div>`;
 
         h += `<div class="av-fd-row" id="av-fd-row">`;
         const fdColors = _archFdColors;
         for (let fi = 0; fi < 3; fi++) {
           const fd = ARCH_FDS[fi];
-          const fc = fdColors[fi];
+          const fc = _archFdColors[fi];
           h += `<div class="av-fd" id="av-fd-${fi}" style="border-top:3px solid ${fc}">`;
-          h += `<div class="av-fd-hdr"><div class="av-fd-name" style="color:${fc}">${fd.name}</div><div class="av-fd-az">${fd.az}</div></div>`;
+          h += `<div class="av-fd-hdr" style="display:flex; justify-content:space-between; align-items:flex-start">
+                 <div>
+                   <div class="av-fd-name" style="color:${fc}">${fd.name}</div>
+                   <div class="av-fd-az">${fd.az}</div>
+                 </div>
+                 <div class="av-fd-tag" style="color:${fc}; font-size:18px; font-weight:700; font-family:var(--head); white-space:nowrap">
+                   Fault Domain ${fi+1}
+                 </div>
+               </div>`;
           h += `<div class="av-fd-nodes">`;
           for (const nid of fd.nodes) {
             const myT = ARCH_TABLETS.filter(t => t.replicas.includes(nid));

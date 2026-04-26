@@ -57,6 +57,6 @@
       },
       {
         id: 'tg-apac', table: 'users', tnum: 3, range: 'APAC Pinned', leaderNode: 7, term: 4, replicas: [7, 8, 9],
-        data: [[3, 'Carol', 'SG', 78, 1713289000.3], [6, 'Frank', 'SG', 91, 1713289000.6], [9, 'Iris', 'SG', 94, 1713289000.9]]
+        data: [[3, 'Carol', 'IN', 78, 1713289000.3], [6, 'Frank', 'IN', 91, 1713289000.6], [9, 'Iris', 'IN', 94, 1713289000.9]]
       }
     ];
