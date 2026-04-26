@@ -1,13 +1,40 @@
-    const SCENARIOS = [
+    const SCENARIOS = {
+      "home": {
+        group: "Home", icon: "🏠", title: "Architecture Explorer", subtitle: "Interactive Distributed SQL Visualizer",
+        description: "Dive deep into YugabyteDB's distributed architecture. Explore interactive modules for Sharding, Raft-based replication, High Availability, and Global Data Distribution through real-time visualizations.",
+        visual: { type: "home" }
+      },
       // 0: Overview
-      {
-        name: 'Cluster Overview', steps: [], latencies: [],
+      "0": {
+        group: "Architecture", icon: "🗺️",
+        name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
+        steps: [], latencies: [],
         desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.'
       },
 
+      "universe": {
+        group: "Architecture", icon: "🌐",
+        name: 'Global Universe', title: 'Global Universe Architecture', subtitle: 'Fault domains',
+        isArch: true,
+        desc: 'A single logical database spanning multiple fault domains (zones or regions). Highly available with Zero RPO and Zero RTO, using synchronous replication.'
+      },
+      "xcl": {
+        group: "Architecture", icon: "🔗",
+        name: 'xCluster', title: 'xCluster Topology', subtitle: 'Cross-cluster',
+        isArch: true,
+        desc: 'Asynchronous replication between independent clusters. Used for disaster recovery (DR), low-latency local reads in multiple regions, and data migration.'
+      },
+      "read-replica": {
+        group: "Architecture", icon: "📖",
+        name: 'Read Replica', title: 'Read Replica Topology', subtitle: 'Low-latency reads',
+        isArch: true,
+        desc: 'Read-only clones of a primary universe. They provide low-latency reads in remote regions without affecting the write performance of the primary cluster.'
+      },
+
       // 1: Hash Sharding
-      {
-        name: 'Hash Sharding', filterTable: 'users',
+      "1": {
+        group: "Sharding", icon: "🔢",
+        name: 'Hash Sharding', title: 'Hash Sharding', subtitle: 'MurmurHash2 distribution',
         desc: 'The Primary Key is hashed to determine tablet placement. This provides uniform distribution across the cluster, preventing hotspots.',
         latencies: [{ lbl: 'Hash Calculation', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-hash', label: '➕ Insert Random User', cls: 'btn-p', cb: 'insertHashUser' }, { id: 'btn-locate', label: '🔍 Locate Quorum', cls: 'btn-g', cb: 'locateHashRows' }],
@@ -59,9 +86,11 @@
       },
 
       // 2: Range (Default)
-      {
-        name: 'Range (Default)', filterTable: 'users',
-        desc: 'By default, range-sharded tables start with a single tablet. Data is ordered by Primary Key.',
+      "2": {
+        group: "Sharding", icon: "📏",
+        name: 'Range (Default)', title: 'Range (Default)', subtitle: 'Single tablet start',
+        filterTable: 'users',
+        desc: 'Standard Range Sharding starts with a single tablet. As data grows, YugabyteDB automatically splits the tablet. This is ideal for small tables or when range scans are frequently used.',
         latencies: [{ lbl: 'Key Compare', cls: 'll', max: 1 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-range', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
@@ -117,8 +146,10 @@
       },
 
       // 3: Range (Pre-split)
-      {
-        name: 'Range (Pre-split)', filterTable: 'users',
+      "3": {
+        group: "Sharding", icon: "✂️",
+        name: 'Range (Pre-split)', title: 'Range (Pre-split)', subtitle: 'SPLIT AT VALUES',
+        filterTable: 'users',
         desc: 'Optimize range sharding by pre-splitting the table into multiple tablets during creation.',
         latencies: [{ lbl: 'Range Lookup', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-presplit', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
@@ -175,9 +206,10 @@
         ]
       },
 
-      // 4: Fast Path Write (Fast Path)
-      {
-        name: 'Fast Path Write', filterTable: 'users',
+      "4": {
+        group: "Write & Read Paths", icon: "⚡",
+        name: 'Fast Path Write', title: 'Fast Path Write', subtitle: 'Quorum & near-follower',
+        filterTable: 'users',
         desc: 'YSQL INSERT flows to Raft LEADER → WAL append → replicate to followers → majority ACK → commit. Near follower (TServer-2, ~0.8ms) enables fast majority. If near follower is down, must wait for far follower (TServer-3, ~2.5ms).',
         latencies: [{ lbl: 'Leader WAL', cls: 'll', max: 2 }, { lbl: 'Near Follower', cls: 'll', max: 3 }, { lbl: 'Far Follower', cls: 'lm', max: 12 }, { lbl: 'Majority ACK', cls: 'll', max: 1 }, { lbl: 'Total Latency', cls: 'lm', max: 15 }],
         extraBtns: [{ id: 'btn-tn', label: '💀 Kill Near Follower', cls: 'btn-d', cb: 'toggleNearFollower' }],
@@ -221,9 +253,10 @@
         ]
       },
 
-      // 5: Distributed Transactions (2PC)
-      {
-        name: 'Distributed Transactions', filterTable: ['users', 'transactions'],
+      "5": {
+        group: "Write & Read Paths", icon: "⚖️",
+        name: 'Distributed Transactions', title: 'Distributed Transactions', subtitle: 'Multi-tablet atomicity (2PC)',
+        filterTable: ['users', 'transactions'],
         desc: 'Transactions spanning multiple tablets (e.g. updating users in different shards) use a high-performance 2-Phase Commit protocol (2PC). Visibility is atomic across all shards.',
         latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
@@ -323,9 +356,10 @@
         ]
       },
 
-      // 6: Index Data Write
-      {
-        name: 'Index Data Write', filterTable: ['users', 'users_email_idx', 'transactions'],
+      "6": {
+        group: "Write & Read Paths", icon: "🧬",
+        name: 'Index Data Write', title: 'Index Data Write', subtitle: 'Primary + Secondary (2PC)',
+        filterTable: ['users', 'users_email_idx', 'transactions'],
         desc: 'Secondary indexes are stored in separate tablets. Updating a row with an index requires a distributed transaction to ensure both are updated atomically.',
         latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
@@ -425,9 +459,10 @@
         ]
       },
 
-      // 7: Consistent Read
-      {
-        name: 'Consistent Read', filterTable: 'users',
+      "7": {
+        group: "Write & Read Paths", icon: "📖",
+        name: 'Consistent Read', title: 'Consistent Read', subtitle: 'Leader reads',
+        filterTable: 'users',
         desc: 'Strong-consistency reads always go to the Raft LEADER. If request lands on a follower, it transparently redirects to the leader.',
         latencies: [{ lbl: 'Gateway Hop', cls: 'll', max: 2 }, { lbl: 'Remote Redir', cls: 'll', max: 2 }, { lbl: 'Leader Read', cls: 'll', max: 2 }, { lbl: 'Total', cls: 'll', max: 6 }],
         steps: [
@@ -437,9 +472,10 @@
         ]
       },
 
-      // 8: Follower Reads
-      {
-        name: 'Follower Reads', filterTable: 'users',
+      "8": {
+        group: "Write & Read Paths", icon: "⚡",
+        name: 'Follower Reads', title: 'Follower Reads', subtitle: 'Bounded staleness',
+        filterTable: 'users',
         desc: 'SET yb_read_from_followers=TRUE allows reads from nearest replica, skipping the leader. Data may be bounded-stale (default 10ms).',
         latencies: [{ lbl: 'Route to Follower', cls: 'll', max: 1 }, { lbl: 'Staleness Check', cls: 'll', max: 1 }, { lbl: 'Local Read', cls: 'll', max: 1 }, { lbl: 'Total', cls: 'll', max: 3 }],
         steps: [
@@ -448,9 +484,10 @@
         ]
       },
 
-      // 9: Geo-Partitioning
-      {
-        name: 'Geo-Partitioning', filterTable: 'users',
+      "9": {
+        group: "Geo-Partitioning", icon: "🌎",
+        name: 'Geo-Partitioning', title: 'Geo-Partitioning', subtitle: 'Multi-region row pinning',
+        filterTable: 'users',
         desc: 'YugabyteDB pins tablet leaders and followers to specific regions. Each region has its own Raft group with 3 local replicas. Client is in APAC — local requests are fast, cross-region requests show increasing latency.',
         latencies: [
           { lbl: 'APAC Read', cls: 'll', max: 10 },
@@ -578,9 +615,9 @@
         ]
       },
 
-      // 10: Leader Election
-      {
-        name: 'Leader Election',
+      "10": {
+        group: "Global & High Availability", icon: "🗳️",
+        name: 'Leader Election', title: 'Leader Election', subtitle: 'Raft lifecycle & recovery',
         desc: 'Full Raft lifecycle: 6 consecutive heartbeat failures → node declared dead → election timeout → Follower→Candidate→Leader. Leaders are distributed fairly across surviving peers. Also supports graceful Blacklist/Drain for planned maintenance.',
         latencies: [{ lbl: 'Heartbeat RTT', cls: 'll', max: 2 }, { lbl: 'HB Failures', cls: 'lh', max: 6 }, { lbl: 'Crash Detection', cls: 'lh', max: 400 }, { lbl: 'Leader Lease Expiry', cls: 'lm', max: 2000 }, { lbl: 'Vote RPCs', cls: 'lm', max: 10 }, { lbl: 'New Leaders Up', cls: 'll', max: 5 }, { lbl: 'Re-replication', cls: 'lm', max: 200 }, { lbl: 'Leader Balancing', cls: 'll', max: 15 }],
         electionSteps: ['Heartbeats', 'Miss ×1-3', 'Miss ×4-6', 'Timeout', 'Candidate', 'RequestVote', 'Vote Grant', 'Elected', 'Recovery', 'Balancing'],
@@ -728,9 +765,9 @@
           }
         ]
       },
-      // 11: Node Failure
-      {
-        name: 'Node Failure',
+      "11": {
+        group: "Global & High Availability", icon: "💥",
+        name: 'Node Failure', title: 'Node Failure', subtitle: 'Crash & catch-up',
         desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.t3) & tg6 (products.t2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
         latencies: [{ lbl: 'Crash Detection', cls: 'lh', max: 500 }, { lbl: 'Re-election', cls: 'lm', max: 20 }, { lbl: 'Write during fail', cls: 'lm', max: 8 }, { lbl: 'Re-replication', cls: 'lm', max: 200 }],
         failureMode: 'node',
@@ -811,9 +848,9 @@
           }
         ]
       },
-      // 12: Network Partition
-      {
-        name: 'Network Partition',
+      "12": {
+        group: "Global & High Availability", icon: "🔀",
+        name: 'Network Partition', title: 'Network Partition', subtitle: 'Split-brain & quorum',
         desc: 'TServer-3 is cut off from TServer-1 and TServer-2 by a network partition. TS-3 tries to elect itself leader but cannot win majority (1/3 < 2). TS-1 & TS-2 (quorum) continue serving writes. TS-3 returns stale reads.',
         latencies: [{ lbl: 'Partition Detected', cls: 'lh', max: 500 }, { lbl: 'TS-3 Election Attempt', cls: 'lm', max: 10 }, { lbl: 'Write (majority side)', cls: 'll', max: 4 }, { lbl: 'Read (TS-3 stale)', cls: 'lm', max: 2 }, { lbl: 'Heal & Resync', cls: 'lm', max: 200 }],
         failureMode: 'partition',
@@ -911,9 +948,9 @@
         ]
       },
 
-      // 13: Horizontal Scaling
-      {
-        name: 'Horizontal Scaling',
+      "13": {
+        group: "Horizontal Scalability", icon: "📈",
+        name: 'Horizontal Scaling', title: 'Horizontal Scaling', subtitle: 'Add/remove nodes & rebalance',
         desc: 'Observe how YugabyteDB scales out from 3 to 6 nodes within the APAC region. As new nodes are added, YB-Master automatically rebalances both tablet leaders and followers to distribute data and load evenly across all available zones.',
         latencies: [{ lbl: 'Leader Rebalance', cls: 'll', max: 50 }, { lbl: 'Data Copy (Replica)', cls: 'lm', max: 200 }],
         init: (ctx) => {
@@ -1138,9 +1175,10 @@
         ]
       },
 
-      // 14: Tablet Split
-      {
-        name: 'Tablet Split', filterTable: 'users',
+      "14": {
+        group: "Horizontal Scalability", icon: "🔄",
+        name: 'Tablet Split', title: 'Tablet Split', subtitle: 'Auto-sharding growth',
+        filterTable: 'users',
         desc: 'YugabyteDB automatically splits tablets when they exceed ~64MB. New Raft groups are created for the split halves, and the parent is retired.',
         latencies: [{ lbl: 'Size Check', cls: 'll', max: 1 }, { lbl: 'Split Point', cls: 'll', max: 2 }, { lbl: 'New Group', cls: 'lm', max: 50 }],
         steps: [
@@ -1179,9 +1217,9 @@
         ]
       },
 
-      // 15: LSM Compaction
-      {
-        name: 'LSM Compaction',
+      "15": {
+        group: "Storage & Scalability", icon: "🗜️",
+        name: 'LSM Compaction', title: 'LSM Compaction', subtitle: 'DocDB storage engine',
         desc: 'DocDB (RocksDB LSM-tree): writes → MemTable → L0 SSTable flush → L0→L1 compaction → lower read amplification.',
         latencies: [{ lbl: 'L0 Flush', cls: 'lm', max: 50 }, { lbl: 'Compaction', cls: 'lm', max: 200 }, { lbl: 'Final Read', cls: 'll', max: 2 }],
         steps: [
@@ -1227,9 +1265,10 @@
         ]
       },
 
-      // 16: Colocated Tables
-      {
-        name: 'Colocated Tables', filterTable: 'colocated',
+      "16": {
+        group: "Storage & Scalability", icon: "📦",
+        name: 'Colocated Tables', title: 'Colocated Tables', subtitle: 'Shared tablet groups',
+        filterTable: 'colocated',
         desc: 'Colocation allows multiple small tables to share the same underlying tablet group. These shared tablets are range-sharded by default, using the entire row key (including Colocation ID) to maintain global order. This significantly reduces metadata overhead and per-table Raft costs for reference or master tables.',
         latencies: [{ lbl: 'Key Lookup', cls: 'll', max: 1 }, { lbl: 'Shared Tablet', cls: 'll', max: 5 }, { lbl: 'Write RPC', cls: 'lm', max: 40 }],
         extraBtns: [
@@ -1321,9 +1360,9 @@
         ]
       },
 
-      // 17: xCluster DR (Turnkey, Unidirectional)
-      {
-        name: 'xCluster DR',
+      "17": {
+        group: "Multi-Cluster & DR", icon: "🔁",
+        name: 'xCluster DR', title: 'xCluster DR', subtitle: 'Turnkey async replication',
         desc: 'Turnkey xCluster Disaster Recovery replicates changes from a PRIMARY cluster (ap-south-1) to a SECONDARY cluster (ap-south-2) asynchronously via CDCSDK pollers. Writes commit via Raft on PRIMARY (~2ms), then stream near-realtime (~45ms) to SECONDARY. A single n:m poller bridges multiple source tablets to multiple target tablets simultaneously.',
         latencies: [
           { lbl: 'Raft commit', cls: 'll', max: 2 },
@@ -1533,9 +1572,9 @@
         ]
       },
 
-      // 18: Active-Active xCluster (Bidirectional)
-      {
-        name: 'Active-Active xCluster',
+      "18": {
+        group: "Multi-Cluster & DR", icon: "⚡",
+        name: 'Active-Active xCluster', title: 'Active-Active xCluster', subtitle: 'Bidirectional xCluster',
         desc: 'Bidirectional xCluster: both clusters act as PRIMARY and accept local writes simultaneously. P-1 (forward) and P-2 (reverse) stream changes in both directions. The REG column in every tablet shows the origin cluster of each row. Conflicts on the same key are resolved via Last-Writer-Wins (LWW) using Hybrid Logical Clocks (HLC).',
         latencies: [
           { lbl: 'Raft commit', cls: 'll', max: 2 },
@@ -1796,9 +1835,9 @@
         ]
       },
 
-      // 19: DocDB Storage — LSM + MVCC
-      {
-        name: 'DocDB Storage',
+      "19": {
+        group: "Storage & Scalability", icon: "🗄️",
+        name: 'DocDB Storage', title: 'DocDB Storage', subtitle: 'LSM + MVCC internals',
         desc: 'DocDB is YugabyteDB’s RocksDB-based storage engine. Every write is an immutable append — updates create new versions, deletes write tombstones. MVCC keeps all versions for consistent snapshot reads without locks.',
         latencies: [
           { lbl: 'WAL append', cls: 'll', max: 1 },
@@ -1998,4 +2037,4 @@
           }
         ]
       }
-    ];
+    };

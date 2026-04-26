@@ -29,6 +29,8 @@
       --ch: 64px;
       --sw: 240px;
       --iw: 340px;
+      --accent: #3b82f6;
+      --accent-dim: rgba(59, 130, 246, 0.1);
     }
 
     *,
@@ -1885,6 +1887,7 @@
 
     input[type=range] {
       -webkit-appearance: none;
+      appearance: none;
       width: 70px;
       height: 3px;
       background: var(--s3);
@@ -1894,6 +1897,7 @@
 
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
+      appearance: none;
       width: 11px;
       height: 11px;
       border-radius: 50%;
@@ -2859,3 +2863,234 @@
     .av-xcl-stat-l { display:block; font-size:10px; color:var(--txt2); text-transform:uppercase; letter-spacing:.8px; margin-top:3px; }
 
     .av-fd.av-fd-failed .av-tbar { animation: none; opacity: 0.12; width: 25%; }
+    /* ── HOME VIEW ── */
+    .home-view {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 70%), var(--bg);
+      overflow-y: auto;
+      z-index: 1000;
+      padding: 60px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .home-container {
+      width: 100%;
+      max-width: 1800px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .home-hero {
+      max-width: 900px;
+      text-align: center;
+      margin: 0 auto 80px auto;
+      animation: fadeInUp 0.8s ease-out;
+    }
+
+    .home-hero h1 {
+      font-family: var(--head);
+      font-size: 64px;
+      font-weight: 800;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #fff 0%, var(--txt2) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -1.5px;
+    }
+
+    .home-hero p {
+      font-size: 20px;
+      color: var(--txt2);
+      line-height: 1.6;
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .home-sections-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .home-section {
+      display: flex;
+      gap: 40px;
+      padding: 60px 0;
+      border-top: 1px solid var(--border-hi);
+      align-items: flex-start;
+    }
+
+    .home-section:first-child { border-top: none; padding-top: 0; }
+
+    .home-section-hdr {
+      flex: 0 0 260px;
+      border-left: 4px solid var(--accent);
+      padding-left: 24px;
+      position: sticky;
+      top: 40px;
+    }
+
+    .home-section-hdr h3 {
+      font-family: var(--head);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--txt);
+      margin: 0 0 12px 0;
+      letter-spacing: 0.5px;
+    }
+
+    .hc-chapter-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 900;
+      color: var(--accent);
+      background: var(--accent-dim);
+      padding: 4px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      letter-spacing: 2px;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      text-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+    }
+
+    .home-section-hdr p {
+      color: var(--txt2);
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .home-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+    }
+
+    @media (max-width: 1400px) {
+      .home-grid { grid-template-columns: repeat(3, 1fr); }
+    }
+
+    @media (max-width: 1100px) {
+      .home-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .home-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .home-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+      background: var(--accent);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .home-card:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--accent);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .home-card:hover::before { opacity: 1; }
+
+    .hc-icon {
+      font-size: 32px;
+      width: 56px;
+      height: 56px;
+      background: var(--s3);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: transform 0.3s;
+    }
+
+    .home-card:hover .hc-icon { transform: scale(1.1); background: var(--s2); }
+
+    .hc-title {
+      font-family: var(--head);
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .hc-sub {
+      font-size: 11px;
+      color: var(--leader);
+      font-family: var(--mono);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .hc-desc {
+      font-size: 13.5px;
+      color: var(--txt2);
+      line-height: 1.5;
+      flex: 1;
+    }
+
+    .hc-btn {
+      align-self: flex-start;
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+      margin-top: 8px;
+    }
+
+    .home-card:hover .hc-btn {
+      background: var(--accent);
+      color: #000;
+    }
+
+    @media (max-width: 1200px) {
+      .home-section { flex-direction: column; gap: 32px; }
+      .home-section-hdr { flex: none; width: 100%; position: static; border-left-width: 6px; }
+    }
+
+    @media (max-width: 800px) {
+      .home-grid { grid-template-columns: 1fr; }
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Adjust main area when home is active */
+    body:has(.home-view[style*="display: block"]) .ctrl-bar {
+      display: none !important;
+    }
+    body:has(.home-view[style*="display: block"]) .app-main {
+      background: var(--bg);
+    }

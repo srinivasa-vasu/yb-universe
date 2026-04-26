@@ -956,8 +956,200 @@
     //  SCENARIO CONTROL
     // ════════════════════════════════════════════
 
+    function buildSidebar() {
+      const sb = document.getElementById('sidebar');
+      if (!sb) return;
+      sb.innerHTML = '';
+
+      // Add Home button
+      const homeBtn = document.createElement('button');
+      homeBtn.className = 'sbtn' + (currentScenario === 'home' ? ' active' : '');
+      homeBtn.onclick = () => selectScenario('home');
+      homeBtn.innerHTML = `
+        <span class="sicon">🏠</span>
+        <div>
+          <div class="slabel">Explorer Home</div>
+          <div class="ssub">Scenario Overview</div>
+        </div>
+      `;
+      sb.appendChild(homeBtn);
+
+      const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Geo-Partitioning", "Horizontal Scalability", "Storage & Scalability", "Multi-Cluster & DR"];
+      const groups = {};
+      Object.keys(SCENARIOS).forEach(id => {
+        if (id === 'home') return;
+        const s = SCENARIOS[id];
+        if (!groups[s.group]) groups[s.group] = [];
+        groups[s.group].push({ id, ...s });
+      });
+
+      groupOrder.forEach(gname => {
+        if (!groups[gname]) return;
+        const div = document.createElement('div');
+        div.className = 'sgroup';
+        div.textContent = gname;
+        sb.appendChild(div);
+
+        groups[gname].forEach(s => {
+          const btn = document.createElement('button');
+          btn.className = 'sbtn' + (currentScenario === s.id ? ' active' : '');
+          if (s.isArch) {
+            btn.setAttribute('data-arch', s.id);
+            btn.onclick = () => selectArch(s.id);
+          } else {
+            btn.setAttribute('data-sc', s.id);
+            btn.onclick = () => selectScenario(s.id);
+          }
+          btn.innerHTML = `
+            <span class="sicon">${s.icon || '📦'}</span>
+            <div>
+              <div class="slabel">${s.name}</div>
+              <div class="ssub">${s.subtitle || ''}</div>
+            </div>
+          `;
+          sb.appendChild(btn);
+        });
+      });
+    }
+
+    function renderHome() {
+      const hv = document.getElementById('home-view');
+      if (!hv) return;
+      hv.innerHTML = '';
+
+      const container = document.createElement('div');
+      container.className = 'home-container';
+
+      const sHome = SCENARIOS['home'];
+      const hero = document.createElement('div');
+      hero.className = 'home-hero';
+      hero.innerHTML = `
+        <h1>${sHome.title}</h1>
+        <p>${sHome.description}</p>
+      `;
+      container.appendChild(hero);
+
+      const gridWrap = document.createElement('div');
+      gridWrap.className = 'home-sections-grid';
+
+      const groupOrder = [
+        "Architecture", 
+        "Sharding", 
+        "Write & Read Paths", 
+        "Global & High Availability", 
+        "Geo-Partitioning",
+        "Horizontal Scalability",
+        "Storage & Scalability", 
+        "Multi-Cluster & DR"
+      ];
+      const groupMeta = {
+        "Architecture": { chapter: "CHAPTER 1", icon: "🌐", desc: "Foundational cluster layout and topology patterns." },
+        "Sharding": { chapter: "CHAPTER 2", icon: "📦", desc: "Data distribution strategies for scale and performance." },
+        "Write & Read Paths": { chapter: "CHAPTER 3", icon: "⚡", desc: "How requests flow through the distributed Raft layers." },
+        "Global & High Availability": { chapter: "CHAPTER 4", icon: "🌎", desc: "Resilience, election, and multi-region patterns." },
+        "Geo-Partitioning": { chapter: "CHAPTER 5", icon: "📍", desc: "Pinning data to regions for latency and compliance." },
+        "Horizontal Scalability": { chapter: "CHAPTER 6", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
+        "Storage & Scalability": { chapter: "CHAPTER 7", icon: "🗄️", desc: "Compaction, partitioning, and storage internals." },
+        "Multi-Cluster & DR": { chapter: "CHAPTER 8", icon: "🔁", desc: "Disaster recovery and active-active replication." }
+      };
+
+      const groups = {};
+      Object.keys(SCENARIOS).forEach(id => {
+        if (id === 'home') return;
+        const s = SCENARIOS[id];
+        if (!groups[s.group]) groups[s.group] = [];
+        groups[s.group].push({ id, ...s });
+      });
+
+      groupOrder.forEach(gname => {
+        if (!groups[gname]) return;
+        const meta = groupMeta[gname] || { chapter: "EXTRA", icon: "📂", desc: "" };
+        
+        const section = document.createElement('div');
+        section.className = 'home-section';
+        
+        const hdr = document.createElement('div');
+        hdr.className = 'home-section-hdr';
+        hdr.innerHTML = `
+          <div class="hc-chapter-badge">${meta.chapter}</div>
+          <h3>${meta.icon} ${gname}</h3>
+          <p>${meta.desc}</p>
+        `;
+        section.appendChild(hdr);
+        
+        const cardsGrid = document.createElement('div');
+        cardsGrid.className = 'home-grid';
+        
+        groups[gname].forEach(s => {
+          const card = document.createElement('div');
+          card.className = 'home-card';
+          card.onclick = () => s.isArch ? selectArch(s.id) : selectScenario(s.id);
+          card.innerHTML = `
+            <div class="hc-icon">${s.icon || '📦'}</div>
+            <div class="hc-title">${s.name}</div>
+            <div class="hc-sub">${s.subtitle || ''}</div>
+            <div class="hc-desc">${s.desc || ''}</div>
+            <button class="hc-btn">Explore &rarr;</button>
+          `;
+          cardsGrid.appendChild(card);
+        });
+        
+        section.appendChild(cardsGrid);
+        gridWrap.appendChild(section);
+      });
+
+      container.appendChild(gridWrap);
+      hv.appendChild(container);
+    }
+
+    function scrollSidebarToActive() {
+      setTimeout(() => {
+        const active = document.querySelector('.sidebar .sbtn.active');
+        const sb = document.getElementById('sidebar');
+        if (active && sb) {
+          // Manual calculation for more reliable centering
+          const top = active.offsetTop;
+          const target = top - (sb.clientHeight / 2) + (active.clientHeight / 2);
+          sb.scrollTo({ top: target, behavior: 'smooth' });
+        }
+      }, 200);
+    }
+
     function selectScenario(id) {
       currentScenario = id; currentStep = -1; stepRunning = false; stopPlay();
+      buildSidebar();
+      scrollSidebarToActive();
+      
+      const hv = document.getElementById('home-view');
+      const cw = document.getElementById('canvas-wrap');
+      const ip = document.querySelector('.info-panel');
+      const fd = document.getElementById('failure-dash');
+      const sd = document.getElementById('scalability-dash');
+      const dp = document.getElementById('data-panel');
+      const sp = document.getElementById('split-panel');
+      const dbp = document.getElementById('docdb-panel');
+      const cb = document.querySelector('.ctrl-bar');
+
+      if (id === 'home') {
+        hv.style.display = 'block';
+        cw.style.display = 'none';
+        ip.style.display = 'none';
+        fd.style.display = 'none';
+        sd.style.display = 'none';
+        dp.style.display = 'none';
+        sp.style.display = 'none';
+        dbp.style.display = 'none';
+        cb.style.display = 'none';
+        renderHome();
+        document.getElementById('active-badge').textContent = 'Home';
+        return;
+      } else {
+        hv.style.display = 'none';
+        cw.style.display = 'flex';
+        ip.style.display = 'flex';
+        cb.style.display = 'flex';
+      }
+
       S = freshState();
       fdReset();
       _exitArchMode(true);
@@ -1010,11 +1202,9 @@
       clearLog();
 
       // Show/hide failure dashboard
-      const fd = document.getElementById('failure-dash');
       const isFailure = sc.failureMode;
       fd.classList.toggle('visible', !!isFailure);
 
-      const sd = document.getElementById('scalability-dash');
       const isScaling = sc.name === 'Horizontal Scaling';
       sd.classList.toggle('visible', isScaling);
 
@@ -1040,7 +1230,10 @@
         eb.appendChild(btn);
       }
 
-      document.querySelectorAll('.sidebar .sbtn').forEach(b => b.classList.toggle('active', +b.dataset.sc === id));
+      document.querySelectorAll('.sidebar .sbtn').forEach(b => {
+        const sid = b.dataset.sc;
+        b.classList.toggle('active', sid === id.toString() || (id === 'home' && !sid && b.querySelector('.sicon').textContent === '🏠'));
+      });
       const has = sc.steps?.length > 0;
       document.getElementById('btn-step').disabled = !has;
       document.getElementById('btn-play').disabled = !has;
@@ -1642,11 +1835,16 @@
         if (cw) cw.style.display = showCanvas ? '' : 'none';
         const ip = document.querySelector('.info-panel');
         if (ip) ip.style.display = showCanvas ? '' : 'none';
+        const hv = document.getElementById('home-view');
+        if (hv) hv.style.display = 'none';
+        const cb = document.querySelector('.ctrl-bar');
+        if (cb) cb.style.display = showCanvas ? 'flex' : 'none';
       }
 
       function selectArch(tab) {
-        document.querySelectorAll('.sidebar .sbtn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll(`.sbtn[data-arch="${tab}"]`).forEach(b => b.classList.add('active'));
+        currentScenario = tab;
+        buildSidebar();
+        scrollSidebarToActive();
         _exitArchMode(false);
         showDataPanel(false); showSplitPanel(false); showDocdbPanel(false);
         const av = document.getElementById('arch-view');
@@ -2008,7 +2206,8 @@
       }
 
       window.addEventListener('load', () => {
-        selectScenario(0);
+        buildSidebar();
+        selectScenario('home');
         initInfoPanelResize();
         window.addEventListener('resize', () => setTimeout(renderConnections, 100));
         
@@ -2025,6 +2224,9 @@
           }
           if (e.key.toLowerCase() === ']') {
             toggleInfoPanel();
+          }
+          if (e.key.toLowerCase() === 'h') {
+            selectScenario('home');
           }
         });
       });
