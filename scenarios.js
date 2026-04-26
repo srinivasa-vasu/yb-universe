@@ -303,7 +303,7 @@ window.mrRestore = function() {
         name: 'Hash Sharding', title: 'Hash Sharding', subtitle: 'MurmurHash2 distribution',
         desc: 'The Primary Key is hashed to determine tablet placement. This provides uniform distribution across the cluster, preventing hotspots.',
         latencies: [{ lbl: 'Hash Calculation', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
-        extraBtns: [{ id: 'btn-hash', label: '➕ Insert Random User', cls: 'btn-p', cb: 'insertHashUser' }, { id: 'btn-locate', label: '🔍 Locate Quorum', cls: 'btn-g', cb: 'locateHashRows' }],
+        extraBtns: [{ id: 'btn-hash', label: '➕ Insert Random User', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
           showDataPanel(true);
           renderDataTable('users');

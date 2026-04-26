@@ -2434,6 +2434,22 @@ function closeTour() {
         });
       }
 
+      function _getSidebarScenarioOrder() {
+        const order = ['home'];
+        const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-distribution", "Storage & Scalability", "Multi-Cluster & DR"];
+        const groups = {};
+        Object.keys(SCENARIOS).forEach(id => {
+          if (id === 'home') return;
+          const s = SCENARIOS[id];
+          if (!groups[s.group]) groups[s.group] = [];
+          groups[s.group].push({ id, ...s });
+        });
+        groupOrder.forEach(gname => {
+          if (groups[gname]) groups[gname].forEach(s => order.push(s.id));
+        });
+        return order;
+      }
+
       window.addEventListener('load', () => {
         buildSidebar();
         selectScenario('home');
@@ -2453,6 +2469,18 @@ function closeTour() {
           if (key === 's') stepForward();
           if (key === 'r') resetScenario();
           if (key === ' ') { e.preventDefault(); togglePlay(); }
+          if (key === 'arrowup' || key === 'arrowdown') {
+            e.preventDefault();
+            const order = _getSidebarScenarioOrder();
+            const curIdx = order.indexOf(String(currentScenario));
+            if (curIdx === -1) return;
+            let nextIdx = curIdx + (key === 'arrowdown' ? 1 : -1);
+            if (nextIdx >= 0 && nextIdx < order.length) {
+              const nextId = order[nextIdx];
+              if (SCENARIOS[nextId] && SCENARIOS[nextId].isArch) selectArch(nextId);
+              else selectScenario(nextId);
+            }
+          }
           if (key === 'g') {
             const check = document.getElementById('guide-toggle-check');
             if (check) {
