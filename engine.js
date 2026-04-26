@@ -1023,7 +1023,7 @@ function closeTour() {
       `;
       sb.appendChild(homeBtn);
 
-      const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Geo-Partitioning", "Horizontal Scalability", "Storage & Scalability", "Multi-Cluster & DR"];
+      const groupOrder = ["Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-Partitioning", "Storage & Scalability", "Multi-Cluster & DR"];
       const groups = {};
       Object.keys(SCENARIOS).forEach(id => {
         if (id === 'home') return;
@@ -1082,13 +1082,13 @@ function closeTour() {
       gridWrap.className = 'home-sections-grid';
 
       const groupOrder = [
-        "Architecture", 
-        "Sharding", 
-        "Write & Read Paths", 
-        "Global & High Availability", 
-        "Geo-Partitioning",
+        "Architecture",
+        "Sharding",
+        "Write & Read Paths",
+        "Global & High Availability",
         "Horizontal Scalability",
-        "Storage & Scalability", 
+        "Geo-Partitioning",
+        "Storage & Scalability",
         "Multi-Cluster & DR"
       ];
       const groupMeta = {
@@ -1096,8 +1096,8 @@ function closeTour() {
         "Sharding": { chapter: "CHAPTER 2", icon: "📦", desc: "Data distribution strategies for scale and performance." },
         "Write & Read Paths": { chapter: "CHAPTER 3", icon: "⚡", desc: "How requests flow through the distributed Raft layers." },
         "Global & High Availability": { chapter: "CHAPTER 4", icon: "🌎", desc: "Resilience, election, and multi-region patterns." },
-        "Geo-Partitioning": { chapter: "CHAPTER 5", icon: "📍", desc: "Pinning data to regions for latency and compliance." },
-        "Horizontal Scalability": { chapter: "CHAPTER 6", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
+        "Horizontal Scalability": { chapter: "CHAPTER 5", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
+        "Geo-Partitioning": { chapter: "CHAPTER 6", icon: "📍", desc: "Pinning data to regions for latency and compliance." },
         "Storage & Scalability": { chapter: "CHAPTER 7", icon: "🗄️", desc: "Compaction, partitioning, and storage internals." },
         "Multi-Cluster & DR": { chapter: "CHAPTER 8", icon: "🔁", desc: "Disaster recovery and active-active replication." }
       };
@@ -1183,8 +1183,8 @@ function closeTour() {
         hv.style.display = 'block';
         cw.style.display = 'none';
         ip.style.display = 'none';
-        fd.style.display = 'none';
-        sd.style.display = 'none';
+        fd.classList.remove('visible'); fd.style.display = '';
+        sd.classList.remove('visible'); sd.style.display = '';
         dp.style.display = 'none';
         sp.style.display = 'none';
         dbp.style.display = 'none';
@@ -1252,10 +1252,10 @@ function closeTour() {
 
       // Show/hide failure dashboard
       const isFailure = sc.failureMode;
-      fd.classList.toggle('visible', !!isFailure);
+      fd.style.display = ''; fd.classList.toggle('visible', !!isFailure);
 
       const isScaling = sc.name === 'Horizontal Scaling';
-      sd.classList.toggle('visible', isScaling);
+      sd.style.display = ''; sd.classList.toggle('visible', isScaling);
 
       document.getElementById('canvas-wrap').style.flex = (isFailure || isScaling) ? '1' : '1';
 
