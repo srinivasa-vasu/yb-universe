@@ -8,7 +8,8 @@
       customers: { name: 'customers', color: '#fb7185', cols: ['id', 'name', 'email'] },
       users_email_idx: { name: 'users_email_idx', color: '#e879f9', cols: ['email', 'ptr:user_id'] },
       transactions: { name: 'system.transactions', color: '#6366f1', cols: ['txid', 'status'] },
-      orders: { name: 'orders', color: '#a78bfa', cols: ['id', 'cid', 'item', 'status'] }
+      orders: { name: 'orders', color: '#a78bfa', cols: ['id', 'cid', 'item', 'status'] },
+      colocated: { name: 'colocated_group', color: '#94a3b8', cols: ['id', 'name', 'val'] }
     };
     const INITIAL_GROUPS = [
       {
