@@ -1054,7 +1054,7 @@ Object.assign(SCENARIOS, {
     group: "Indexes", icon: "🪣", title: "Bucket Index (Hot Key Mitigation)", subtitle: "Synthetic shard key for monotonic columns",
     description: "Prevents write hotspots on monotonically increasing columns (timestamps, serial IDs) by adding a synthetic hash prefix. Distributes writes across N buckets with SPLIT AT VALUES.",
     inputPlaceholder: "Enter event description...",
-    scanDefault: "created_at BETWEEN '2024-03-22' AND '2024-03-25'",
+    scanDefault: "created_at BETWEEN '2024-03-22 00:00:00' AND '2024-03-25 23:59:59'",
     legend: [
       { type: "sharding", label: "bucket (Synthetic)", explain: "hex(hash(created_at)) % 3 — distributes writes evenly" },
       { type: "clustering", label: "created_at DESC", explain: "Clustering key — newest first within each bucket" },
@@ -1062,7 +1062,10 @@ Object.assign(SCENARIOS, {
     ],
     generateRow: (v) => {
       const pk = "ord-" + Math.floor(Math.random() * 9999);
-      const ts = "2024-03-" + String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+      const day = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+      const hh = String(Math.floor(Math.random() * 24)).padStart(2, '0');
+      const mm = String(Math.floor(Math.random() * 60)).padStart(2, '0');
+      const ts = `2024-03-${day} ${hh}:${mm}:00`;
       const bucket = Math.floor(Math.random() * 3);
       return {
         index: { fields: [String(bucket), ts, pk] },
@@ -1078,36 +1081,36 @@ Object.assign(SCENARIOS, {
       tableTablets: [
         {
           id: "Table Tablet 1", range: "0x0000–0x5555", rows: [
-            { fields: ["ord-9901", "2024-03-25", "Purchase", "149.99"] }
+            { fields: ["ord-9901", "2024-03-25 14:32:00", "Purchase", "149.99"] }
           ]
         },
         {
           id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [
-            { fields: ["ord-7703", "2024-03-23", "Purchase", "89.50"] },
-            { fields: ["ord-8802", "2024-03-24", "Refund", "29.99"] }
+            { fields: ["ord-7703", "2024-03-23 16:45:00", "Purchase", "89.50"] },
+            { fields: ["ord-8802", "2024-03-24 09:15:00", "Refund", "29.99"] }
           ]
         },
         {
           id: "Table Tablet 3", range: "0xAAAB–0xFFFF", rows: [
-            { fields: ["ord-6604", "2024-03-22", "Return", "45.00"] }
+            { fields: ["ord-6604", "2024-03-22 11:20:00", "Return", "45.00"] }
           ]
         }
       ],
       indexTablets: [
         {
           id: "Bucket 0", range: "-∞ to 1", rows: [
-            { fields: ["0", "2024-03-25", "ord-9901"] },
-            { fields: ["0", "2024-03-22", "ord-6604"] }
+            { fields: ["0", "2024-03-25 14:32:00", "ord-9901"] },
+            { fields: ["0", "2024-03-22 11:20:00", "ord-6604"] }
           ]
         },
         {
           id: "Bucket 1", range: "1 to 2", rows: [
-            { fields: ["1", "2024-03-24", "ord-8802"] }
+            { fields: ["1", "2024-03-24 09:15:00", "ord-8802"] }
           ]
         },
         {
           id: "Bucket 2", range: "2 to ∞", rows: [
-            { fields: ["2", "2024-03-23", "ord-7703"] }
+            { fields: ["2", "2024-03-23 16:45:00", "ord-7703"] }
           ]
         }
       ]
@@ -2210,7 +2213,7 @@ Object.assign(SCENARIOS, {
       ]
     },
     queryConfig: {
-      sql: "SELECT event_id, ts, metric, value FROM events WHERE ts BETWEEN '2024-01-01' AND '2024-04-01' ORDER BY ts DESC",
+      sql: "SELECT event_id, ts, metric, value FROM events WHERE ts BETWEEN '2024-01-01 00:00:00+00' AND '2024-04-01 00:00:00+00' ORDER BY ts DESC",
       steps: [
         {
           op: "route",
@@ -2222,14 +2225,14 @@ Object.assign(SCENARIOS, {
         {
           op: "fanout",
           detail: "3 parallel Index Scan RPCs dispatched — each sub-scan targets one bucket and carries the ts BETWEEN predicate inside the RPC",
-          ysqlStatus: "Dispatching 3 parallel Index Scan RPCs — each targets one bucket with embedded ts BETWEEN '2024-01-01' AND '2024-04-01' predicate",
+          ysqlStatus: "Dispatching 3 parallel Index Scan RPCs — each targets one bucket with embedded ts BETWEEN '2024-01-01 00:00:00+00' AND '2024-04-01 00:00:00+00' predicate",
           tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }],
           rows: []
         },
         {
           op: "seek",
-          detail: "Each bucket seeks to first ts ≤ '2024-04-01' (DESC order). B0→2024-03-22  B1→2024-02-20  B2→2024-02-08 — all 3 cursors positioned in parallel",
-          ysqlStatus: "All 3 buckets seeking in parallel — B0→2024-03-22, B1→2024-02-20, B2→2024-02-08 (entries above range skipped by seek)",
+          detail: "Each bucket seeks to first ts ≤ '2024-04-01 00:00:00+00' (DESC order). B0→2024-03-22 18:45+00  B1→2024-02-20 11:30+00  B2→2024-02-08 12:00+00 — all 3 cursors positioned in parallel",
+          ysqlStatus: "All 3 buckets seeking in parallel — B0→2024-03-22 18:45+00, B1→2024-02-20 11:30+00, B2→2024-02-08 12:00+00 (entries above range skipped by seek)",
           tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }],
           rows: [
             { tablet: 0, row: 0, state: "cursor" },
@@ -2239,7 +2242,7 @@ Object.assign(SCENARIOS, {
         },
         {
           op: "next",
-          detail: "All 3 streams scan through their range — B0: 2024-03-22✓ 2024-01-03✓ | B1: 2024-02-20✓ 2024-01-15✓ | B2: 2024-02-08✓",
+          detail: "All 3 streams scan through their range — B0: 2024-03-22 18:45+00✓ 2024-01-03 07:11+00✓ | B1: 2024-02-20 11:30+00✓ 2024-01-15 08:30+00✓ | B2: 2024-02-08 12:00+00✓",
           ysqlStatus: "Streaming from 3 ts-sorted streams — B0: 2 rows, B1: 2 rows, B2: 1 row — buffering stream heads for Merge Append",
           tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "done" }],
           rows: [
@@ -2252,8 +2255,8 @@ Object.assign(SCENARIOS, {
         },
         {
           op: "return",
-          detail: "Merge Append: YSQL holds 3 stream cursors and repeatedly picks the max ts — 2024-03-22 → 2024-02-20 → 2024-02-08 → 2024-01-15 → 2024-01-03",
-          ysqlStatus: "Merge Append: pulling next-largest ts from 3 stream heads — 2024-03-22 → 2024-02-20 → 2024-02-08 → 2024-01-15 → 2024-01-03",
+          detail: "Merge Append: YSQL holds 3 stream cursors and repeatedly picks the max ts — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
+          ysqlStatus: "Merge Append: pulling next-largest ts from 3 stream heads — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
           tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "done" }],
           rows: [
             { tablet: 0, row: 0, state: "returned" },
@@ -2276,15 +2279,15 @@ Object.assign(SCENARIOS, {
     initialState: {
       tablets: [
         { id: "Bucket 0", range: "bucket = 0", rows: [
-          { fields: ["0", "2024-03-22", "ev-3301", "disk_io",  "91.1"] },
-          { fields: ["0", "2024-01-03", "ev-0512", "cpu_pct",  "55.0"] }
+          { fields: ["0", "2024-03-22 18:45:00+00", "ev-3301", "disk_io",  "91.1"] },
+          { fields: ["0", "2024-01-03 07:11:00+00", "ev-0512", "cpu_pct",  "55.0"] }
         ]},
         { id: "Bucket 1", range: "bucket = 1", rows: [
-          { fields: ["1", "2024-02-20", "ev-2201", "net_rx",   "33.5"] },
-          { fields: ["1", "2024-01-15", "ev-1001", "cpu_pct",  "73.2"] }
+          { fields: ["1", "2024-02-20 11:30:00+00", "ev-2201", "net_rx",   "33.5"] },
+          { fields: ["1", "2024-01-15 08:30:00+00", "ev-1001", "cpu_pct",  "73.2"] }
         ]},
         { id: "Bucket 2", range: "bucket = 2", rows: [
-          { fields: ["2", "2024-02-08", "ev-2205", "mem_mb",   "45.8"] }
+          { fields: ["2", "2024-02-08 12:00:00+00", "ev-2205", "mem_mb",   "45.8"] }
         ]}
       ]
     },
@@ -2312,7 +2315,7 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-kw">SELECT</span> event_id, ts, metric, value
 <span class="sql-kw">FROM</span>   events
-<span class="sql-kw">WHERE</span>  ts <span class="sql-kw">BETWEEN</span> <span class="sql-str">'2024-01-01'</span> <span class="sql-kw">AND</span> <span class="sql-str">'2024-04-01'</span>
+<span class="sql-kw">WHERE</span>  ts <span class="sql-kw">BETWEEN</span> <span class="sql-str">'2024-01-01 00:00:00+00'</span> <span class="sql-kw">AND</span> <span class="sql-str">'2024-04-01 00:00:00+00'</span>
 <span class="sql-kw">ORDER BY</span> ts <span class="sql-kw">DESC</span>;`
     },
     guidedTour: [
@@ -2537,7 +2540,7 @@ WHERE u.name = 'Dan';`,
     subtitle: "Bucket index on ts — write-scalable",
     description: "A plain range index on a timestamp column creates a permanent write hotspot — every new row is 'now', so all writes pile onto the last tablet. The fix: a synthetic bucket prefix derived from the timestamp distributes writes across N tablets from the start. Reads fan out across all buckets and merge, but the write throughput scales linearly with N.",
     inputPlaceholder: "Enter a date (e.g. 2024-01-15, 2024-03-22)...",
-    scanDefault: "ts BETWEEN '2024-03-01' AND '2024-04-30'",
+    scanDefault: "ts BETWEEN '2024-03-01 00:00:00+00' AND '2024-04-30 23:59:59+00'",
     legend: [
       { type: "sharding", label: "bucket (Synthetic)", explain: "yb_hash_code(ts) % 3 — assigns each timestamp to one of 3 index tablets, preventing all concurrent writes from landing on the same one" },
       { type: "clustering", label: "ts DESC (Index)", explain: "Sorted newest-first within each bucket — recency-ordered scans stay sequential" },
@@ -2546,9 +2549,12 @@ WHERE u.name = 'Dan';`,
     generateRow: (v) => {
       const dates = ["2024-01-15", "2024-02-08", "2024-03-22", "2024-04-10", "2024-05-01"];
       const rawDate = (v || "").trim();
-      const ts = rawDate.match(/^\d{4}-\d{2}-\d{2}/) ? rawDate.substring(0, 10) :
-                 rawDate.match(/^\d{4}-\d{2}$/) ? rawDate + "-" + String(Math.floor(Math.random()*28)+1).padStart(2,'0') :
-                 dates[Math.floor(Math.random() * dates.length)];
+      const datePart = rawDate.match(/^\d{4}-\d{2}-\d{2}/) ? rawDate.substring(0, 10) :
+                       rawDate.match(/^\d{4}-\d{2}$/) ? rawDate + "-" + String(Math.floor(Math.random()*28)+1).padStart(2,'0') :
+                       dates[Math.floor(Math.random() * dates.length)];
+      const hh = String(Math.floor(Math.random() * 24)).padStart(2, '0');
+      const mm = String(Math.floor(Math.random() * 60)).padStart(2, '0');
+      const ts = `${datePart} ${hh}:${mm}:00+00`;
       const bucket = Math.floor(Math.random() * 3);
       const eventId = "ev-" + Math.floor(Math.random() * 9999).toString().padStart(4, '0');
       const devices = ["dev-A1", "dev-B2", "dev-C3", "dev-D4", "dev-E5"];
@@ -2576,28 +2582,28 @@ WHERE u.name = 'Dan';`,
     initialState: {
       tableTablets: [
         { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [
-          { fields: ["ev-1001", "2024-01-15", "dev-A1", "cpu_pct", "73.2"] },
-          { fields: ["ev-3301", "2024-03-22", "dev-B2", "disk_io", "91.1"] }
+          { fields: ["ev-1001", "2024-01-15 08:30:00+00", "dev-A1", "cpu_pct", "73.2"] },
+          { fields: ["ev-3301", "2024-03-22 18:45:00+00", "dev-B2", "disk_io", "91.1"] }
         ]},
         { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [
-          { fields: ["ev-2205", "2024-02-08", "dev-C3", "mem_mb", "45.8"] },
-          { fields: ["ev-4102", "2024-04-10", "dev-D4", "net_rx", "22.7"] }
+          { fields: ["ev-2205", "2024-02-08 12:00:00+00", "dev-C3", "mem_mb", "45.8"] },
+          { fields: ["ev-4102", "2024-04-10 14:22:00+00", "dev-D4", "net_rx", "22.7"] }
         ]},
         { id: "Table Tablet 3", range: "0xAAAB–0xFFFF", rows: [
-          { fields: ["ev-0512", "2024-01-03", "dev-E5", "cpu_pct", "55.0"] }
+          { fields: ["ev-0512", "2024-01-03 07:11:00+00", "dev-E5", "cpu_pct", "55.0"] }
         ]}
       ],
       indexTablets: [
         { id: "Bucket 0", range: "bucket = 0", rows: [
-          { fields: ["0", "2024-04-10", "ev-4102"] },
-          { fields: ["0", "2024-01-03", "ev-0512"] }
+          { fields: ["0", "2024-04-10 14:22:00+00", "ev-4102"] },
+          { fields: ["0", "2024-01-03 07:11:00+00", "ev-0512"] }
         ]},
         { id: "Bucket 1", range: "bucket = 1", rows: [
-          { fields: ["1", "2024-03-22", "ev-3301"] },
-          { fields: ["1", "2024-01-15", "ev-1001"] }
+          { fields: ["1", "2024-03-22 18:45:00+00", "ev-3301"] },
+          { fields: ["1", "2024-01-15 08:30:00+00", "ev-1001"] }
         ]},
         { id: "Bucket 2", range: "bucket = 2", rows: [
-          { fields: ["2", "2024-02-08", "ev-2205"] }
+          { fields: ["2", "2024-02-08 12:00:00+00", "ev-2205"] }
         ]}
       ]
     },
