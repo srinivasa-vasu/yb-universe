@@ -1725,8 +1725,10 @@ function closeTour() {
         } else {
           tg = S.groups.find(g => {
             const p = g.range.split(' — ');
-            if (p.length === 2) return id >= parseInt(p[0]) && id <= parseInt(p[1]);
-            return false;
+            if (p.length !== 2) return false;
+            const lo = p[0].trim() === '-∞' ? -Infinity : parseInt(p[0]);
+            const hi = p[1].trim() === '∞' ? Infinity : parseInt(p[1]);
+            return id >= lo && id <= hi;
           });
           hashHex = `${id} (Range)`;
           addLog(`PK id=${id} range lookup...`, 'li');
@@ -1862,7 +1864,8 @@ function closeTour() {
           const byRange = groups.find(g => {
             const p = g.range.split(' — ');
             if (p.length !== 2) return false;
-            const lo = parseInt(p[0]), hi = parseInt(p[1]);
+            const lo = p[0].trim() === '-∞' ? -Infinity : parseInt(p[0]);
+            const hi = p[1].trim() === '∞' ? Infinity : parseInt(p[1]);
             return !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
           });
           if (byRange) {
@@ -1893,8 +1896,10 @@ function closeTour() {
           const routedByHash = groups.find(g => hashInRange(hash, g.range));
           const routedByRange = !routedByHash && groups.find(g => {
             const p = g.range.split(/\s*[—–]\s*/);
-            const lo = parseInt(p[0]), hi = parseInt(p[1]);
-            return p.length === 2 && !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
+            if (p.length !== 2) return false;
+            const lo = p[0].trim() === '-∞' ? -Infinity : parseInt(p[0]);
+            const hi = p[1].trim() === '∞' ? Infinity : parseInt(p[1]);
+            return !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
           });
           if (routedByHash) addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4,'0')} → ${tbl}.t${routedByHash.tnum}`, '');
           else if (routedByRange) addLog(`Range: id=${id} in [${routedByRange.range}] → ${tbl}.t${routedByRange.tnum}`, '');

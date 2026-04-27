@@ -321,13 +321,15 @@ window.mrRestore = function() {
               ctx.hlTablet(g.id, g.leaderNode, 't-hl');
               await ctx.delay(350);
             }
-            ctx.setLat(0, 0.1); ctx.setLat(1, 0.4);
             addLog('hash(id) → 0x0000–0xFFFF space partitioned across tg1, tg2, tg3', 'li');
           }},
           { label: 'Write to Leader', desc: 'Client INSERT is routed to the tablet leader that owns the key\'s hash range. The leader appends to WAL and marks the row provisional — visible on the leader immediately but not yet committed. It then fans out Raft AppendEntries to both followers.', action: async (ctx) => {
             const pendingRow = [10, 'Jack', 'MUM', 88, Date.now()/1000];
             ctx.activateClient(true);
             addLog('INSERT id=10 → hash(10)=0x3A2F → tg1 (0x0000–0x54FF), leader N1', 'li');
+            const tgHash = S.groups.find(g => g.id === 'tg1');
+            if (tgHash) renderHashRouting(10, '0x3A2F', tgHash);
+            ctx.setLat(0, 0.1); ctx.setLat(1, 0.4);
             await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
             ctx.hlTablet('tg1', 1, 't-hl');
             const rs = S.replicaState['tg1']?.[1];
@@ -437,23 +439,23 @@ window.mrRestore = function() {
         init: (ctx) => {
           showDataPanel(true);
           renderDataTable('users');
-          const d = [[10, 'Alice', 'NY', 87], [50, 'Bob', 'CH', 92], [150, 'Carol', 'HOU', 78], [250, 'David', 'PHX', 95], [450, 'Eve', 'SEA', 83], [850, 'Frank', 'MIA', 94]];
+          const d = [[10, 'Alice', 'NY', 87, 1713289000.1], [50, 'Bob', 'CH', 92, 1713289000.2], [150, 'Carol', 'HOU', 78, 1713289000.3], [250, 'David', 'PHX', 95, 1713289000.4], [450, 'Eve', 'SEA', 83, 1713289000.5], [850, 'Frank', 'MIA', 94, 1713289000.6]];
           S.groups = S.groups.filter(g => g.table !== 'users');
-          S.groups.push({ id: 'tg1', table: 'users', tnum: 1, range: '0 — 99', leaderNode: 1, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] < 100) });
-          S.groups.push({ id: 'tg2', table: 'users', tnum: 2, range: '100 — 199', leaderNode: 2, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] >= 100 && r[0] < 200) });
-          S.groups.push({ id: 'tg3', table: 'users', tnum: 3, range: '200 — 999', leaderNode: 3, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] >= 200) });
+          S.groups.push({ id: 'tg1', table: 'users', tnum: 1, range: '-∞ — 100', leaderNode: 1, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] < 100) });
+          S.groups.push({ id: 'tg2', table: 'users', tnum: 2, range: '100 — 200', leaderNode: 2, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] >= 100 && r[0] < 200) });
+          S.groups.push({ id: 'tg3', table: 'users', tnum: 3, range: '200 — ∞', leaderNode: 3, term: 4, replicas: [1, 2, 3], data: d.filter(r => r[0] >= 200) });
           ctx.rebuildReplicaState();
           ctx.setDDL('CREATE TABLE users (...) \nSPLIT AT VALUES ((100), (200));');
           renderAllTablets(); setTimeout(renderConnections, 80);
         },
         steps: [
-          { label: 'Multi-Tablet', desc: 'Table is pre-split into 3 tablets: 0–99, 100–199, 200–999. Each tablet is owned by a different leader, distributing load from day one.', action: async (ctx) => {
+          { label: 'Multi-Tablet', desc: 'Table is pre-split into 3 tablets: -∞–100, 100–200, 200–∞. Each tablet is owned by a different leader, distributing load from day one.', action: async (ctx) => {
             for (const g of S.groups.filter(x => x.table === 'users')) {
               ctx.hlTablet(g.id, g.leaderNode, 't-hl');
               await ctx.delay(400);
             }
           } },
-          { label: 'Write → Routed', desc: 'Client inserts id=75. Range lookup maps 75 → tablet tg1 (0–99). Write goes to tg1 leader which appends to WAL and marks the row provisional — visible on the leader immediately but not yet committed.', action: async (ctx) => {
+          { label: 'Write → Routed', desc: 'Client inserts id=75. Range lookup maps 75 → tablet tg1 (-∞–100). Write goes to tg1 leader which appends to WAL and marks the row provisional — visible on the leader immediately but not yet committed.', action: async (ctx) => {
             const pendingRow = [75, 'Jack', 'MUM', 88, Date.now()/1000];
             ctx.activateClient(true);
             await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
@@ -463,7 +465,7 @@ window.mrRestore = function() {
             ctx.reRenderTablet('tg1', 1);
             ctx.setLat(0, 0.1);
             ctx.setLat(1, 0.4);
-            addLog('Client INSERT id=75 → range 0–99 → tg1 (N1)', 'li');
+            addLog('Client INSERT id=75 → range -∞–100 → tg1 (N1)', 'li');
             addLog('Key ordered, WAL append, row provisional ⏳ → fanning out to N2, N3', '');
             ctx.activateClient(false);
           } },
@@ -1590,13 +1592,13 @@ window.mrRestore = function() {
         ],
         init: (ctx) => {
           S.groups = [
-            { id: 'xpu', table: 'users',  tnum: 1, range: 'all rows', leaderNode: 1, term: 4, replicas: [1,2,3], showReg: true,
+            { id: 'xpu', table: 'users',  tnum: 1, range: '0x0000–0xFFFF', leaderNode: 1, term: 4, replicas: [1,2,3], showReg: true,
               data: [[1,'Alice Chen','S1',87,1713289000.100],[4,'David Park','S1',95,1713289000.400]] },
-            { id: 'xpo', table: 'orders', tnum: 1, range: 'all rows', leaderNode: 2, term: 4, replicas: [1,2,3],
+            { id: 'xpo', table: 'orders', tnum: 1, range: '0x0000–0xFFFF', leaderNode: 2, term: 4, replicas: [1,2,3],
               data: [[101,1,'item-A','DONE',1713289000.500],[102,4,'item-B','DONE',1713289000.600]] },
-            { id: 'xsu', table: 'users',  tnum: 1, range: 'all rows', leaderNode: 4, term: 4, replicas: [4,5,6], showReg: true,
+            { id: 'xsu', table: 'users',  tnum: 1, range: '0x0000–0xFFFF', leaderNode: 4, term: 4, replicas: [4,5,6], showReg: true,
               data: [[1,'Alice Chen','S1',87,1713289000.100,'ext'],[4,'David Park','S1',95,1713289000.400,'ext']] },
-            { id: 'xso', table: 'orders', tnum: 1, range: 'all rows', leaderNode: 5, term: 4, replicas: [4,5,6],
+            { id: 'xso', table: 'orders', tnum: 1, range: '0x0000–0xFFFF', leaderNode: 5, term: 4, replicas: [4,5,6],
               data: [[101,1,'item-A','DONE',1713289000.500,'ext'],[102,4,'item-B','DONE',1713289000.600,'ext']] }
           ];
           ctx.rebuildReplicaState();

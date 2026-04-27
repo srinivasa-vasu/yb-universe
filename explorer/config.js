@@ -33,7 +33,7 @@
         data: [[101, 'Apple iPhone', '$999', '', 1713289002.1], [102, 'Bose QC45', '$329', '', 1713289002.2]]
       },
       {
-        id: 'tg6', table: 'products', tnum: 2, range: 'N — Z', leaderNode: 3, term: 4, replicas: [1, 2, 3],
+        id: 'tg6', table: 'products', tnum: 2, range: 'M — Z', leaderNode: 3, term: 4, replicas: [1, 2, 3],
         data: [[104, 'Sony PS5', '$499', '', 1713289002.4], [105, 'Tesla Wall', '$5500', '', 1713289002.5]]
       },
       {
