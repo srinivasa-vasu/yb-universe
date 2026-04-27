@@ -302,6 +302,11 @@ window.mrRestore = function() {
         group: "Sharding", icon: "🔢",
         name: 'Hash Sharding', title: 'Hash Sharding', subtitle: 'MurmurHash2 distribution',
         desc: 'The Primary Key is hashed to determine tablet placement. This provides uniform distribution across the cluster, preventing hotspots.',
+        guidedTour: [
+          { text: "Hash sharding runs the primary key through <b>MurmurHash2</b>, mapping each row to one of the tablets uniformly.", element: ".canvas-wrap" },
+          { text: "Click <b>Insert Random User</b> to see a new row hashed and routed to the correct tablet in real time.", element: "#btn-hash" },
+          { text: "Notice how inserts spread evenly — sequential IDs hash to <b>different tablets</b>, eliminating write hotspots.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Hash Calculation', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-hash', label: '➕ Insert Random User', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
@@ -357,6 +362,11 @@ window.mrRestore = function() {
         name: 'Range (Default)', title: 'Range (Default)', subtitle: 'Single tablet start',
         filterTable: 'users',
         desc: 'Standard Range Sharding starts with a single tablet. As data grows, YugabyteDB automatically splits the tablet. This is ideal for small tables or when range scans are frequently used.',
+        guidedTour: [
+          { text: "Range sharding stores rows in <b>sorted key order</b>. A new table starts with a single tablet covering the full key range.", element: ".canvas-wrap" },
+          { text: "Click <b>Insert Row</b> to add rows. Once the tablet grows large enough, YugabyteDB auto-splits it.", element: "#btn-range" },
+          { text: "Range sharding enables efficient <b>range scans</b> (BETWEEN queries) but risks write hotspots on monotonically increasing keys.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Key Compare', cls: 'll', max: 1 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-range', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
@@ -417,6 +427,11 @@ window.mrRestore = function() {
         name: 'Range (Pre-split)', title: 'Range (Pre-split)', subtitle: 'SPLIT AT VALUES',
         filterTable: 'users',
         desc: 'Optimize range sharding by pre-splitting the table into multiple tablets during creation.',
+        guidedTour: [
+          { text: "<b>SPLIT AT VALUES</b> creates multiple tablets at table creation time, giving each a distinct key range from the start.", element: ".canvas-wrap" },
+          { text: "Click <b>Insert Row</b> to see how rows are routed to the correct range tablet based on key value.", element: "#btn-presplit" },
+          { text: "Pre-splitting avoids the initial single-tablet hotspot — ideal when you know your key distribution upfront.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Range Lookup', cls: 'll', max: 1 }, { lbl: 'Tablet Lookup', cls: 'll', max: 2 }, { lbl: 'Raft Commit', cls: 'lm', max: 10 }],
         extraBtns: [{ id: 'btn-presplit', label: '➕ Insert Row', cls: 'btn-p', cb: 'insertHashUser' }],
         init: (ctx) => {
@@ -529,6 +544,11 @@ window.mrRestore = function() {
         name: 'Distributed Transactions', title: 'Distributed Transactions', subtitle: 'Multi-tablet atomicity (2PC)',
         filterTable: ['users', 'transactions'],
         desc: 'Transactions spanning multiple tablets (e.g. updating users in different shards) use a high-performance 2-Phase Commit protocol (2PC). Visibility is atomic across all shards.',
+        guidedTour: [
+          { text: "Writes touching <b>multiple tablets</b> need 2-Phase Commit (2PC) to appear atomic — either all tablets see the change or none do.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> through the 5 phases: TX Init → Provisional Writes → Commit → Apply → Visible.", element: "#btn-step" },
+          { text: "Watch the <b>Transaction Panel</b> as the TX transitions PENDING → COMMITTED. Rows are hidden from other readers until commit.", element: ".tx-panel" }
+        ],
         latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
           {
@@ -632,6 +652,11 @@ window.mrRestore = function() {
         name: 'Index Data Write', title: 'Index Data Write', subtitle: 'Primary + Secondary (2PC)',
         filterTable: ['users', 'users_email_idx', 'transactions'],
         desc: 'Secondary indexes are stored in separate tablets. Updating a row with an index requires a distributed transaction to ensure both are updated atomically.',
+        guidedTour: [
+          { text: "Secondary indexes live in <b>separate tablets</b>. A write must update both the primary row and the index entry atomically.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to watch 2PC coordinate the provisional writes across the primary tablet and the index tablet.", element: "#btn-step" },
+          { text: "Without atomic coordination, a crash between the two writes would leave the index <b>out of sync</b> with the primary table.", element: ".tx-panel" }
+        ],
         latencies: [{ lbl: 'TX Init', cls: 'll', max: 10 }, { lbl: 'Prov Write', cls: 'lm', max: 50 }, { lbl: 'TX Commit', cls: 'll', max: 10 }, { lbl: 'Visible to All', cls: 'li', max: 5 }, { lbl: 'Total Latency', cls: 'lm', max: 80 }],
         steps: [
           {
@@ -735,6 +760,11 @@ window.mrRestore = function() {
         name: 'Consistent Read', title: 'Consistent Read', subtitle: 'Leader reads',
         filterTable: 'users',
         desc: 'Strong-consistency reads always go to the Raft LEADER. If request lands on a follower, it transparently redirects to the leader.',
+        guidedTour: [
+          { text: "Strong-consistency reads always go to the Raft <b>Leader</b>. A follower that receives a read will transparently redirect it.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to compare the fast path (request hits leader directly) vs the two-hop path (follower redirect).", element: "#btn-step" },
+          { text: "Compare the <b>Total</b> latency bar between both paths — the redirect adds one extra network round-trip.", element: ".lat-row" }
+        ],
         latencies: [{ lbl: 'Gateway Hop', cls: 'll', max: 2 }, { lbl: 'Remote Redir', cls: 'll', max: 2 }, { lbl: 'Leader Read', cls: 'll', max: 2 }, { lbl: 'Total', cls: 'll', max: 6 }],
         steps: [
           { label: 'Local Read (Fast)', desc: 'Request lands directly on the leader (TServer-1) — no redirect needed.', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 1, 'pk-read', 400); ctx.setLat(0, 0.5); ctx.setLat(2, 0.8); ctx.setLat(3, 1.3); ctx.hlLatRow([0, 2, 3]); await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); ctx.activateClient(false); } },
@@ -748,6 +778,11 @@ window.mrRestore = function() {
         name: 'Follower Reads', title: 'Follower Reads', subtitle: 'Bounded staleness',
         filterTable: 'users',
         desc: 'SET yb_read_from_followers=TRUE allows reads from nearest replica, skipping the leader. Data may be bounded-stale (default 10ms).',
+        guidedTour: [
+          { text: "Setting <b>yb_read_from_followers=TRUE</b> lets reads go to the nearest replica, bypassing the leader entirely.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to route a read to TServer-3 (nearest follower) — no redirect to the leader needed.", element: "#btn-step" },
+          { text: "The follower checks its <b>HybridTime</b> is within the staleness window (default 10ms) before serving. Great for analytics workloads.", element: ".lat-row" }
+        ],
         latencies: [{ lbl: 'Route to Follower', cls: 'll', max: 1 }, { lbl: 'Staleness Check', cls: 'll', max: 1 }, { lbl: 'Local Read', cls: 'll', max: 1 }, { lbl: 'Total', cls: 'll', max: 3 }],
         steps: [
           { label: 'Read from Nearest', desc: 'Routes to TServer-3 (follower, nearest to client), bypassing TServer-1 (leader, far).', action: async (ctx) => { ctx.activateClient(true); await ctx.pktClientToTablet('tg1', 3, 'pk-read', 400); ctx.setLat(0, 0.6); ctx.hlLatRow(0); } },
@@ -1005,6 +1040,11 @@ window.mrRestore = function() {
         group: "Global & High Availability", icon: "🔀",
         name: 'Network Partition', title: 'Network Partition', subtitle: 'Split-brain & quorum',
         desc: 'TServer-3 is cut off from TServer-1 and TServer-2 by a network partition. TS-3 tries to elect itself leader but cannot win majority (1/3 < 2). TS-1 & TS-2 (quorum) continue serving writes. TS-3 returns stale reads.',
+        guidedTour: [
+          { text: "A network partition isolates TS-3. With only 1 of 3 votes it <b>cannot win a Raft election</b> — the cluster remains safe.", element: ".canvas-wrap" },
+          { text: "Click <b>Partition TS-3</b> to trigger the split. TS-1 & TS-2 retain quorum and keep serving writes uninterrupted.", element: "#btn-prt" },
+          { text: "Click <b>Heal Partition</b> to reconnect TS-3. Watch it detect the gap in Raft log and <b>catch up</b> all missed writes.", element: "#btn-heal" }
+        ],
         latencies: [{ lbl: 'Partition Detected', cls: 'lh', max: 500 }, { lbl: 'TS-3 Election Attempt', cls: 'lm', max: 10 }, { lbl: 'Write (majority side)', cls: 'll', max: 4 }, { lbl: 'Read (TS-3 stale)', cls: 'lm', max: 2 }, { lbl: 'Heal & Resync', cls: 'lm', max: 200 }],
         failureMode: 'partition',
         extraBtns: [
@@ -1105,6 +1145,11 @@ window.mrRestore = function() {
         group: "Horizontal Scalability", icon: "📈",
         name: 'Horizontal Scaling', title: 'Horizontal Scaling', subtitle: 'Add/remove nodes & rebalance',
         desc: 'Observe how YugabyteDB scales out from 3 to 6 nodes within the APAC region. As new nodes are added, YB-Master automatically rebalances both tablet leaders and followers to distribute data and load evenly across all available zones.',
+        guidedTour: [
+          { text: "YugabyteDB scales out by simply adding nodes. The <b>YB-Master</b> automatically detects them and starts rebalancing.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to add nodes one at a time and watch tablet leaders and replicas redistribute across zones.", element: "#btn-step" },
+          { text: "After scaling, both <b>leaders and followers</b> are spread evenly — no node is overloaded. Scale-in (remove nodes) works the same way.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Leader Rebalance', cls: 'll', max: 50 }, { lbl: 'Data Copy (Replica)', cls: 'lm', max: 200 }],
         init: (ctx) => {
           ctx.setCanvasGeoMode(false);
@@ -1333,6 +1378,11 @@ window.mrRestore = function() {
         name: 'Tablet Split', title: 'Tablet Split', subtitle: 'Auto-sharding growth',
         filterTable: 'users',
         desc: 'YugabyteDB automatically splits tablets when they exceed ~64MB. New Raft groups are created for the split halves, and the parent is retired.',
+        guidedTour: [
+          { text: "When a tablet grows beyond ~64MB, YugabyteDB automatically finds the <b>median split point</b> and divides it into two new tablets.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to bulk-insert data, trigger the size threshold, and watch the split and new Raft group creation.", element: "#btn-step" },
+          { text: "After the split, the parent tablet is retired. Each child starts <b>independent Raft replication</b>, spreading load across nodes.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Size Check', cls: 'll', max: 1 }, { lbl: 'Split Point', cls: 'll', max: 2 }, { lbl: 'New Group', cls: 'lm', max: 50 }],
         steps: [
           { label: 'Growth', desc: 'Bulk writes fill the tablet beyond the 64MB threshold.', action: async (ctx) => { for (let i = 0; i < 3; i++) { await ctx.pktClientToTablet('tg1', 1, 'pk-write', 300); ctx.addMem('tg1', 1, 20); } } },
@@ -1374,6 +1424,11 @@ window.mrRestore = function() {
         group: "Storage & Scalability", icon: "🗜️",
         name: 'LSM Compaction', title: 'LSM Compaction', subtitle: 'DocDB storage engine',
         desc: 'DocDB (RocksDB LSM-tree): writes → MemTable → L0 SSTable flush → L0→L1 compaction → lower read amplification.',
+        guidedTour: [
+          { text: "Writes land in an in-memory <b>MemTable</b>. When full, it flushes as an immutable <b>L0 SSTable</b> file on disk.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> through multiple flushes, then watch a <b>compaction</b> merge L0 files into a single, sorted L1 SSTable.", element: "#btn-step" },
+          { text: "Compaction reduces <b>read amplification</b> (fewer files to check per read) at the cost of background write amplification.", element: ".lat-row" }
+        ],
         latencies: [{ lbl: 'L0 Flush', cls: 'lm', max: 50 }, { lbl: 'Compaction', cls: 'lm', max: 200 }, { lbl: 'Final Read', cls: 'll', max: 2 }],
         steps: [
           { label: 'Writes & Flush #1', desc: 'Incoming writes fill MemTable (TS-1). When full, it flushes as an immutable L0 SSTable.', action: async (ctx) => {
@@ -1423,6 +1478,11 @@ window.mrRestore = function() {
         name: 'Colocated Tables', title: 'Colocated Tables', subtitle: 'Shared tablet groups',
         filterTable: 'colocated',
         desc: 'Colocation allows multiple small tables to share the same underlying tablet group. These shared tablets are range-sharded by default, using the entire row key (including Colocation ID) to maintain global order. This significantly reduces metadata overhead and per-table Raft costs for reference or master tables.',
+        guidedTour: [
+          { text: "Colocation lets multiple small tables share <b>one tablet group</b>, eliminating per-table Raft overhead and YB-Master metadata.", element: ".canvas-wrap" },
+          { text: "Click <b>Insert (Product)</b> or <b>Insert (Category)</b> — both rows land in the same physical tablet, prefixed by a Colocation ID.", element: "#btn-ins-c1" },
+          { text: "Ideal for small <b>reference or lookup tables</b> that would otherwise create tablet sprawl and inflate Master memory.", element: ".n-body" }
+        ],
         latencies: [{ lbl: 'Key Lookup', cls: 'll', max: 1 }, { lbl: 'Shared Tablet', cls: 'll', max: 5 }, { lbl: 'Write RPC', cls: 'lm', max: 40 }],
         extraBtns: [
           { id: 'btn-ins-c1', label: '➕ Insert (Product)', cls: 'btn-p', cb: 'insertColocatedA' },
@@ -1517,6 +1577,11 @@ window.mrRestore = function() {
         group: "Multi-Cluster & DR", icon: "🔁",
         name: 'xCluster DR', title: 'xCluster DR', subtitle: 'Turnkey async replication',
         desc: 'Turnkey xCluster Disaster Recovery replicates changes from a PRIMARY cluster (ap-south-1) to a SECONDARY cluster (ap-south-2) asynchronously via CDCSDK pollers. Writes commit via Raft on PRIMARY (~2ms), then stream near-realtime (~45ms) to SECONDARY. A single n:m poller bridges multiple source tablets to multiple target tablets simultaneously.',
+        guidedTour: [
+          { text: "xCluster DR streams committed writes from the <b>PRIMARY</b> cluster to a standby <b>SECONDARY</b> via async CDC polling.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to commit a write on PRIMARY via Raft (~2ms), then watch the CDC poller pick it up and apply it to SECONDARY.", element: "#btn-step" },
+          { text: "Watch the <b>Repl Lag</b> bar — xCluster is asynchronous, so the secondary always trails slightly behind the primary.", element: ".lat-row" }
+        ],
         latencies: [
           { lbl: 'Raft commit', cls: 'll', max: 2 },
           { lbl: 'CDC poll', cls: 'lm', max: 10 },
@@ -1729,6 +1794,11 @@ window.mrRestore = function() {
         group: "Multi-Cluster & DR", icon: "⚡",
         name: 'Active-Active xCluster', title: 'Active-Active xCluster', subtitle: 'Bidirectional xCluster',
         desc: 'Bidirectional xCluster: both clusters act as PRIMARY and accept local writes simultaneously. P-1 (forward) and P-2 (reverse) stream changes in both directions. The REG column in every tablet shows the origin cluster of each row. Conflicts on the same key are resolved via Last-Writer-Wins (LWW) using Hybrid Logical Clocks (HLC).',
+        guidedTour: [
+          { text: "Both clusters accept writes simultaneously. Two CDC pollers stream changes in <b>both directions</b> in near real time.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to write to each cluster and watch the replication flow bidirectionally between PRIMARY and SECONDARY.", element: "#btn-step" },
+          { text: "If the same key is written on both sides, the conflict is resolved via <b>Last-Writer-Wins (LWW)</b> using Hybrid Logical Clocks.", element: ".lat-row" }
+        ],
         latencies: [
           { lbl: 'Raft commit', cls: 'll', max: 2 },
           { lbl: 'Repl lag', cls: 'lh', max: 65 },
@@ -1991,7 +2061,12 @@ window.mrRestore = function() {
       "19": {
         group: "Storage & Scalability", icon: "🗄️",
         name: 'DocDB Storage', title: 'DocDB Storage', subtitle: 'LSM + MVCC internals',
-        desc: 'DocDB is YugabyteDB’s RocksDB-based storage engine. Every write is an immutable append — updates create new versions, deletes write tombstones. MVCC keeps all versions for consistent snapshot reads without locks.',
+        desc: "DocDB is YugabyteDB’s RocksDB-based storage engine. Every write is an immutable append — updates create new versions, deletes write tombstones. MVCC keeps all versions for consistent snapshot reads without locks.",
+        guidedTour: [
+          { text: "Every write in DocDB is an <b>immutable append</b> — updates create new key versions, deletes write tombstones. Nothing is overwritten in place.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to insert, update, and delete a row. Watch the SSTable accumulate multiple versions of the same key.", element: "#btn-step" },
+          { text: "<b>MVCC</b> lets snapshot reads see a consistent view at any past timestamp without locks. Compaction later purges expired old versions.", element: ".lat-row" }
+        ],
         latencies: [
           { lbl: 'WAL append', cls: 'll', max: 1 },
           { lbl: 'MemTable write', cls: 'll', max: 0.1 },
@@ -2340,6 +2415,11 @@ window.mrRestore = function() {
         name: 'Geo-Partition', title: 'Geo-Partition', subtitle: 'Multi-region geo(row) pinning',
         filterTable: 'users',
         desc: 'YugabyteDB pins rows to specific regions via a <b>tablegroup</b> per region. Each Raft group has 3 replicas in the same region — reads and writes are always local. Region-specific clients see sub-5ms latency; a global client crossing regions pays the full cross-region RTT penalty.',
+        guidedTour: [
+          { text: "Geo-partitioning pins rows to a region by placing them in a region-local <b>Raft group</b> with all 3 replicas in the same zone.", element: ".canvas-wrap" },
+          { text: "Click <b>Step Forward</b> to send reads and writes from each region's client — all traffic stays <b>in-region</b> with ~2ms latency.", element: "#btn-step" },
+          { text: "Each client box is positioned next to its region. Geo-partitioning is key for <b>data residency</b> and GDPR compliance.", element: ".geo-client-box" }
+        ],
         latencies: [
           { lbl: 'Client → Leader', cls: 'll', max: 200 },
           { lbl: 'Read Latency',    cls: 'll', max: 200 },

@@ -1212,6 +1212,7 @@ function closeTour() {
         cb.style.display = 'none';
         const _ch = document.querySelector('.cluster-health');
         if (_ch) _ch.style.display = 'none';
+        closeTour();
         renderHome();
         document.getElementById('active-badge').textContent = 'Home';
         return;

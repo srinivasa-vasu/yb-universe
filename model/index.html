@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YugabyteDB Data Model Explorer</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Rajdhani:wght@500;600;700&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="logo"><img src="../logo.svg" alt="YugabyteDB" style="height:20px"></div>
+        <span class="logo-txt">Data Model Explorer</span>
+        <div class="header-mid">
+            <span class="hbadge" id="active-scenario-badge">Hash Sharding</span>
+            <div class="cluster-health"><div class="dot"></div><span>Live Simulation</span></div>
+        </div>
+        <div class="header-right">
+            <div class="guide-control">
+                <span class="guide-icon">🧭</span>
+                <label class="switch">
+                    <input type="checkbox" id="guide-toggle-check" onchange="toggleGuideSetting()">
+                    <span class="slider"></span>
+                </label>
+                <span class="guide-label">Guide</span>
+            </div>
+            <button class="icon-btn" onclick="toggleHelp()" title="Keyboard Shortcuts (?)">
+                <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+            </button>
+        </div>
+    </header>
+    <div class="notice-bar">ⓘ &nbsp;Interactive Data Modeling | Explore sharding, clustering, indexes &amp; data organization in YugabyteDB</div>
+    <div class="app-main">
+        <nav class="sidebar" id="sidebar"></nav>
+        <div id="home-view"></div>
+        <main id="content">
+            <div id="scenario-info">
+                <h1 id="scenario-title"></h1>
+                <p id="scenario-desc"></p>
+            </div>
+            <div id="key-legend" class="key-legend"></div>
+            <div class="tabs-container">
+                <div class="tab-header">
+                    <button class="tab-btn active" data-tab="visual">Visual Explorer</button>
+                    <button class="tab-btn" data-tab="guide">Getting Started Guide</button>
+                </div>
+                <div id="visual" class="tab-content active">
+                    <div id="visual-workspace">
+                        <div id="sim-controls">
+                            <div class="control-group">
+                                <label>Simulate Insert:</label>
+                                <div class="input-row">
+                                    <input type="text" id="sim-input-val" placeholder="Value...">
+                                    <button class="primary-btn" onclick="simulateInsert()">Insert Row</button>
+                                    <button class="secondary-btn" onclick="autoInsert()">⚡ Auto Generate</button>
+                                    <button class="secondary-btn reset-btn" onclick="resetScenario()">↺ Reset</button>
+                                </div>
+                            </div>
+                            <div id="sim-feedback"></div>
+                        </div>
+                        <div id="visual-render-area"></div>
+                    </div>
+                </div>
+                <div id="guide" class="tab-content">
+                    <div class="guide-content">
+                        <div class="code-header">
+                            <span>SQL Schema &amp; Queries</span>
+                            <button class="copy-btn" onclick="copySQL()">Copy Code</button>
+                        </div>
+                        <div class="code-block"><pre><code id="sql-display"></code></pre></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <div id="tour-guide" class="tour-guide">
+        <div class="tour-header">
+            <span>🧭 Explorer Guide</span>
+            <button class="tour-close" onclick="closeTour()">&times;</button>
+        </div>
+        <div class="tour-content" id="tour-content"></div>
+    </div>
+    <div id="help-modal" class="modal-overlay" onclick="toggleHelp()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3>⌨️ Keyboard Shortcuts</h3>
+                <button class="close-btn" onclick="toggleHelp()">&times;</button>
+            </div>
+            <div class="shortcuts-grid">
+                <div class="shortcut-item">
+                    <span class="key">H</span>
+                    <span class="desc">Return to Home Page</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">F</span>
+                    <span class="desc">Toggle Focus Mode (Hide UI)</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">[</span>
+                    <span class="desc">Toggle Sidebar</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">?</span>
+                    <span class="desc">Show this Help Menu</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">G</span>
+                    <span class="desc">Toggle Explorer Guide</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">↑</span>
+                    <span class="desc">Previous Scenario</span>
+                </div>
+                <div class="shortcut-item">
+                    <span class="key">↓</span>
+                    <span class="desc">Next Scenario</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <p>💡 Tip: Use the SQL Guide tab to see the DDL for each scenario.</p>
+            </div>
+        </div>
+    </div>
+<script src="scenarios.js"></script>
+    <script src="engine.js"></script>
+</body>
+</html>
