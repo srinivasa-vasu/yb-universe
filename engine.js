@@ -1210,6 +1210,8 @@ function closeTour() {
         sp.style.display = 'none';
         dbp.style.display = 'none';
         cb.style.display = 'none';
+        const _ch = document.querySelector('.cluster-health');
+        if (_ch) _ch.style.display = 'none';
         renderHome();
         document.getElementById('active-badge').textContent = 'Home';
         return;
@@ -1255,6 +1257,8 @@ function closeTour() {
       document.getElementById('i-title').textContent = sc.name;
       document.getElementById('i-desc').innerHTML = sc.desc;
       document.getElementById('term-display').textContent = 'Raft Term: 4';
+      const healthEl = document.querySelector('.cluster-health');
+      if (healthEl) healthEl.style.display = '';
       const visibleNodes = new Set(S.groups.flatMap(g => g.replicas)).size;
       document.getElementById('health-txt').textContent = `Healthy · RF=3 · ${visibleNodes} TServers · ${S.groups.length} Raft Groups`;
       document.getElementById('health-dot').style.background = 'var(--ok)';
