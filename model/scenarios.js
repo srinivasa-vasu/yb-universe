@@ -13,8 +13,8 @@ const SCENARIOS = {
   "hash-single": {
     group: "Hash Sharding", icon: "🆔", title: "Hash: Single Key", subtitle: "Simple hash distribution",
     description: "Single column PK is hash-sharded by default. Data distributes across tablets via MurmurHash2. Great for point lookups, but range scans hit all tablets.",
-    inputPlaceholder: "Enter user_id (e.g. user-42)...",
-    scanDefault: "user_id = 'user-241'",
+    inputPlaceholder: "Enter name (e.g. Alice Chen)...",
+    scanDefault: "user_id = 'user-105'",
     legend: [
       { type: "sharding", label: "user_id", explain: "Sharding key — HASH(user_id) determines tablet placement" },
       { type: "data", label: "Other columns", explain: "Regular data columns stored with the row" }
@@ -29,9 +29,9 @@ const SCENARIOS = {
     },
     initialState: {
       tablets: [
-        { id: "Tablet 1", range: "0x0000–0x5555", rows: [{ data: ["0x21F3", "user-241", "Alice Chen", "US", "Active", "2024-01-15"] }, { data: ["0x4B12", "user-507", "Dan Park", "EU", "Active", "2024-02-20"] }] },
-        { id: "Tablet 2", range: "0x5556–0xAAAA", rows: [{ data: ["0x7D3A", "user-892", "Bob Martinez", "EU", "Pending", "2024-03-05"] }] },
-        { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ data: ["0xB321", "user-105", "Carol Singh", "APAC", "Active", "2024-04-10"] }, { data: ["0xF245", "user-333", "Eve Adams", "US", "Active", "2024-05-01"] }] }
+        { id: "Tablet 1", range: "0x0000–0x5555", rows: [{ data: ["0x49CE", "user-105", "Alice Chen", "US", "Active", "2024-01-15"] }, { data: ["0x4995", "user-120", "Dan Park", "EU", "Active", "2024-02-20"] }] },
+        { id: "Tablet 2", range: "0x5556–0xAAAA", rows: [{ data: ["0x79B0", "user-101", "Bob Martinez", "EU", "Pending", "2024-03-05"] }] },
+        { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ data: ["0xCF06", "user-100", "Carol Singh", "APAC", "Active", "2024-04-10"] }, { data: ["0xCEE2", "user-115", "Eve Adams", "US", "Active", "2024-05-01"] }] }
       ]
     },
     callout: { type: "info", icon: "💡", text: "<b>Hash sharding</b> is the default in YugabyteDB. The PK value is hashed and mapped to one of the hash partitions (tablets). Ideal for point lookups (<code>WHERE user_id = ?</code>), but full table scans are needed for range queries." },
@@ -46,7 +46,7 @@ const SCENARIOS = {
 
 <span class="sql-comment">-- By default, single-column PK = HASH sharded</span>
 <span class="sql-comment">-- Point lookup: HASH(user_id) → determines tablet → single RPC</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users <span class="sql-kw">WHERE</span> user_id = <span class="sql-str">'user-241'</span>;
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users <span class="sql-kw">WHERE</span> user_id = <span class="sql-str">'user-105'</span>;
 
 <span class="sql-comment">-- ⚠ Range scan hits ALL tablets (scatter-gather)</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users <span class="sql-kw">WHERE</span> user_id > <span class="sql-str">'user-100'</span>;` },
@@ -1143,8 +1143,8 @@ Object.assign(SCENARIOS, {
   "idx-expression": {
     group: "Indexes", icon: "ƒ(x)", title: "Expression Index", subtitle: "Index on computed value",
     description: "Indexes a computed expression rather than a raw column value. The expression is evaluated at write time and stored in the index. Enables case-insensitive lookups and function-based searches without touching the stored data.",
-    inputPlaceholder: "Enter email (any case, e.g. Alice@ACME.COM)...",
-    scanDefault: "email = 'alice@acme.com'",
+    inputPlaceholder: "Enter email (any case, e.g. Alice@Initech.Co)...",
+    scanDefault: "lower(email) = 'alice@initech.co'",
     legend: [
       { type: "sharding", label: "lower(email) Hash", explain: "Expression evaluated at write time — lowercase value is hashed and stored in index" },
       { type: "ptr", label: "user_id (Ptr)", explain: "Pointer to main table PK" }
@@ -1167,30 +1167,30 @@ Object.assign(SCENARIOS, {
     initialState: {
       tableTablets: [
         { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [
-          { fields: ["user-241", "Alice@ACME.COM", "Alice", "US", "Active"] },
-          { fields: ["user-307", "BOB@Globex.IO", "BOB", "EU", "Active"] }
+          { fields: ["user-241", "Alice@Initech.Co", "Alice", "US", "Active"] },
+          { fields: ["user-517", "CAROL@CO.COM", "Carol", "APAC", "Active"] }
         ]},
         { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [
-          { fields: ["user-892", "Carol@InitECH.Co", "Carol", "APAC", "Pending"] }
+          { fields: ["user-893", "Bob@Globex.IO", "Bob", "EU", "Active"] }
         ]},
         { id: "Table Tablet 3", range: "0xAAAB–0xFFFF", rows: [
-          { fields: ["user-105", "DAN@WAYNE.ORG", "DAN", "EU", "Active"] }
+          { fields: ["user-673", "EVE@ACME.COM", "Eve", "US", "Pending"] }
         ]}
       ],
       indexTablets: [
         { id: "Idx Tablet 1", range: "0x0000–0x5555", rows: [
-          { fields: ["0x1A2B", "alice@acme.com", "user-241"] },
-          { fields: ["0x4C3D", "dan@wayne.org", "user-105"] }
+          { fields: ["0x1C68", "alice@initech.co", "user-241"] },
+          { fields: ["0x2A21", "eve@acme.com", "user-673"] }
         ]},
         { id: "Idx Tablet 2", range: "0x5556–0xAAAA", rows: [
-          { fields: ["0x7E4F", "bob@globex.io", "user-307"] }
+          { fields: ["0x81DA", "carol@co.com", "user-517"] }
         ]},
         { id: "Idx Tablet 3", range: "0xAAAB–0xFFFF", rows: [
-          { fields: ["0xB561", "carol@initech.co", "user-892"] }
+          { fields: ["0xDEE3", "bob@globex.io", "user-893"] }
         ]}
       ]
     },
-    callout: { type: "info", icon: "ƒ", text: "<b>Expression indexes</b> store computed values — not raw column data. <code>WHERE lower(email) = 'alice@acme.com'</code> uses this index even if the stored email is <code>'Alice@ACME.COM'</code>. The expression is evaluated at write time and the result is what gets hashed and stored." },
+    callout: { type: "info", icon: "ƒ", text: "<b>Expression indexes</b> store computed values — not raw column data. <code>WHERE lower(email) = 'alice@initech.co'</code> uses this index even if the stored email is <code>'Alice@Initech.Co'</code>. The expression is evaluated at write time and the result is what gets hashed and stored." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
     <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
@@ -1206,11 +1206,11 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-comment">-- ✅ Uses the index (expression matches WHERE clause):</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
-<span class="sql-kw">WHERE</span> lower(email) = <span class="sql-str">'alice@acme.com'</span>;
+<span class="sql-kw">WHERE</span> lower(email) = <span class="sql-str">'alice@initech.co'</span>;
 
 <span class="sql-comment">-- ❌ Cannot use this index (raw column, not the expression):</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
-<span class="sql-kw">WHERE</span> email = <span class="sql-str">'Alice@ACME.COM'</span>;` },
+<span class="sql-kw">WHERE</span> email = <span class="sql-str">'Alice@Initech.Co'</span>;` },
     guidedTour: [
       { text: "The Table stores the original email (any case). The Index stores <code>lower(email)</code> — a different value.", element: ".index-area" },
       { text: "Try inserting a mixed-case email like 'Bob@GLOBEX.IO'.", element: "#sim-input-val" },
@@ -1236,7 +1236,7 @@ Object.assign(SCENARIOS, {
       };
     },
     visual: {
-      type: "index-mapping", isCovering: false,
+      type: "index-mapping", isCovering: false, isUnique: true,
       indexColumns: [{ label: "[hash]", role: "sys", dir: "ASC" }, { label: "email (UNIQUE)", role: "sh", dir: "ASC" }, { label: "Data Pointer Ref", role: "pk" }],
       tableColumns: [{ label: "user_id (PK)", role: "pk" }, { label: "email", role: "" }, { label: "name", role: "" }, { label: "region", role: "" }, { label: "status", role: "" }]
     },
@@ -2537,6 +2537,7 @@ WHERE u.name = 'Dan';`,
     subtitle: "Bucket index on ts — write-scalable",
     description: "A plain range index on a timestamp column creates a permanent write hotspot — every new row is 'now', so all writes pile onto the last tablet. The fix: a synthetic bucket prefix derived from the timestamp distributes writes across N tablets from the start. Reads fan out across all buckets and merge, but the write throughput scales linearly with N.",
     inputPlaceholder: "Enter a date (e.g. 2024-01-15, 2024-03-22)...",
+    scanDefault: "ts BETWEEN '2024-03-01' AND '2024-04-30'",
     legend: [
       { type: "sharding", label: "bucket (Synthetic)", explain: "yb_hash_code(ts) % 3 — assigns each timestamp to one of 3 index tablets, preventing all concurrent writes from landing on the same one" },
       { type: "clustering", label: "ts DESC (Index)", explain: "Sorted newest-first within each bucket — recency-ordered scans stay sequential" },
@@ -2561,7 +2562,7 @@ WHERE u.name = 'Dan';`,
       type: "index-mapping", isCovering: false,
       indexColumns: [
         { label: "bucket", role: "sh", dir: "ASC" },
-        { label: "ts DESC", role: "cl", dir: "DESC" },
+        { label: "ts", role: "cl", dir: "DESC" },
         { label: "event_id (Ptr)", role: "pk" }
       ],
       tableColumns: [
@@ -2643,6 +2644,7 @@ WHERE u.name = 'Dan';`,
     subtitle: "tenant_id HASH as first PK component",
     description: "In SaaS schemas, tenant_id must always be the first hash-sharded component of the primary key. This ensures every row for a tenant lands in a deterministic tablet — a query with WHERE tenant_id = 'acme' routes to exactly one tablet. Without this, a per-tenant query fans out to all tablets in the cluster, multiplying RPC cost by the tablet count.",
     inputPlaceholder: "Enter tenant_id (e.g. acme-corp, initech, umbrella)...",
+    scanDefault: "tenant_id = 'acme-corp'",
     legend: [
       { type: "sharding", label: "tenant_id (HASH)", explain: "First PK component — HASH(tenant_id) pins all rows for a tenant to one tablet, enabling single-tablet per-tenant queries" },
       { type: "clustering", label: "user_id ASC", explain: "Clustering key — all rows for a user are contiguous within the tenant's range" },
@@ -2734,6 +2736,7 @@ WHERE u.name = 'Dan';`,
     subtitle: "Opaque JSONB storage + inverted GIN index for @> queries",
     description: "JSONB columns are stored as a single opaque value in DocDB — the full JSON object lives in one cell, undecomposed. A GIN (Generalized Inverted Index) inverts this: it extracts every (key, value) pair from each row and creates a sorted index entry for each. A <code>metadata @> '{\"color\":\"red\"}'</code> query hits the GIN index directly — no sequential scan of the base table.",
     inputPlaceholder: "Enter a color (e.g. red, blue, green, black)...",
+    scanDefault: "json_value = 'red'",
     legend: [
       { type: "sharding", label: "json_key (GIN)", explain: "The JSON key extracted from the document — GIN range-shards by (json_key, json_value) so all entries for a key are co-located and sorted" },
       { type: "clustering", label: "json_value (GIN)", explain: "The JSON value, sorted within each key — enables efficient equality and range predicates on attribute values" },

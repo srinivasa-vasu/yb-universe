@@ -166,7 +166,7 @@ function selectScenario(id) {
     queryPlaying = false;
 
     document.getElementById('scenario-title').textContent = currentScenario.title;
-    document.getElementById('scenario-desc').textContent = currentScenario.description;
+    document.getElementById('scenario-desc').innerHTML = currentScenario.description;
     const activeScenarioBadge = document.getElementById('active-scenario-badge');
     if (activeScenarioBadge) activeScenarioBadge.textContent = currentScenario.group;
     const sqlDisplay = document.getElementById('sql-display');
@@ -553,7 +553,8 @@ function renderIndexMapping(container, v) {
     // ── DIVIDER ──
     const divider = document.createElement('div');
     divider.className = 'idx-divider';
-    divider.innerHTML = `<div class="idx-divider-line"></div><div class="idx-divider-label">Index Scan ⟶ Table Fetch (via PK)</div><div class="idx-divider-line"></div>`;
+    const dividerLabel = v.isCovering ? 'Index Scan ⟶ No Table Fetch (index covers all queried columns)' : 'Index Scan ⟶ Table Fetch (via PK)';
+    divider.innerHTML = `<div class="idx-divider-line"></div><div class="idx-divider-label">${dividerLabel}</div><div class="idx-divider-line"></div>`;
     wrap.appendChild(divider);
 
     // ── BOTTOM: Table Data ──
@@ -1164,11 +1165,20 @@ function simpleHash(str) {
    SCAN PREDICATE SIMULATOR (#4)
    ═══════════════════════════════════════════════════════════ */
 
+// Strip trailing role descriptors like " (UNIQUE)", " (PK)", " (Ptr)" from column labels,
+// but preserve expression forms like "lower(email)" where parens immediately follow the name.
+function getColumnBaseName(label) {
+    return label.replace(/\s+\([^)]*\)\s*$/, '').trim().toLowerCase();
+}
+
 function parseScanPredicate(text) {
     text = text.trim();
     let m;
     m = text.match(/^(\w+)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i);
     if (m) return { column: m[1].toLowerCase(), op: 'BETWEEN', low: m[2].replace(/'/g,'').trim(), high: m[3].replace(/'/g,'').trim() };
+    // Handle expression forms like lower(email) = 'value'
+    m = text.match(/^(\w+\([^)]+\))\s*(!=|<=|>=|=|<|>)\s*'?([^']+?)'?\s*$/i);
+    if (m) return { column: m[1].toLowerCase(), op: m[2], value: m[3].trim() };
     m = text.match(/^(\w+)\s*(!=|<=|>=|=|<|>)\s*'?([^']+?)'?\s*$/);
     if (m) return { column: m[1].toLowerCase(), op: m[2], value: m[3].trim() };
     return null;
@@ -1219,13 +1229,32 @@ window.runScan = function() {
     const v = currentScenario?.visual;
     if (!v) return;
 
+    // Validate that the predicate column exists in the scenario
+    let validColumns = [];
+    if (v.type === 'sharding-view') {
+        validColumns = (v.columns || [])
+            .filter(c => c.role !== 'sys')
+            .map(c => getColumnBaseName(c.label));
+    } else if (v.type === 'index-mapping') {
+        validColumns = (v.indexColumns || [])
+            .filter(c => c.role === 'sh' || c.role === 'cl')
+            .map(c => getColumnBaseName(c.label));
+    }
+    if (validColumns.length > 0 && !validColumns.includes(pred.column)) {
+        if (feedback) {
+            feedback.className = 'active scan-mode';
+            feedback.innerHTML = `<span style="color:var(--red)">Unknown column <b>'${pred.column}'</b> — valid: ${validColumns.map(c => `<code>${c}</code>`).join(', ')}</span>`;
+        }
+        return;
+    }
+
     scanState = { scanned: new Set(), pruned: new Set() };
     let msg = '';
 
     if (v.type === 'sharding-view') {
         const cols = v.columns || [];
         const shCol = cols.find(c => c.role === 'sh');
-        const isOnShardKey = shCol && pred.column === shCol.label.toLowerCase();
+        const isOnShardKey = shCol && getColumnBaseName(shCol.label) === pred.column;
         const colIdx = cols.findIndex(c => c.label.toLowerCase() === pred.column);
         const shIdx = cols.findIndex(c => c.role === 'sh');
         const safeIdx = colIdx >= 0 ? colIdx : (shIdx >= 0 ? shIdx : 1);
@@ -1238,7 +1267,13 @@ window.runScan = function() {
                 if (i === hit) scanState.scanned.add(t.id);
                 else scanState.pruned.add(t.id);
             });
-            msg = `HASH POINT LOOKUP · <code>hash("${pred.value}")</code> → <b>${scenarioState.tablets[hit]?.id}</b> · ${numTablets - 1} tablet${numTablets > 2 ? 's' : ''} pruned`;
+            const hitTablet = scenarioState.tablets[hit];
+            const rowFound = (hitTablet?.rows || []).some(row => {
+                const val = row.data ? row.data[safeIdx] : (row.fields ? row.fields[safeIdx] : null);
+                return val != null && valueMeetsPredicate(String(val), pred);
+            });
+            const notFoundNote = rowFound ? '' : ` · <span style="color:var(--red)">⚠ No row found (value not in table)</span>`;
+            msg = `HASH POINT LOOKUP · <code>hash("${pred.value}")</code> → <b>${hitTablet?.id}</b> · ${numTablets - 1} tablet${numTablets > 2 ? 's' : ''} pruned${notFoundNote}`;
         } else if (v.shardingType === 'HASH') {
             scenarioState.tablets.forEach(t => scanState.scanned.add(t.id));
             msg = `FULL SCAN · Range predicate on hash-sharded table — all ${scenarioState.tablets.length} tablets must be scanned`;
@@ -1256,8 +1291,37 @@ window.runScan = function() {
         const tblTablets = scenarioState.tableTablets || [];
         const hasSysCol = (v.indexColumns || []).some(c => c.role === 'sys');
         const idxCols = v.indexColumns || [];
-        const colIdx = idxCols.findIndex(c => c.label.toLowerCase() === pred.column);
+        // Use getColumnBaseName so "email (UNIQUE)" matches pred.column "email"
+        const colIdx = idxCols.findIndex(c => getColumnBaseName(c.label) === pred.column);
         const safeIdx = colIdx >= 0 ? colIdx : 1;
+
+        // Collect PKs (last field) only from rows that satisfy the predicate at safeIdx.
+        // This ensures the 2nd RPC is counted only for rows that actually match —
+        // not over-counting by assuming all rows in a scanned index tablet are fetched.
+        const collectMatchingPKs = (tablets) => {
+            const pks = new Set();
+            tablets.forEach(t => {
+                (t.rows || []).forEach(row => {
+                    if (!row.fields) return;
+                    const val = row.fields[safeIdx];
+                    if (val != null && valueMeetsPredicate(val, pred)) {
+                        pks.add(row.fields[row.fields.length - 1]);
+                    }
+                });
+            });
+            return pks;
+        };
+
+        // Mark exactly the data tablets containing the given PKs; prune the rest.
+        const applyDataTablets = (pks) => {
+            let count = 0;
+            tblTablets.forEach(t => {
+                const hit = (t.rows || []).some(r => r.fields && pks.has(r.fields[0]));
+                if (hit) { scanState.scanned.add(t.id); count++; }
+                else scanState.pruned.add(t.id);
+            });
+            return count;
+        };
 
         if (hasSysCol && pred.op === '=') {
             const hash = getStableHash(pred.value);
@@ -1266,21 +1330,59 @@ window.runScan = function() {
                 if (i === hit) scanState.scanned.add(t.id);
                 else scanState.pruned.add(t.id);
             });
-            tblTablets.forEach(t => scanState.scanned.add(t.id));
-            msg = `INDEX POINT LOOKUP · 1 index tablet hit · 2nd RPC to table (${tblTablets.length} tablet${tblTablets.length !== 1 ? 's' : ''})`;
+            if (v.isCovering) {
+                tblTablets.forEach(t => scanState.pruned.add(t.id));
+                msg = `INDEX-ONLY SCAN · 1 index tablet hit · No 2nd RPC — all queried columns covered by index`;
+            } else {
+                const matchPKs = collectMatchingPKs(idxTablets[hit] ? [idxTablets[hit]] : []);
+                if (matchPKs.size === 0) {
+                    tblTablets.forEach(t => scanState.pruned.add(t.id));
+                    msg = `INDEX POINT LOOKUP · 1 index tablet hit · No matching rows — no 2nd RPC`;
+                } else {
+                    const tblCount = applyDataTablets(matchPKs);
+                    if (v.isUnique) {
+                        msg = `INDEX POINT LOOKUP · 1 index tablet hit · 2nd RPC to 1 data tablet (unique key → at most 1 match)`;
+                    } else {
+                        msg = `INDEX POINT LOOKUP · 1 index tablet hit · 2nd RPC to ${tblCount} data tablet${tblCount !== 1 ? 's' : ''}`;
+                    }
+                }
+            }
         } else if (hasSysCol) {
             idxTablets.forEach(t => scanState.scanned.add(t.id));
-            tblTablets.forEach(t => scanState.scanned.add(t.id));
-            msg = `INDEX FULL SCAN · All ${idxTablets.length} index tablets · 2nd RPC to table`;
+            if (v.isCovering) {
+                tblTablets.forEach(t => scanState.pruned.add(t.id));
+                msg = `INDEX-ONLY FULL SCAN · All ${idxTablets.length} index tablets · No 2nd RPC — all queried columns covered by index`;
+            } else {
+                const matchPKs = collectMatchingPKs(idxTablets);
+                if (matchPKs.size === 0) {
+                    tblTablets.forEach(t => scanState.pruned.add(t.id));
+                    msg = `INDEX FULL SCAN · All ${idxTablets.length} index tablets · No matching rows — no 2nd RPC`;
+                } else {
+                    const tblCount = applyDataTablets(matchPKs);
+                    msg = `INDEX FULL SCAN · All ${idxTablets.length} index tablets · 2nd RPC to ${tblCount} data tablet${tblCount !== 1 ? 's' : ''}`;
+                }
+            }
         } else {
             let scanned = 0, pruned = 0;
+            const scannedIdxTablets = [];
             idxTablets.forEach(t => {
                 const match = tabletHasMatchingRows(t, pred, safeIdx);
-                if (match || match === null) { scanState.scanned.add(t.id); scanned++; }
+                if (match || match === null) { scanState.scanned.add(t.id); scannedIdxTablets.push(t); scanned++; }
                 else { scanState.pruned.add(t.id); pruned++; }
             });
-            tblTablets.forEach(t => scanState.scanned.add(t.id));
-            msg = `INDEX RANGE SCAN · ${scanned} index tablet${scanned !== 1 ? 's' : ''} hit · ${pruned} pruned · 2nd RPC to table`;
+            if (v.isCovering) {
+                tblTablets.forEach(t => scanState.pruned.add(t.id));
+                msg = `INDEX-ONLY RANGE SCAN · ${scanned} index tablet${scanned !== 1 ? 's' : ''} hit · ${pruned} pruned · No 2nd RPC — all queried columns covered by index`;
+            } else {
+                const matchPKs = collectMatchingPKs(scannedIdxTablets);
+                if (matchPKs.size === 0) {
+                    tblTablets.forEach(t => scanState.pruned.add(t.id));
+                    msg = `INDEX RANGE SCAN · ${scanned} index tablet${scanned !== 1 ? 's' : ''} hit · ${pruned} pruned · No matching rows — no 2nd RPC`;
+                } else {
+                    const tblCount = applyDataTablets(matchPKs);
+                    msg = `INDEX RANGE SCAN · ${scanned} index tablet${scanned !== 1 ? 's' : ''} hit · ${pruned} pruned · 2nd RPC to ${tblCount} data tablet${tblCount !== 1 ? 's' : ''}`;
+                }
+            }
         }
     }
 
