@@ -314,7 +314,7 @@ const SCENARIOS = {
     initialState: {
       tablets: [
         {
-          id: "Tablet 1", range: "[A, J)", rows: [
+          id: "Tablet 1", range: "(-∞, J)", rows: [
             { data: ["A001", "Electronics", "29.99", "In Stock", "TechCo"] },
             { data: ["B050", "Books", "15.00", "In Stock", "PubCo"] },
             { data: ["G200", "Home", "45.50", "Low", "HomeCo"] }
@@ -326,7 +326,7 @@ const SCENARIOS = {
           ]
         },
         {
-          id: "Tablet 3", range: "[R, Z]", rows: [
+          id: "Tablet 3", range: "[R, +∞)", rows: [
             { data: ["R500", "Electronics", "89.99", "In Stock", "TechCo"] },
             { data: ["X999", "Books", "9.99", "Low", "PubCo"] }
           ]

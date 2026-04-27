@@ -1203,6 +1203,51 @@ function valueMeetsPredicate(val, pred) {
     return false;
 }
 
+function parseTabletRange(rangeStr) {
+    if (!rangeStr) return null;
+    const m = rangeStr.match(/^([\[\(])\s*(.+?)\s*,\s*(.+?)\s*([\]\)])$/);
+    if (!m) return null;
+    const lowerRaw = m[2].trim(), upperRaw = m[3].trim();
+    return {
+        lower:    (lowerRaw.includes('∞') || lowerRaw === '-inf') ? null : lowerRaw,
+        lowerInc: m[1] === '[',
+        upper:    (upperRaw.includes('∞') || upperRaw === 'inf')  ? null : upperRaw,
+        upperInc: m[4] === ']',
+    };
+}
+
+function getPredRange(pred) {
+    switch (pred.op) {
+        case '=':       return { low: pred.value, lowInc: true,  high: pred.value, highInc: true  };
+        case 'BETWEEN': return { low: pred.low,   lowInc: true,  high: pred.high,  highInc: true  };
+        case '<':       return { low: null,        lowInc: false, high: pred.value, highInc: false };
+        case '<=':      return { low: null,        lowInc: false, high: pred.value, highInc: true  };
+        case '>':       return { low: pred.value,  lowInc: false, high: null,       highInc: false };
+        case '>=':      return { low: pred.value,  lowInc: true,  high: null,       highInc: false };
+        default:        return null;
+    }
+}
+
+function compareRangeValues(a, b) {
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na < nb ? -1 : na > nb ? 1 : 0;
+    return String(a).toLowerCase() < String(b).toLowerCase() ? -1 :
+           String(a).toLowerCase() > String(b).toLowerCase() ? 1 : 0;
+}
+
+function tabletRangeOverlapsPred(tabRange, predRange) {
+    if (!tabRange || !predRange) return true;
+    if (predRange.high !== null && tabRange.lower !== null) {
+        const cmp = compareRangeValues(predRange.high, tabRange.lower);
+        if (cmp < 0 || (cmp === 0 && (!predRange.highInc || !tabRange.lowerInc))) return false;
+    }
+    if (tabRange.upper !== null && predRange.low !== null) {
+        const cmp = compareRangeValues(tabRange.upper, predRange.low);
+        if (cmp < 0 || (cmp === 0 && (!tabRange.upperInc || !predRange.lowInc))) return false;
+    }
+    return true;
+}
+
 function tabletHasMatchingRows(tablet, pred, colIdx) {
     if (tablet.rows.length === 0) return null; // unknown — no data yet
     return tablet.rows.some(row => {
@@ -1279,9 +1324,13 @@ window.runScan = function() {
             msg = `FULL SCAN · Range predicate on hash-sharded table — all ${scenarioState.tablets.length} tablets must be scanned`;
         } else {
             let scanned = 0, pruned = 0;
+            const predRange = getPredRange(pred);
             scenarioState.tablets.forEach(t => {
-                const match = tabletHasMatchingRows(t, pred, safeIdx);
-                if (match || match === null) { scanState.scanned.add(t.id); scanned++; }
+                const tabRange = parseTabletRange(t.range);
+                const inRange = (tabRange && predRange)
+                    ? tabletRangeOverlapsPred(tabRange, predRange)
+                    : (() => { const m = tabletHasMatchingRows(t, pred, safeIdx); return m || m === null; })();
+                if (inRange) { scanState.scanned.add(t.id); scanned++; }
                 else { scanState.pruned.add(t.id); pruned++; }
             });
             msg = `RANGE SCAN · ${scanned} tablet${scanned !== 1 ? 's' : ''} in range · ${pruned} pruned`;
@@ -1365,9 +1414,13 @@ window.runScan = function() {
         } else {
             let scanned = 0, pruned = 0;
             const scannedIdxTablets = [];
+            const predRange = getPredRange(pred);
             idxTablets.forEach(t => {
-                const match = tabletHasMatchingRows(t, pred, safeIdx);
-                if (match || match === null) { scanState.scanned.add(t.id); scannedIdxTablets.push(t); scanned++; }
+                const tabRange = parseTabletRange(t.range);
+                const inRange = (tabRange && predRange)
+                    ? tabletRangeOverlapsPred(tabRange, predRange)
+                    : (() => { const m = tabletHasMatchingRows(t, pred, safeIdx); return m || m === null; })();
+                if (inRange) { scanState.scanned.add(t.id); scannedIdxTablets.push(t); scanned++; }
                 else { scanState.pruned.add(t.id); pruned++; }
             });
             if (v.isCovering) {
