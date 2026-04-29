@@ -557,7 +557,7 @@ function closeTour() {
           <div class="t-colordot" style="background:${TABLES['categories'].color}"></div>
         </div>
       ` : `<div class="t-colordot" style="background:${ti.color}"></div>`}
-      <div class="t-name">${g.isColocated ? 'Colocated Tablet' : ti.name + '.t' + g.tnum}</div>
+      <div class="t-name">${g.isColocated ? 'Colocated Tablet' : ti.name + '.tablet' + g.tnum}</div>
       <div class="role-badge r-${role}">${role}</div>
     </div>
     <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
@@ -579,7 +579,7 @@ function closeTour() {
       const { roleC, ti, memP, ssP, role, dHtml, sstHtml } = buildTabletHTML(g, nodeId);
       el.className = `tablet ${roleC} ${saved.join(' ')}`;
       el.innerHTML = `
-    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${ti.name}.t${g.tnum}</div><div class="role-badge r-${role}">${role}</div></div>
+    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${ti.name}.tablet${g.tnum}</div><div class="role-badge r-${role}">${role}</div></div>
     <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
     ${dHtml}
     <div class="lsm-box">
@@ -1652,7 +1652,7 @@ function closeTour() {
           ${groups.map(g => {
             const hit = targetTg && g.id === targetTg.id;
             return `<div class="hrm-row${hit ? ' hrm-hit' : ''}">
-              <span class="hrm-name">t${g.tnum}</span>
+              <span class="hrm-name">tablet${g.tnum}</span>
               <span class="hrm-range">${g.range}</span>
               <span class="hrm-leader">N${g.leaderNode}</span>
               ${hit ? '<span class="hrm-ptr">◄</span>' : '<span></span>'}
@@ -1674,7 +1674,7 @@ function closeTour() {
               <span class="hcf-arr">→</span>
               <span class="hcf-res">${hashHex}</span>
             </div>
-            <div class="hcf-dest">→ <strong>users.t${tg.tnum}</strong> &nbsp;·&nbsp; Leader N${tg.leaderNode}</div>`;
+            <div class="hcf-dest">→ <strong>users.tablet${tg.tnum}</strong> &nbsp;·&nbsp; Leader N${tg.leaderNode}</div>`;
         }
         _hashHistory.unshift({ id, hashHex, tnum: tg.tnum });
         if (_hashHistory.length > 8) _hashHistory.pop();
@@ -1687,7 +1687,7 @@ function closeTour() {
               <span class="hh-id">id=${h.id}</span>
               <span class="hh-hex">${h.hashHex}</span>
               <span class="hh-arr">→</span>
-              <span class="hh-tg">t${h.tnum}</span>
+              <span class="hh-tg">tablet${h.tnum}</span>
             </div>`
           ).join('');
         }
@@ -1721,7 +1721,7 @@ function closeTour() {
           hashHex = '0x' + hash.toString(16).toUpperCase().padStart(4, '0');
           tg = S.groups.find(g => g.table === 'users' && hashInRange(hash, g.range));
           addLog(`PK id=${id} → HASH(${id}) = ${hashHex}`, 'li');
-          if (tg) addLog(`Hash ${hashHex} falls into range ${tg.range} → users.t${tg.tnum}`, 'ls');
+          if (tg) addLog(`Hash ${hashHex} falls into range ${tg.range} → users.tablet${tg.tnum}`, 'ls');
         } else {
           tg = S.groups.find(g => {
             const p = g.range.split(' — ');
@@ -1732,7 +1732,7 @@ function closeTour() {
           });
           hashHex = `${id} (Range)`;
           addLog(`PK id=${id} range lookup...`, 'li');
-          if (tg) addLog(`Value ${id} falls into range [${tg.range}] → users.t${tg.tnum}`, 'ls');
+          if (tg) addLog(`Value ${id} falls into range [${tg.range}] → users.tablet${tg.tnum}`, 'ls');
         }
 
         if (tg) {
@@ -1756,7 +1756,7 @@ function closeTour() {
       function locateRangeRows() {
         if (!selectedRow) { addLog('Select a row in the data panel first!', 'lw'); return; }
         const g = S.groups.find(x => x.id === selectedRow.tId); if (!g) return;
-        addLog(`Locating quorum for ${g.table}.t${g.tnum}...`, 'li');
+        addLog(`Locating quorum for ${g.table}.tablet${g.tnum}...`, 'li');
         const ctx = makeCtx();
         for (const nid of g.replicas) { ctx.hlTablet(g.id, nid, nid === g.leaderNode ? 't-hl' : 't-hl2'); addLog(`${nid === g.leaderNode ? 'LEADER' : 'FOLLOWER'} on TServer-${nid}`, 'ls'); }
       }
@@ -1858,7 +1858,7 @@ function closeTour() {
           const hash = hashKey(id);
           const byHash = groups.find(g => hashInRange(hash, g.range));
           if (byHash) {
-            addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4, '0')} → ${tbl}.t${byHash.tnum}`, '');
+            addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4, '0')} → ${tbl}.tablet${byHash.tnum}`, '');
             return byHash;
           }
           const byRange = groups.find(g => {
@@ -1869,7 +1869,7 @@ function closeTour() {
             return !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
           });
           if (byRange) {
-            addLog(`Range: id=${id} in [${byRange.range}] → ${tbl}.t${byRange.tnum}`, '');
+            addLog(`Range: id=${id} in [${byRange.range}] → ${tbl}.tablet${byRange.tnum}`, '');
             return byRange;
           }
           return null;
@@ -1901,8 +1901,8 @@ function closeTour() {
             const hi = p[1].trim() === '∞' ? Infinity : parseInt(p[1]);
             return !isNaN(lo) && !isNaN(hi) && id >= lo && id <= hi;
           });
-          if (routedByHash) addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4,'0')} → ${tbl}.t${routedByHash.tnum}`, '');
-          else if (routedByRange) addLog(`Range: id=${id} in [${routedByRange.range}] → ${tbl}.t${routedByRange.tnum}`, '');
+          if (routedByHash) addLog(`hash(${id})=0x${hash.toString(16).toUpperCase().padStart(4,'0')} → ${tbl}.tablet${routedByHash.tnum}`, '');
+          else if (routedByRange) addLog(`Range: id=${id} in [${routedByRange.range}] → ${tbl}.tablet${routedByRange.tnum}`, '');
           const tg = (routedByHash && routedByHash.data.some(r => r[0] === id)) ? routedByHash
                    : (routedByRange && routedByRange.data.some(r => r[0] === id)) ? routedByRange
                    : groups.find(g => g.data.some(r => r[0] === id));
@@ -2506,12 +2506,12 @@ function closeTour() {
         function fdDiagram(idx) {
           // 3 tablets, RF=3: one replica per FD, leadership rotates per tablet
           const T = [
-            { c: '#f59e0b', n: 'orders.t1' },
-            { c: '#60a5fa', n: 'orders.t2' },
-            { c: '#34d399', n: 'orders.t3' },
+            { c: '#f59e0b', n: 'orders.tablet1' },
+            { c: '#60a5fa', n: 'orders.tablet2' },
+            { c: '#34d399', n: 'orders.tablet3' },
           ];
           // 4th tablet for Rack tab (4 nodes/rack needs 4 tablets)
-          const T4 = { c: '#a78bfa', n: 'users.t1' };
+          const T4 = { c: '#a78bfa', n: 'users.tablet1' };
           const FD_COLORS = ['#fb7185', '#f59e0b', '#34d399'];
 
           // circular chip — identical to Global Universe av-chip pattern

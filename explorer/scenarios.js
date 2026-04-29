@@ -584,7 +584,7 @@ window.mrRestore = function() {
           },
           {
             label: '2. Provisional Writes',
-            desc: 'Writes are sent to the target tablet leaders (users.t1, users.t2) with the transaction ID. Data is "provisional" and not yet visible.',
+            desc: 'Writes are sent to the target tablet leaders (users.tablet1, users.tablet2) with the transaction ID. Data is "provisional" and not yet visible.',
             action: async (ctx) => {
               addLog('TX-101: Sending provisional writes to shard leaders...', 'li');
               S.replicaState['tg1'][1].provisionalRows = [[1, 'Alice Chen', 'New York', 87, 101.5]];
@@ -820,7 +820,7 @@ window.mrRestore = function() {
         steps: [
           {
             label: 'Healthy — Heartbeats Flowing',
-            desc: 'TServer-2 is LEADER for tg2 (users.t2), tg4 (categories.t1), and tg8 (email_idx.t1). It sends periodic heartbeat AppendEntries every ~200ms to peers, asserting leadership and resetting their election timers.',
+            desc: 'TServer-2 is LEADER for tg2 (users.tablet2), tg4 (categories.tablet1), and tg8 (email_idx.tablet1). It sends periodic heartbeat AppendEntries every ~200ms to peers, asserting leadership and resetting their election timers.',
             elStep: 0,
             action: async (ctx) => {
               ctx.setLat(0, 0.9);
@@ -963,7 +963,7 @@ window.mrRestore = function() {
       "11": {
         group: "Global & High Availability", icon: "💥",
         name: 'Node Failure', title: 'Node Failure', subtitle: 'Crash & catch-up',
-        desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.t3) & tg6 (products.t2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
+        desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.tablet3) & tg6 (products.tablet2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
         guidedTour: [
           { text: "This module simulates a <b>TServer-3 crash</b> and Raft recovery.", element: ".canvas-wrap" },
           { text: "Click <b>💀 Kill TServer-3</b> to trigger the failure.", element: "#btn-k3" },
@@ -979,10 +979,10 @@ window.mrRestore = function() {
         steps: [
           {
             label: 'Cluster Healthy + Writes Running',
-            desc: 'Start auto-writes to see the cluster in steady state. All 3 TServers are alive. TServer-3 is LEADER for tg3 (users.t3) and tg6 (products.t2).',
+            desc: 'Start auto-writes to see the cluster in steady state. All 3 TServers are alive. TServer-3 is LEADER for tg3 (users.tablet3) and tg6 (products.tablet2).',
             action: async (ctx) => {
               addLog('Cluster healthy · auto-writes recommended', 'ls');
-              addLog('TServer-3 leads: users.t3 (tg3), products.t2 (tg6)', 'li');
+              addLog('TServer-3 leads: users.tablet3 (tg3), products.tablet2 (tg6)', 'li');
               if (!fdAutoRunning) fdToggleAutoWrite();
             }
           },
@@ -1067,10 +1067,10 @@ window.mrRestore = function() {
         steps: [
           {
             label: 'Healthy Cluster + Writes',
-            desc: 'All nodes connected. TServer-3 leads tg3 (users.t3) & tg6 (products.t2). Start writes to observe the steady state before partition.',
+            desc: 'All nodes connected. TServer-3 leads tg3 (users.tablet3) & tg6 (products.tablet2). Start writes to observe the steady state before partition.',
             action: async (ctx) => {
               addLog('Cluster fully connected', 'ls');
-              addLog('TServer-3 leads: users.t3 (tg3), products.t2 (tg6)', 'li');
+              addLog('TServer-3 leads: users.tablet3 (tg3), products.tablet2 (tg6)', 'li');
               if (!fdAutoRunning) fdToggleAutoWrite();
             }
           },
