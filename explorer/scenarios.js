@@ -296,6 +296,17 @@ window.mrRestore = function() {
           { text: "Use them to provide <b>local read latency</b> in regions far from your primary cluster.", element: ".av-highlights" }
         ]
       },
+      "fault-domains": {
+        group: "Architecture", icon: "🛡️",
+        name: 'Fault Domains', title: 'Fault Domains', subtitle: 'RF, quorum & failure isolation',
+        isArch: true,
+        desc: 'A <b>fault domain</b> is a group of nodes that can fail together. YugabyteDB places one Raft replica per fault domain — so a single failure never takes down the majority. Domains range from individual nodes to entire clouds. RF must be odd and ≥ the number of fault domains you want to survive.',
+        guidedTour: [
+          { text: "A <b>fault domain</b> is the unit of failure: everything inside it can go down together. YugabyteDB places exactly one replica per domain.", element: ".arch-view" },
+          { text: "RF must be <b>odd</b> so that Raft always has a strict majority after a single-domain failure — even counts leave a 50/50 tie.", element: ".av-quorum" },
+          { text: "The formula <b>max failures = ⌊(RF−1)/2⌋</b> tells you how many domains can fail simultaneously before the cluster becomes unavailable.", element: ".av-fd-rf-table" }
+        ]
+      },
 
       // 1: Hash Sharding
       "1": {

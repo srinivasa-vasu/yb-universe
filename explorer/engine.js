@@ -1996,6 +1996,19 @@ function closeTour() {
 
       const _archFdColors = ['#f59e0b', '#60a5fa', '#34d399'];
 
+      window.fdSetTab = function(idx) {
+        document.querySelectorAll('[id^="fd-panel-"]').forEach((el, i) => { el.style.display = i === idx ? '' : 'none'; });
+        const tabs = document.querySelectorAll('[id^="fd-tab-"]');
+        const colors = ['#fb7185','#f59e0b','#34d399','#60a5fa','#a78bfa'];
+        tabs.forEach((btn, i) => {
+          const c = colors[i];
+          const active = i === idx;
+          btn.style.background    = active ? `${c}18` : 'transparent';
+          btn.style.borderBottom  = `2px solid ${active ? c : 'transparent'}`;
+          btn.style.color         = active ? c : 'var(--txt2)';
+        });
+      };
+
       window.archSetLeaderPref = function(fi) {
         _archLeaderPref = (_archLeaderPref === fi) ? -1 : fi;
         document.querySelectorAll('.av-lp-btn').forEach(btn => {
@@ -2043,8 +2056,8 @@ function closeTour() {
         const av = document.getElementById('arch-view');
         if (!av) return;
         av.style.display = 'flex';
-        const badgeMap = { universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica' };
-        const titleMap = { universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology' };
+        const badgeMap = { universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains' };
+        const titleMap = { universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains' };
         document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
         document.getElementById('i-title').textContent = titleMap[tab] || tab;
         _archFailedFD = -1;
@@ -2054,6 +2067,7 @@ function closeTour() {
         av.innerHTML = '';
         if (tab === 'universe') _renderArchUniverse(av);
         else if (tab === 'read-replica') _renderArchReadReplica(av);
+        else if (tab === 'fault-domains') _renderArchFaultDomains(av);
         else _renderArchXCluster(av);
         
         if (SCENARIOS[tab]) renderTour(SCENARIOS[tab]);
@@ -2409,6 +2423,354 @@ function closeTour() {
         h += `</table></div></div>`;
 
         h += `</div>`;
+        container.innerHTML = h;
+      }
+
+      function _renderArchFaultDomains(container) {
+        // Hero: definition left + stats right
+        let h = `<div style="display:flex;gap:14px;align-items:stretch">`;
+
+        h += `<div style="flex:1.8;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center">`;
+        h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--txt2);margin-bottom:10px">What is a Fault Domain?</div>`;
+        h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.65">A <b>fault/failure domain (fd)</b> is a group of nodes that share a common failure mode — power, switch, zone, or region. When one node in the domain fails, all nodes in that domain may be affected simultaneously. It is any shared failure boundary — a node, a rack, an availability zone, a region, or a cloud provider. A failure of 1 FD not necessarily affect the others.</div>`;
+        h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.65;margin-top:8px">YugabyteDB places exactly <b>one Raft replica per fault domain</b>. Raft requires a strict majority (&gt;50%) to commit — so RF and the number of fault domains must always be <b>odd</b>.</div>`;
+        h += `</div>`;
+
+        const statBoxes = [
+          { val: '3',     lbl: 'Minimum RF',        sub: 'recommended',    color: '#34d399' },
+          { val: '5',     lbl: 'FD Levels',          sub: 'node → cloud',   color: '#60a5fa' },
+          { val: 'Odd',   lbl: 'Optimal RF',         sub: '3, 5, 7 …',      color: '#f59e0b' },
+          { val: '>50%',  lbl: 'Quorum Rule',         sub: 'strict majority', color: '#a78bfa' },
+        ];
+        h += `<div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:10px">`;
+        statBoxes.forEach(s => {
+          h += `<div style="background:var(--s1);border:1px solid var(--border);border-top:3px solid ${s.color};border-radius:8px;padding:14px 12px;text-align:center;display:flex;flex-direction:column;justify-content:center">`;
+          h += `<span style="display:block;font-size:26px;font-weight:700;color:${s.color};font-family:var(--head);line-height:1.1">${s.val}</span>`;
+          h += `<span style="display:block;font-size:11.5px;font-weight:700;color:var(--txt);text-transform:uppercase;letter-spacing:.7px;margin-top:5px">${s.lbl}</span>`;
+          h += `<span style="display:block;font-size:10.5px;color:var(--txt2);margin-top:2px">${s.sub}</span>`;
+          h += `</div>`;
+        });
+        h += `</div>`;
+
+        h += `</div>`;
+
+        const highlights = [
+          { icon: '⬡', label: 'Raft Quorum: Strict &gt;50%',     cls: 'av-hl-blue'   },
+          { icon: '⊘', label: 'No Split-Brain',                   cls: 'av-hl-green'  },
+          { icon: '▣', label: 'One Replica per Fault Domain',      cls: 'av-hl-purple' },
+          { icon: '↑', label: 'Higher FD = Stronger Isolation',    cls: 'av-hl-blue'   },
+          { icon: '⊞', label: 'Odd RF = Optimal Efficiency',       cls: 'av-hl-amber'  },
+          { icon: '↻', label: 'Auto Leader Election on Failure',   cls: 'av-hl-green'  },
+          { icon: '⇶', label: 'Horizontally Scalable',             cls: 'av-hl-purple' },
+          { icon: '▲', label: 'Vertically Scalable',               cls: 'av-hl-amber'  },
+        ];
+        h += `<div class="av-highlights">${highlights.map(hl => `<div class="av-hl ${hl.cls}"><span class="av-hl-icon">${hl.icon}</span><span class="av-hl-txt">${hl.label}</span></div>`).join('')}</div>`;
+
+        // Fault Domain Levels — tabbed with diagrams
+        h += `<div class="av-section-title">Fault Domain Levels — Finest to Coarsest Isolation</div>`;
+
+        const FD_TABS = [
+          { icon: '▣', name: 'Node',        color: '#fb7185', sub: 'Weakest isolation',
+            failOn: 'Individual server crash, OOM kill, kernel panic, or disk failure',
+            why:    'All Raft processes on that server stop. Only the replicas hosted on this node become unavailable.',
+            example:'RF=3 — 3 TServer processes on 3 different physical servers',
+            policy: 'fault_tolerance: NODE',
+            scope:  'Single TServer process' },
+          { icon: '⊟', name: 'Rack',        color: '#f59e0b', sub: 'On-premises isolation',
+            failOn: 'Top-of-rack switch failure, shared PDU, or shared physical cage',
+            why:    'All servers sharing the switch or power strip lose network/power together.',
+            example:'RF=3 — 3 racks in one data center, 3 nodes per rack',
+            policy: 'fault_tolerance: RACK',
+            scope:  'Servers behind one ToR switch' },
+          { icon: '⬡', name: 'Zone / AZ',   color: '#34d399', sub: 'Standard HA · recommended default',
+            failOn: 'Availability zone power loss, cooling failure, or network partition',
+            why:    'Cloud AZs share underlying infrastructure — a zone outage takes every node in it offline.',
+            example:'RF=3 — AZ-a, AZ-b, AZ-c in the same cloud region',
+            policy: 'placement_zone (cloud)  /  rack = AZ (on-prem)',
+            scope:  'One cloud availability zone' },
+          { icon: '🌐', name: 'Region / DC', color: '#60a5fa', sub: 'Geographic isolation',
+            failOn: 'Entire cloud region or data center offline — storm, fire, fiber cut',
+            why:    'Regions are independent control planes. A regional failure takes all AZs inside it.',
+            example:'RF=3 — us-east-1, eu-west-1, ap-south-1',
+            policy: 'placement_region',
+            scope:  'One cloud region or data center campus' },
+          { icon: '☁', name: 'Cloud',        color: '#a78bfa', sub: 'Strongest isolation',
+            failOn: 'Entire cloud provider outage — control plane, networking, or global DNS',
+            why:    'Provider-wide incidents (BGP hijack, IAM outage, DNS failure) affect all regions.',
+            example:'RF=3 — AWS + GCP + Azure (multi-cloud)',
+            policy: 'placement_cloud',
+            scope:  'One cloud provider (AWS / GCP / Azure)' },
+        ];
+
+        // diagram generator
+        function fdDiagram(idx) {
+          // 3 tablets, RF=3: one replica per FD, leadership rotates per tablet
+          const T = [
+            { c: '#f59e0b', n: 'orders.t1' },
+            { c: '#60a5fa', n: 'orders.t2' },
+            { c: '#34d399', n: 'orders.t3' },
+          ];
+          // 4th tablet for Rack tab (4 nodes/rack needs 4 tablets)
+          const T4 = { c: '#a78bfa', n: 'users.t1' };
+          const FD_COLORS = ['#fb7185', '#f59e0b', '#34d399'];
+
+          // circular chip — identical to Global Universe av-chip pattern
+          const chip = (t, isLeader) =>
+            `<div class="av-chip ${isLeader ? 'av-chip-l' : 'av-chip-f'}" style="${isLeader ? `background:${t.c}` : `border-color:${t.c};color:${t.c}`}" title="${t.n} · ${isLeader ? 'Leader ◎' : 'Follower ○'}">${isLeader ? '◎' : '○'}</div>`;
+
+          // standard av-node box with chips inside
+          const nodeBox = (id, chipsHtml, short = false) =>
+            `<div class="av-node"${short ? ' style="min-width:0"' : ''}>
+               <div class="av-node-id">${id}</div>
+               <div class="av-chips">${chipsHtml}</div>
+             </div>`;
+
+          const captions = [
+            `Leadership is <b>per-tablet (Raft group)</b>, not per-node · Each node holds all 3 replicas but leads a <em>different</em> shard · <span style="color:#f59e0b">◎ t1 on Node 1</span> · <span style="color:#60a5fa">◎ t2 on Node 2</span> · <span style="color:#34d399">◎ t3 on Node 3</span>`,
+            `Leadership is <b>per-tablet (Raft group)</b>, not per-rack · Each rack is an independent failure boundary · <span style="color:#f59e0b">◎ t1 in Rack 1</span> · <span style="color:#60a5fa">◎ t2 in Rack 2</span> · <span style="color:#34d399">◎ t3 in Rack 3</span> · even 4 nodes/rack · odd 3 racks`,
+            `Leadership is <b>per-tablet (Raft group)</b>, not per-AZ · A zone outage loses only one replica · <span style="color:#f59e0b">◎ t1 in AZ-a</span> · <span style="color:#60a5fa">◎ t2 in AZ-b</span> · <span style="color:#34d399">◎ t3 in AZ-c</span> · odd 3 nodes/AZ · odd 3 AZs`,
+            `Leadership is <b>per-tablet (Raft group)</b>, not per-region · A region outage loses only one replica — quorum survives · <span style="color:#f59e0b">◎ t1 us-east-1</span> · <span style="color:#60a5fa">◎ t2 eu-west-1</span> · <span style="color:#34d399">◎ t3 ap-south-1</span>`,
+            `Leadership is <b>per-tablet (Raft group)</b>, not per-cloud · An entire cloud outage loses only one replica — quorum survives · <span style="color:#f59e0b">◎ t1 AWS</span> · <span style="color:#60a5fa">◎ t2 GCP</span> · <span style="color:#34d399">◎ t3 Azure</span>`,
+          ];
+          const captionBar =
+            `<div style="font-size:14px;color:var(--txt2);background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:11px 16px;text-align:center;line-height:1.7;margin-top:8px">
+               ${captions[idx]}
+             </div>`;
+
+          // ── Node tab ─────────────────────────────────────────────────────────────────────
+          if (idx === 0) {
+            const fds = [0,1,2].map(fi => {
+              const fc = FD_COLORS[fi];
+              const chips = T.map((t, ti) => chip(t, ti === fi)).join('');
+              return `<div class="av-fd" style="border-top:3px solid ${fc}">
+                <div class="av-fd-name" style="color:${fc}">Fault Domain ${fi+1}</div>
+                <div class="av-fd-az">Node = FD · finest granularity</div>
+                <div class="av-fd-nodes">${nodeBox(`Node ${fi+1}`, chips)}</div>
+                <div class="av-fd-copy">▣ Full Copy #${fi+1}</div>
+              </div>`;
+            }).join('');
+            return `<div style="display:flex;flex-direction:column;gap:8px">
+              <div class="av-fd-row">${fds}</div>
+              ${captionBar}
+            </div>`;
+          }
+
+          // ── Rack tab ──────────────────────────────────────────────────────────────────────
+          if (idx === 1) {
+            const tablets4 = [T[0], T[1], T[2], T4];
+            const leaders4 = [0, 1, 2, 1];
+            const fds = [0,1,2].map(fi => {
+              const fc = FD_COLORS[fi];
+              const nodes = [0,1,2,3].map(ni => {
+                const t = tablets4[ni];
+                const isL = leaders4[ni] === fi;
+                return nodeBox(`N${fi*4+ni+1}`, chip(t, isL), true);
+              }).join('');
+              return `<div class="av-fd" style="border-top:3px solid ${fc}">
+                <div class="av-fd-name" style="color:${fc}">Fault Domain ${fi+1}</div>
+                <div class="av-fd-az">Rack ${fi+1}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1">${nodes}</div>
+                <div style="font-size:11px;color:var(--txt2);background:var(--s2);border-radius:5px;padding:4px 8px;text-align:center;border:1px solid var(--border);margin-top:6px">⇆ ToR Switch</div>
+                <div class="av-fd-copy">▣ Full Copy #${fi+1}</div>
+              </div>`;
+            }).join('');
+            return `<div style="display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;font-size:12px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:1px">Data Center — 4 nodes / rack (even) · 3 racks (odd FDs)</div>
+              <div class="av-fd-row">${fds}</div>
+              ${captionBar}
+            </div>`;
+          }
+
+          // ── Zone/AZ tab ────────────────────────────────────────────────────────────────────
+          if (idx === 2) {
+            const azNames = ['AZ-a', 'AZ-b', 'AZ-c'];
+            const fds = [0,1,2].map(fi => {
+              const fc = FD_COLORS[fi];
+              const nodes = [0,1,2].map(ni => {
+                const isL = ni === fi;
+                return nodeBox(`N${fi*3+ni+1}`, chip(T[ni], isL), true);
+              }).join('');
+              return `<div class="av-fd" style="border-top:3px solid ${fc}">
+                <div class="av-fd-name" style="color:${fc}">Fault Domain ${fi+1}</div>
+                <div class="av-fd-az">${azNames[fi]}</div>
+                <div class="av-fd-nodes">${nodes}</div>
+                <div class="av-fd-copy">▣ Full Copy #${fi+1}</div>
+              </div>`;
+            }).join('');
+            return `<div style="display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;font-size:12px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:1px">Cloud Region — 3 nodes / AZ (odd) · 3 AZs (odd FDs)</div>
+              <div class="av-fd-row">${fds}</div>
+              ${captionBar}
+            </div>`;
+          }
+
+          // ── Region/DC tab ──────────────────────────────────────────────────────────────────
+          if (idx === 3) {
+            const regions = ['us-east-1', 'eu-west-1', 'ap-south-1'];
+            const azNames  = ['AZ-a', 'AZ-b', 'AZ-c'];
+            const fds = [0,1,2].map(fi => {
+              const fc = FD_COLORS[fi];
+              const azRows = [0,1,2].map(ai => {
+                const isL = ai === fi;
+                return `<div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:7px;padding:7px 10px;border:1px solid var(--border)">
+                  <span style="font-size:11px;font-weight:700;color:var(--txt2);min-width:36px;font-family:var(--mono)">${azNames[ai]}</span>
+                  <div style="font-size:10px;font-weight:600;color:var(--txt2);font-family:var(--mono);flex:1">Node ${fi*3+ai+1}</div>
+                  <div style="display:flex;gap:4px">${chip(T[ai], isL)}</div>
+                </div>`;
+              }).join('');
+              return `<div class="av-fd" style="border-top:3px solid ${fc}">
+                <div class="av-fd-name" style="color:${fc}">Fault Domain ${fi+1}</div>
+                <div class="av-fd-az" style="font-family:var(--mono)">${regions[fi]}</div>
+                <div style="display:flex;flex-direction:column;gap:6px;flex:1">${azRows}</div>
+                <div class="av-fd-copy">▣ Full Copy #${fi+1}</div>
+              </div>`;
+            }).join('');
+            return `<div style="display:flex;flex-direction:column;gap:8px">
+              <div style="text-align:center;font-size:12px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:1px">Multi-Region — 3 regions (odd FDs) · 3 AZs per region</div>
+              <div class="av-fd-row">${fds}</div>
+              ${captionBar}
+            </div>`;
+          }
+
+          // ── Cloud tab ────────────────────────────────────────────────────────────────────────
+          const clouds = [
+            { name: 'AWS',   region: 'us-east-1'   },
+            { name: 'GCP',   region: 'us-central1'  },
+            { name: 'Azure', region: 'East US'      },
+          ];
+          const azNames = ['AZ-1', 'AZ-2', 'AZ-3'];
+          const fds = [0,1,2].map(fi => {
+            const fc = FD_COLORS[fi];
+            const cl = clouds[fi];
+            const azRows = [0,1,2].map(ai => {
+              const isL = ai === fi;
+              return `<div style="display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:7px;padding:7px 10px;border:1px solid var(--border)">
+                <span style="font-size:11px;font-weight:700;color:var(--txt2);min-width:36px;font-family:var(--mono)">${azNames[ai]}</span>
+                <div style="font-size:10px;font-weight:600;color:var(--txt2);font-family:var(--mono);flex:1">Node ${fi*3+ai+1}</div>
+                <div style="display:flex;gap:4px">${chip(T[ai], isL)}</div>
+              </div>`;
+            }).join('');
+            return `<div class="av-fd" style="border-top:3px solid ${fc}">
+              <div class="av-fd-name" style="color:${fc}">Fault Domain ${fi+1}</div>
+              <div style="text-align:center;margin-bottom:4px">
+                <div style="font-size:16px;font-weight:800;color:var(--txt)">${cl.name}</div>
+                <div class="av-fd-az" style="font-family:var(--mono)">${cl.region}</div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;flex:1">${azRows}</div>
+              <div class="av-fd-copy">▣ Full Copy #${fi+1}</div>
+            </div>`;
+          }).join('');
+          return `<div style="display:flex;flex-direction:column;gap:8px">
+            <div style="text-align:center;font-size:12px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:1px">Multi-Cloud — 3 providers (odd FDs) · strongest isolation</div>
+            <div class="av-fd-row">${fds}</div>
+            ${captionBar}
+          </div>`;
+        }
+        // Tab container — no overflow:hidden so tabs never clip
+        h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px">`;
+        // Tab bar — scrollable if narrow, but tabs use flex so they share width evenly
+        h += `<div style="display:flex;border-bottom:1px solid var(--border);border-radius:10px 10px 0 0;overflow:hidden">`;
+        FD_TABS.forEach((lv, i) => {
+          const active = i === 0;
+          h += `<button id="fd-tab-${i}" onclick="fdSetTab(${i})" style="flex:1;padding:14px 4px;background:${active?`${lv.color}18`:'transparent'};border:none;border-bottom:3px solid ${active?lv.color:'transparent'};cursor:pointer;font-size:12px;font-weight:700;color:${active?lv.color:'var(--txt2)'};font-family:var(--head);transition:color .15s,background .15s,border-color .15s">${lv.icon} ${lv.name}</button>`;
+        });
+        h += `</div>`;
+
+        // Tab panels
+        FD_TABS.forEach((lv, i) => {
+          h += `<div id="fd-panel-${i}" style="${i > 0 ? 'display:none' : ''}">`;
+          // diagram — full width, generous padding, no fixed height so it never clips
+          h += `<div style="background:var(--s2);border-bottom:1px solid var(--border);padding:28px 22px;border-radius:0">${fdDiagram(i)}</div>`;
+          // info strip
+          h += `<div style="padding:18px 22px 20px;display:flex;gap:24px;flex-wrap:wrap">`;
+          h += `<div style="flex:1;min-width:200px">`;
+          h += `<div style="font-size:11px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.9px;margin-bottom:8px">Fails together when</div>`;
+          h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.55;margin-bottom:7px">${lv.failOn}</div>`;
+          h += `<div style="font-size:12.5px;color:var(--txt2);line-height:1.5">${lv.why}</div>`;
+          h += `</div>`;
+          h += `<div style="flex:1;min-width:200px">`;
+          h += `<div style="font-size:11px;font-weight:700;color:var(--txt2);text-transform:uppercase;letter-spacing:.9px;margin-bottom:8px">Deployment Example</div>`;
+          h += `<div style="font-size:13.5px;color:var(--txt);margin-bottom:10px;line-height:1.5">${lv.example}</div>`;
+          h += `<div style="display:flex;gap:8px;flex-wrap:wrap">`;
+          h += `<span style="font-size:12px;color:${lv.color};background:${lv.color}18;border:1px solid ${lv.color}44;border-radius:5px;padding:4px 10px;font-family:var(--mono)">${lv.policy}</span>`;
+          h += `<span style="font-size:12px;color:var(--txt2);background:var(--s2);border:1px solid var(--border);border-radius:5px;padding:4px 10px">${lv.scope}</span>`;
+          h += `</div></div></div>`;
+          h += `</div>`;
+        });
+
+        h += `</div>`;
+
+        // Why Odd Numbers
+        h += `<div class="av-quorum"><div class="av-q-title">Why Fault Domains Must Be Odd</div>`;
+        h += `<div class="av-q-sub">Raft requires a <b>strict majority (&gt;50%)</b> of replicas to commit writes and elect a new leader. With an even count, a single failure leaves two equal halves — neither can claim a majority, causing the cluster to go unavailable to avoid split-brain.</div>`;
+        h += `<div class="av-q-cases">`;
+        const qcases = [
+          { n: 2, fail: 1, survive: 1, pct: 50, ok: false, warn: false, lbl: '2 FDs (Even)',              calc: '1/2 = 50% — no strict majority' },
+          { n: 3, fail: 1, survive: 2, pct: 67, ok: true,  warn: false, lbl: '3 FDs (Odd) — Minimum',     calc: '2/3 = 67% — quorum holds' },
+          { n: 4, fail: 1, survive: 3, pct: 75, ok: false, warn: true,  lbl: '4 FDs (Even) — Suboptimal', calc: '3/4 = 75% — same tolerance as RF=3, extra cost' },
+          { n: 5, fail: 2, survive: 3, pct: 60, ok: true,  warn: false, lbl: '5 FDs (Odd)',               calc: '3/5 = 60% — tolerates 2 failures' },
+        ];
+        for (const c of qcases) {
+          const cls = c.warn ? '' : (c.ok ? 'av-qcase-ok' : 'av-qcase-bad');
+          const warnStyle = c.warn ? 'border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.06)' : '';
+          h += `<div class="av-qcase ${cls}" style="${warnStyle}">`;
+          h += `<div class="av-qcase-lbl">${c.lbl}</div>`;
+          h += `<div class="av-qcase-dots">${Array.from({length:c.n},(_,i)=>`<span class="av-qd ${i<c.fail?'av-qd-fail':'av-qd-ok'}">${i<c.fail?'✕':'✓'}</span>`).join('')}</div>`;
+          h += `<div class="av-qcase-calc">${c.calc}</div>`;
+          const verdict = c.warn ? '⚠ SUBOPTIMAL' : (c.ok ? '✓ CONTINUES' : '✗ UNAVAILABLE');
+          const verdictColor = c.warn ? 'color:var(--warn)' : '';
+          h += `<div class="av-qcase-verdict" style="${verdictColor}">${verdict}</div>`;
+          h += `</div>`;
+        }
+        h += `</div></div>`;
+
+        // RF & Fault Tolerance Formula
+        h += `<div class="av-section-title">Replication Factor &amp; Fault Tolerance Formula</div>`;
+        h += `<div style="display:flex;gap:12px;flex-wrap:wrap">`;
+        const formulas = [
+          { lbl: 'Quorum — replicas needed to commit', val: '⌊RF / 2⌋ + 1',      color: '#60a5fa' },
+          { lbl: 'Max tolerable simultaneous failures',val: '⌊(RF − 1) / 2⌋',    color: '#34d399' },
+          { lbl: 'Fault domains required',             val: 'RF  (1 replica / FD)', color: '#a78bfa' },
+        ];
+        formulas.forEach(f => {
+          h += `<div style="flex:1;min-width:170px;background:var(--s1);border:1px solid var(--border);border-top:3px solid ${f.color};border-radius:8px;padding:13px 16px;text-align:center">`;
+          h += `<div style="font-size:11px;color:var(--txt2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">${f.lbl}</div>`;
+          h += `<div style="font-size:18px;font-weight:700;color:${f.color};font-family:var(--head)">${f.val}</div>`;
+          h += `</div>`;
+        });
+        h += `</div>`;
+
+        // RF table
+        const rfRows = [
+          { rf: 1, q: 1, f: 0, ok: false, note: 'No redundancy — development only'        },
+          { rf: 2, q: 2, f: 0, ok: false, note: 'No failure tolerance — even number'       },
+          { rf: 3, q: 2, f: 1, ok: true,  note: 'Minimum recommended — tolerates 1 FD'    },
+          { rf: 4, q: 3, f: 1, ok: false, note: 'Same tolerance as RF=3 — extra cost'      },
+          { rf: 5, q: 3, f: 2, ok: true,  note: 'High availability — tolerates 2 FDs'      },
+          { rf: 6, q: 4, f: 2, ok: false, note: 'Same tolerance as RF=5 — extra cost'      },
+          { rf: 7, q: 4, f: 3, ok: true,  note: 'Maximum resilience — tolerates 3 FDs'     },
+        ];
+        h += `<div id="av-fd-rf-table" style="overflow-x:auto;background:var(--s1);border:1px solid var(--border);border-radius:8px">`;
+        h += `<table style="width:100%;border-collapse:collapse;font-size:13px">`;
+        h += `<thead><tr style="background:var(--s3)">`;
+        ['RF', 'Quorum', 'Max Failures', 'Fault Domains', 'Notes'].forEach((c, j) => {
+          h += `<th style="padding:10px 14px;text-align:${j===4?'left':'center'};font-size:11px;color:var(--txt2);text-transform:uppercase;letter-spacing:.8px;font-weight:700;border-bottom:1px solid var(--border)">${c}</th>`;
+        });
+        h += `</tr></thead><tbody>`;
+        for (const r of rfRows) {
+          const rfColor = r.ok ? 'var(--ok)' : (r.f === 0 ? 'var(--err)' : 'var(--warn)');
+          const badge = r.ok ? `<span style="font-size:10px;color:var(--ok);background:rgba(34,197,94,.15);border:1px solid rgba(34,197,94,.3);border-radius:4px;padding:1px 5px;margin-left:6px;vertical-align:middle">Odd</span>` : '';
+          const failColor = r.f === 0 ? 'var(--err)' : r.f >= 2 ? 'var(--ok)' : 'var(--warn)';
+          h += `<tr style="border-bottom:1px solid var(--border)">`;
+          h += `<td style="padding:9px 14px;text-align:center;font-weight:700;font-family:var(--head);color:${rfColor};font-size:15px">RF=${r.rf}${badge}</td>`;
+          h += `<td style="padding:9px 14px;text-align:center;color:var(--txt)">${r.q}</td>`;
+          h += `<td style="padding:9px 14px;text-align:center;font-weight:600;color:${failColor}">${r.f}</td>`;
+          h += `<td style="padding:9px 14px;text-align:center;color:var(--txt)">${r.rf}</td>`;
+          h += `<td style="padding:9px 14px;color:var(--txt2);font-size:12px">${r.note}</td>`;
+          h += `</tr>`;
+        }
+        h += `</tbody></table></div>`;
+
         container.innerHTML = h;
       }
 

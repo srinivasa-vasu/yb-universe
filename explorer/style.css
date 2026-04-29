@@ -2827,7 +2827,7 @@
 
 
     /* ── Architecture View ───────────────────────────────────── */
-    .arch-view { flex: 1; overflow-y: auto; flex-direction: column; gap: 16px; padding: 14px 18px; background: var(--bg); }
+    .arch-view { flex: 1; min-height: 0; overflow-y: auto; flex-direction: column; gap: 16px; padding: 14px 18px; background: var(--bg); }
 
     .av-stats-bar { display: flex; background: var(--s1); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
     .av-stat { flex: 1; padding: 14px 10px; border-right: 1px solid var(--border); text-align: center; }
