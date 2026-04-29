@@ -250,19 +250,43 @@ window.mrRestore = function() {
           { text: "Use <b>F</b> to enter Focus Mode for a clearer view of the animations.", element: ".canvas-wrap" }
         ]
       },
-      // 0: Overview
-      "0": {
-        group: "Architecture", icon: "🗺️",
-        name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
-        steps: [], latencies: [],
-        desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.',
+      // Architecture: Universe Hierarchy
+      "universe-hierarchy": {
+        group: "Architecture", icon: "🏗️",
+        name: 'Universe', title: 'Universe Hierarchy', subtitle: 'Logical object hierarchy',
+        isArch: true,
+        desc: 'A <b>Universe</b> is the top-level deployment unit in YugabyteDB. It encompasses one primary cluster and optionally multiple read replica clusters. Within each cluster, data is organized into databases (or keyspaces), schemas, tables, indexes, and other objects — all of which are physically sharded into tablets.',
         guidedTour: [
-          { text: "Explore the nodes in the cluster. Each box represents a <b>TServer</b>.", element: ".node-card" },
-          { text: "Look at the small circles inside. These are <b>Tablets</b> — the unit of sharding.", element: ".n-body" },
-          { text: "The filled circles (◉) are <b>Raft Leaders</b>; the empty ones (○) are followers.", element: ".toolbar" }
+          { text: "A <b>Universe</b> is the top-level entity — it contains a primary cluster and optional read replica clusters.", element: ".arch-view" },
+          { text: "Within each cluster, data is organized into <b>databases / keyspaces</b>, <b>schemas</b>, and <b>tables</b>.", element: ".uh-tree" },
+          { text: "Tables and indexes are physically split into <b>tablets</b> — the unit of sharding and replication.", element: ".uh-tablets" }
         ]
       },
-
+      // Architecture: Fault Domains
+      "fault-domains": {
+        group: "Architecture", icon: "🛡️",
+        name: 'Fault Domains', title: 'Fault Domains', subtitle: 'RF, quorum & failure isolation',
+        isArch: true,
+        desc: 'A <b>fault domain</b> is a group of nodes that can fail together. YugabyteDB places one Raft replica per fault domain — so a single failure never takes down the majority. Domains range from individual nodes to entire clouds. RF must be odd and ≥ the number of fault domains you want to survive.',
+        guidedTour: [
+          { text: "A <b>fault domain</b> is the unit of failure: everything inside it can go down together. YugabyteDB places exactly one replica per domain.", element: ".arch-view" },
+          { text: "RF must be <b>odd</b> so that Raft always has a strict majority after a single-domain failure — even counts leave a 50/50 tie.", element: ".av-quorum" },
+          { text: "The formula <b>max failures = ⌊(RF−1)/2⌋</b> tells you how many domains can fail simultaneously before the cluster becomes unavailable.", element: ".av-fd-rf-table" }
+        ]
+      },
+      // Architecture: Consensus Quorum
+      "consensus": {
+        group: "Architecture", icon: "⬡",
+        name: 'Consensus Quorum', title: 'Consensus (Raft) Quorum', subtitle: 'Raft roles, writes & elections',
+        isArch: true,
+        desc: 'Every tablet in YugabyteDB is a <b>Raft group</b> — a set of replicas that use the Raft consensus protocol to guarantee strong consistency. Raft assigns roles (Leader, Follower), manages the write-ahead log, and handles leader elections automatically when failures occur.',
+        guidedTour: [
+          { text: "Each tablet forms a <b>Raft group</b> with one leader and multiple followers.", element: ".arch-view" },
+          { text: "Writes go to the leader, which replicates via <b>AppendEntries</b> RPCs to followers. A majority ACK commits the write.", element: ".cq-write-flow" },
+          { text: "When a leader fails, followers run an <b>election</b> — the first to get a majority vote becomes the new leader.", element: ".cq-election" }
+        ]
+      },
+      // Architecture: Global Universe
       "universe": {
         group: "Architecture", icon: "🌐",
         name: 'Global Universe', title: 'Global Universe Architecture', subtitle: 'Fault domains',
@@ -274,6 +298,7 @@ window.mrRestore = function() {
           { text: "Synchronous replication ensures <b>Zero RPO</b> — no data is lost during a region failure.", element: ".av-highlights" }
         ]
       },
+      // Architecture: xCluster
       "xcl": {
         group: "Architecture", icon: "🔗",
         name: 'xCluster', title: 'xCluster Topology', subtitle: 'Cross-cluster',
@@ -285,6 +310,7 @@ window.mrRestore = function() {
           { text: "Ideal for <b>Disaster Recovery</b> scenarios where clusters are thousands of miles apart.", element: ".av-highlights" }
         ]
       },
+      // Architecture: Read Replica
       "read-replica": {
         group: "Architecture", icon: "📖",
         name: 'Read Replica', title: 'Read Replica Topology', subtitle: 'Low-latency reads',
@@ -296,15 +322,16 @@ window.mrRestore = function() {
           { text: "Use them to provide <b>local read latency</b> in regions far from your primary cluster.", element: ".av-highlights" }
         ]
       },
-      "fault-domains": {
-        group: "Architecture", icon: "🛡️",
-        name: 'Fault Domains', title: 'Fault Domains', subtitle: 'RF, quorum & failure isolation',
-        isArch: true,
-        desc: 'A <b>fault domain</b> is a group of nodes that can fail together. YugabyteDB places one Raft replica per fault domain — so a single failure never takes down the majority. Domains range from individual nodes to entire clouds. RF must be odd and ≥ the number of fault domains you want to survive.',
+      // Architecture: Cluster Overview
+      "cluster-overview": {
+        group: "Architecture", icon: "🗺️",
+        name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
+        steps: [], latencies: [],
+        desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.',
         guidedTour: [
-          { text: "A <b>fault domain</b> is the unit of failure: everything inside it can go down together. YugabyteDB places exactly one replica per domain.", element: ".arch-view" },
-          { text: "RF must be <b>odd</b> so that Raft always has a strict majority after a single-domain failure — even counts leave a 50/50 tie.", element: ".av-quorum" },
-          { text: "The formula <b>max failures = ⌊(RF−1)/2⌋</b> tells you how many domains can fail simultaneously before the cluster becomes unavailable.", element: ".av-fd-rf-table" }
+          { text: "Explore the nodes in the cluster. Each box represents a <b>TServer</b>.", element: ".node-card" },
+          { text: "Look at the small circles inside. These are <b>Tablets</b> — the unit of sharding.", element: ".n-body" },
+          { text: "The filled circles (◉) are <b>Raft Leaders</b>; the empty ones (○) are followers.", element: ".toolbar" }
         ]
       },
 

@@ -1996,6 +1996,21 @@ function closeTour() {
 
       const _archFdColors = ['#f59e0b', '#60a5fa', '#34d399'];
 
+      window.uhToggle = function(id) {
+        const el = document.getElementById(id);
+        const tgl = document.getElementById('uh-t-' + id);
+        if (!el || !tgl) return;
+        if (el.style.display === 'none') {
+          el.style.display = '';
+          tgl.textContent = '▼';
+          tgl.style.transform = 'rotate(0deg)';
+        } else {
+          el.style.display = 'none';
+          tgl.textContent = '▶';
+          tgl.style.transform = 'rotate(-90deg)'; // if I want smooth animation, or just text content is fine
+        }
+      };
+
       window.fdSetTab = function(idx) {
         document.querySelectorAll('[id^="fd-panel-"]').forEach((el, i) => { el.style.display = i === idx ? '' : 'none'; });
         const tabs = document.querySelectorAll('[id^="fd-tab-"]');
@@ -2056,8 +2071,8 @@ function closeTour() {
         const av = document.getElementById('arch-view');
         if (!av) return;
         av.style.display = 'flex';
-        const badgeMap = { universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains' };
-        const titleMap = { universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains' };
+        const badgeMap = { 'universe-hierarchy': 'Architecture · Universe', universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains', consensus: 'Architecture · Consensus Quorum' };
+        const titleMap = { 'universe-hierarchy': 'Universe Hierarchy', universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains', consensus: 'Consensus (Raft) Quorum' };
         document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
         document.getElementById('i-title').textContent = titleMap[tab] || tab;
         _archFailedFD = -1;
@@ -2066,6 +2081,8 @@ function closeTour() {
         ARCH_FDS = [...ARCH_FDS_MODES.zone];
         av.innerHTML = '';
         if (tab === 'universe') _renderArchUniverse(av);
+        else if (tab === 'universe-hierarchy') _renderArchUniverseHierarchy(av);
+        else if (tab === 'consensus') _renderArchConsensus(av);
         else if (tab === 'read-replica') _renderArchReadReplica(av);
         else if (tab === 'fault-domains') _renderArchFaultDomains(av);
         else _renderArchXCluster(av);
@@ -2074,11 +2091,15 @@ function closeTour() {
       }
 
       function _renderArchUniverse(container) {
+        let h = `<div class="av-xcl-block" style="margin-bottom:16px">`;
+        h += `<div class="av-xcl-title">Global Universe Architecture</div>`;
+        h += `<div class="av-xcl-sub" style="margin-bottom:16px">A global view of a YugabyteDB universe spanning multiple fault domains.</div>`;
         const stats = [
           { val: '3', lbl: 'Fault Domains' }, { val: 'RF=3', lbl: 'Replication' },
           { val: '9', lbl: 'TServers' }, { val: '9', lbl: 'Tablet Groups' }, { val: '27', lbl: 'Total Replicas' },
         ];
-        let h = `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+        h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+        h += `</div>`;
 
         const highlights = [
           { icon: '◎', label: 'Zero RPO',                cls: 'av-hl-green'  },
@@ -2770,6 +2791,387 @@ function closeTour() {
           h += `</tr>`;
         }
         h += `</tbody></table></div>`;
+
+        container.innerHTML = h;
+      }
+
+      // ════════════════════════════════════════════
+      //  UNIVERSE HIERARCHY RENDERER
+      // ════════════════════════════════════════════
+      function _renderArchUniverseHierarchy(container) {
+        let h = '';
+        // Title
+        h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+        h += `<div class="av-xcl-title">Universe Object Hierarchy</div>`;
+        h += `<div class="av-xcl-sub" style="margin-bottom:16px">A <strong>Universe</strong> is the top-level deployment unit. It contains one primary cluster and optionally multiple read replica clusters. Data is organized into databases, schemas, tables, indexes, and other objects — all physically sharded into tablets distributed across TServer nodes.</div>`;
+
+        // Stats bar
+        const stats = [
+          { val: '1', lbl: 'Universe' }, { val: '1+N', lbl: 'Clusters' },
+          { val: 'N', lbl: 'Databases' }, { val: 'N', lbl: 'Schemas' },
+          { val: 'N', lbl: 'Tables & Indexes' }, { val: 'N×S', lbl: 'Tablets' },
+        ];
+        h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+        h += `</div>`;
+
+        // Highlights
+        const highlights = [
+          { icon: '⬡', label: 'Raft Consensus per Tablet', cls: 'av-hl-purple' },
+          { icon: '⊞', label: 'Hash or Range Sharding', cls: 'av-hl-blue' },
+          { icon: '◎', label: 'YSQL & YCQL APIs', cls: 'av-hl-green' },
+          { icon: '↻', label: 'Auto-Sharding & Splitting', cls: 'av-hl-amber' },
+        ];
+        h += `<div class="av-highlights">${highlights.map(hl => `<div class="av-hl ${hl.cls}"><span class="av-hl-icon">${hl.icon}</span><span class="av-hl-txt">${hl.label}</span></div>`).join('')}</div>`;
+
+        h += `<div class="av-section-title">Visual Hierarchy</div>`;
+
+        // ── Nested hierarchy tree ──
+        // unique id counter for expand/collapse
+        let _uhId = 0;
+        function uhNode(icon, cls, nameHtml, metaHtml, hasChildren) {
+          const id = `uh-c-${_uhId++}`;
+          let s = `<div class="uh-node ${cls}" ${hasChildren ? `onclick="uhToggle('${id}')" style="cursor:pointer"` : ''}>`;
+          if (hasChildren) s += `<div class="uh-toggle" id="uh-t-${id}">▼</div>`;
+          s += `<div class="uh-icon">${icon}</div><div class="uh-info"><div class="uh-name">${nameHtml}</div><div class="uh-meta">${metaHtml}</div></div></div>`;
+          if (hasChildren) s += `<div class="uh-children" id="${id}">`;
+          return s;
+        }
+        function uhClose() { return `</div></div>`; } // close children + level
+
+        h += `<div class="uh-tree">`;
+
+        // Level 0: Universe
+        h += `<div class="uh-level uh-l0">`;
+        h += uhNode('🌌', 'uh-universe', 'Universe: <span class="uh-val">my-yugabyte-universe</span>', 'Top-level deployment · managed by YugabyteDB Anywhere or yugabyted', true);
+
+        // Level 1: Primary Cluster
+        h += `<div class="uh-level uh-l1">`;
+        h += uhNode('🟢', 'uh-cluster uh-primary-cl', 'Primary Cluster <span class="uh-badge uh-badge-green">READ + WRITE</span>', 'RF=3 · 3 Fault Domains · Sync Raft replication · serves all reads &amp; writes', true);
+
+        // Level 2: Databases
+        const databases = [
+          { name: 'yugabyte', api: 'YSQL', color: '#94a3b8', schemas: [
+            { name: 'public', tables: ['yb_nodes', 'yb_tablets'], indexes: [], others: ['admin_role'] }
+          ]},
+          { name: 'ecommerce', api: 'YSQL', color: '#60a5fa', schemas: [
+            { name: 'public', tables: ['users','orders','products'], indexes: ['users_email_idx','orders_date_idx'], others: ['get_user_by_id()','update_inventory()','app_role'] },
+            { name: 'analytics', tables: ['events','sessions'], indexes: ['events_ts_idx'], others: ['generate_report()','analyst_role'] }
+          ]},
+          { name: 'sensor_network', api: 'YCQL', color: '#34d399', schemas: [
+            { name: 'iot_data', tables: ['sensor_data','device_registry'], indexes: ['sensor_ts_idx'], others: ['iot_role', 'process_alert()'] }
+          ]}
+        ];
+
+        function renderDatabases(isPrimary) {
+          let out = '';
+          databases.forEach(db => {
+            out += `<div class="uh-level uh-l2">`;
+            out += uhNode('🗄️', `uh-database" style="border-left-color:${db.color}`, `${db.api === 'YCQL' ? 'Keyspace' : 'Database'}: <span class="uh-val">${db.name}</span> <span class="uh-badge" style="background:${db.color}22;color:${db.color};border-color:${db.color}44">${db.api}</span>`, db.api === 'YSQL' ? 'PostgreSQL-compatible · supports schemas, roles, functions' : 'Cassandra-compatible · keyspace = database equivalent', true);
+
+            db.schemas.forEach(schema => {
+              out += `<div class="uh-level uh-l3">`;
+              out += uhNode('📂', 'uh-schema', `Schema: <span class="uh-val">${schema.name}</span>`, `${schema.tables.length} tables · ${schema.indexes.length} indexes · ${schema.others.length} other objects`, true);
+
+              // Tables
+              out += `<div class="uh-obj-group">`;
+              out += `<div class="uh-obj-group-hdr"><span class="uh-obj-icon">📊</span> Tables</div>`;
+              out += `<div class="uh-obj-items">`;
+              schema.tables.forEach(t => {
+                out += `<div class="uh-obj-item uh-table-item"><span class="uh-obj-name">${t}</span>`;
+                out += `<div class="uh-tablets" title="${isPrimary ? 'Each table is sharded into tablets' : 'Read replica observer tablets'}">`;
+                if (isPrimary) {
+                  out += `<span class="uh-tablet-chip uh-tc-l">◉</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-lbl">tablet×3</span>`;
+                } else {
+                  out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-lbl">observer×2</span>`;
+                }
+                out += `</div></div>`;
+              });
+              out += `</div></div>`;
+
+              // Indexes
+              out += `<div class="uh-obj-group">`;
+              out += `<div class="uh-obj-group-hdr"><span class="uh-obj-icon">🔍</span> Indexes</div>`;
+              out += `<div class="uh-obj-items">`;
+              schema.indexes.forEach(idx => {
+                out += `<div class="uh-obj-item uh-index-item"><span class="uh-obj-name">${idx}</span>`;
+                out += `<div class="uh-tablets">`;
+                if (isPrimary) {
+                  out += `<span class="uh-tablet-chip uh-tc-l">◉</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-lbl">tablet×3</span>`;
+                } else {
+                  out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-lbl">observer×2</span>`;
+                }
+                out += `</div></div>`;
+              });
+              out += `</div></div>`;
+
+              // Other objects
+              out += `<div class="uh-obj-group">`;
+              out += `<div class="uh-obj-group-hdr"><span class="uh-obj-icon">⚙️</span> Other Objects</div>`;
+              out += `<div class="uh-obj-items uh-others-grid">`;
+              schema.others.forEach(o => {
+                const isFunc = o.includes('(');
+                const isRole = o.includes('role');
+                const icon = isFunc ? '⨍' : isRole ? '👤' : '⚙';
+                const cls = isFunc ? 'uh-func' : isRole ? 'uh-role' : '';
+                out += `<div class="uh-obj-item uh-other-item ${cls}"><span class="uh-other-icon">${icon}</span><span class="uh-obj-name">${o}</span></div>`;
+              });
+              out += `</div></div>`;
+
+              out += uhClose(); // close schema
+            });
+            out += uhClose(); // close db
+          });
+          return out;
+        }
+
+        h += renderDatabases(true);
+        h += uhClose(); // close primary cluster
+
+        // Level 1: Read Replica Clusters
+        const rrClusters = [
+          { name: 'us-east-1 Read Replica', rf: 3, azs: 3 },
+          { name: 'eu-central-1 Read Replica', rf: 1, azs: 1 },
+        ];
+        rrClusters.forEach((rr, idx) => {
+          h += `<div class="uh-level uh-l1">`;
+          h += uhNode('👁', 'uh-cluster uh-replica-cl', `${rr.name} <span class="uh-badge uh-badge-purple">READ ONLY</span>`, `RF=${rr.rf} · ${rr.azs} AZ${rr.azs > 1 ? 's' : ''} · Async WAL replication · observer nodes · no Raft vote`, true);
+          h += renderDatabases(false);
+          h += uhClose();
+        });
+
+        h += uhClose(); // close universe
+        h += `</div>`; // close uh-tree
+
+        // Tablet detail section
+        h += `<div class="av-section-title">Tables & Indexes → Tablets (Sharding)</div>`;
+        h += `<div class="uh-tablet-detail">`;
+        h += `<div class="uh-td-left">`;
+        h += `<div class="uh-td-title">How Tables Become Tablets</div>`;
+        h += `<div class="uh-td-text">Every table and index in YugabyteDB is automatically sharded into <b>tablets</b>. Each tablet is a Raft group with one leader and RF−1 followers, distributed across fault domains.</div>`;
+        h += `<div class="uh-td-flow">`;
+        h += `<div class="uh-td-step"><div class="uh-td-step-num">1</div><div>CREATE TABLE users (...)</div></div>`;
+        h += `<div class="uh-td-arrow">→</div>`;
+        h += `<div class="uh-td-step"><div class="uh-td-step-num">2</div><div>Hash/Range Sharding splits key space</div></div>`;
+        h += `<div class="uh-td-arrow">→</div>`;
+        h += `<div class="uh-td-step"><div class="uh-td-step-num">3</div><div>Tablets created (default: based on node count)</div></div>`;
+        h += `<div class="uh-td-arrow">→</div>`;
+        h += `<div class="uh-td-step"><div class="uh-td-step-num">4</div><div>Each tablet → RF replicas across fault domains</div></div>`;
+        h += `</div></div>`;
+        h += `<div class="uh-td-right">`;
+        h += `<div class="uh-td-example">`;
+        h += `<div class="uh-td-ex-title">Example: users table (Hash, 3 tablets, RF=3)</div>`;
+        const tabletEx = [
+          { name: 'users.tablet1', range: '0x0000–0x54FF', leader: 'Node 1', followers: 'Node 4, Node 7', color: '#f59e0b' },
+          { name: 'users.tablet2', range: '0x5500–0xA9FF', leader: 'Node 5', followers: 'Node 2, Node 8', color: '#60a5fa' },
+          { name: 'users.tablet3', range: '0xAA00–0xFFFF', leader: 'Node 9', followers: 'Node 3, Node 6', color: '#34d399' },
+        ];
+        tabletEx.forEach(t => {
+          h += `<div class="uh-td-tablet" style="border-left:3px solid ${t.color}">`;
+          h += `<div class="uh-td-t-name" style="color:${t.color}">${t.name}</div>`;
+          h += `<div class="uh-td-t-range">${t.range}</div>`;
+          h += `<div class="uh-td-t-replicas"><span class="uh-td-t-l">◉ ${t.leader}</span> <span class="uh-td-t-f">○ ${t.followers}</span></div>`;
+          h += `</div>`;
+        });
+        h += `</div></div>`;
+        h += `</div>`;
+
+        container.innerHTML = h;
+      }
+
+      // ════════════════════════════════════════════
+      //  CONSENSUS QUORUM RENDERER
+      // ════════════════════════════════════════════
+      function _renderArchConsensus(container) {
+        let h = '';
+        h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+        h += `<div class="av-xcl-title">Consensus (Raft) Quorum</div>`;
+        h += `<div class="av-xcl-sub" style="margin-bottom:16px">Every tablet in YugabyteDB is a <strong>Raft group</strong>. Raft guarantees strong consistency by requiring a <strong>strict majority (quorum)</strong> to acknowledge every write before it is committed. Leader election is fully automatic — no manual failover is ever needed.</div>`;
+
+        // Stats bar
+        const stats = [
+          { val: 'RF=3', lbl: 'Replication' }, { val: '2/3', lbl: 'Quorum' },
+          { val: '1', lbl: 'Leader' }, { val: '2', lbl: 'Followers' },
+          { val: '>50%', lbl: 'Majority Rule' }, { val: 'Auto', lbl: 'Elections' },
+        ];
+        h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+        h += `</div>`;
+
+        // Highlights
+        const highlights = [
+          { icon: '◉', label: 'Single Leader per Tablet', cls: 'av-hl-green' },
+          { icon: '○', label: 'N−1 Followers', cls: 'av-hl-blue' },
+          { icon: '⬡', label: 'Strict Majority Commits', cls: 'av-hl-purple' },
+          { icon: '↻', label: 'Auto Leader Election', cls: 'av-hl-amber' },
+          { icon: '⊘', label: 'No Split-Brain', cls: 'av-hl-green' },
+          { icon: '≡', label: 'WAL-based Replication', cls: 'av-hl-blue' },
+        ];
+        h += `<div class="av-highlights">${highlights.map(hl => `<div class="av-hl ${hl.cls}"><span class="av-hl-icon">${hl.icon}</span><span class="av-hl-txt">${hl.label}</span></div>`).join('')}</div>`;
+
+        // ── Section 1: Raft Group Anatomy ──
+        h += `<div class="av-section-title">Raft Group Anatomy — Tablet Replica Roles</div>`;
+        h += `<div class="cq-group-anatomy">`;
+
+        // Visual: 3 replicas in a Raft group
+        h += `<div class="cq-replicas-row">`;
+        const replicas = [
+          { node: 'Tablet 1 → Node 1 (FD-1)', role: 'LEADER', icon: '◉', cls: 'cq-leader', color: '#f59e0b', desc: 'Handles all reads & writes. Appends to WAL first, then replicates to followers.' },
+          { node: 'Tablet 1 → Node 2 (FD-2)', role: 'FOLLOWER', icon: '○', cls: 'cq-follower', color: '#60a5fa', desc: 'Receives AppendEntries from leader. Applies to local WAL. Sends ACK back.' },
+          { node: 'Tablet 1 → Node 3 (FD-3)', role: 'FOLLOWER', icon: '○', cls: 'cq-follower', color: '#34d399', desc: 'Same as other follower. Participates in quorum voting and leader election.' },
+        ];
+        replicas.forEach(r => {
+          h += `<div class="cq-replica ${r.cls}">`;
+          h += `<div class="cq-rep-icon" style="color:${r.color}">${r.icon}</div>`;
+          h += `<div class="cq-rep-role" style="color:${r.color}">${r.role}</div>`;
+          h += `<div class="cq-rep-node">${r.node}</div>`;
+          h += `<div class="cq-rep-desc">${r.desc}</div>`;
+          h += `</div>`;
+        });
+        h += `</div>`;
+
+        // Raft group label
+        h += `<div class="cq-group-label">`;
+        h += `<span class="cq-gl-dot" style="background:#f59e0b"></span>`;
+        h += `<span>users.tablet1 — Raft Group (term: 4)</span>`;
+        h += `</div>`;
+        h += `</div>`;
+
+        // ── Section 2: Write Flow ──
+        h += `<div class="av-section-title">Write Path — Raft Consensus Commit Flow</div>`;
+        h += `<div class="cq-write-flow">`;
+
+        const writeSteps = [
+          { num: '1', title: 'Client Write', desc: 'INSERT/UPDATE sent to leader', icon: '📝', color: '#f59e0b' },
+          { num: '2', title: 'WAL Append', desc: 'Leader appends entry to its Write-Ahead Log', icon: '📋', color: '#60a5fa' },
+          { num: '3', title: 'Replicate', desc: 'Leader sends AppendEntries RPC to all followers in parallel', icon: '📡', color: '#a78bfa' },
+          { num: '4', title: 'Follower ACK', desc: 'Each follower appends to its WAL and sends ACK', icon: '✓', color: '#34d399' },
+          { num: '5', title: 'Majority', desc: 'Leader + 1 follower ACK = 2/3 = quorum. Write is committed.', icon: '⬡', color: '#22c55e' },
+          { num: '6', title: 'Respond', desc: 'Leader responds SUCCESS to client. Remaining follower catches up async.', icon: '✅', color: '#f59e0b' },
+        ];
+
+        h += `<div class="cq-write-steps">`;
+        writeSteps.forEach((s, i) => {
+          h += `<div class="cq-ws">`;
+          h += `<div class="cq-ws-num" style="background:${s.color}">${s.num}</div>`;
+          h += `<div class="cq-ws-icon">${s.icon}</div>`;
+          h += `<div class="cq-ws-title">${s.title}</div>`;
+          h += `<div class="cq-ws-desc">${s.desc}</div>`;
+          h += `</div>`;
+          if (i < writeSteps.length - 1) h += `<div class="cq-ws-arrow">→</div>`;
+        });
+        h += `</div>`;
+
+        // Write flow diagram
+        h += `<div class="cq-flow-diagram">`;
+        h += `<div class="cq-fd-col cq-fd-client"><div class="cq-fd-box cq-fd-client-box">Client</div></div>`;
+        h += `<div class="cq-fd-arrows">`;
+        h += `<div class="cq-fd-arrow cq-fd-a-write">INSERT →</div>`;
+        h += `<div class="cq-fd-arrow cq-fd-a-ack">← SUCCESS</div>`;
+        h += `</div>`;
+        h += `<div class="cq-fd-col cq-fd-leader"><div class="cq-fd-box cq-fd-leader-box">◉ Leader<div class="cq-fd-sub">Tablet 1 · Node 1 · WAL</div></div></div>`;
+        h += `<div class="cq-fd-arrows">`;
+        h += `<div class="cq-fd-arrow cq-fd-a-raft">AppendEntries →</div>`;
+        h += `<div class="cq-fd-arrow cq-fd-a-ack2">← ACK (majority)</div>`;
+        h += `</div>`;
+        h += `<div class="cq-fd-col cq-fd-followers">`;
+        h += `<div class="cq-fd-box cq-fd-f-box">○ Follower<div class="cq-fd-sub">Tablet 1 · Node 4 · WAL</div></div>`;
+        h += `<div class="cq-fd-box cq-fd-f-box">○ Follower<div class="cq-fd-sub">Tablet 1 · Node 7 · WAL</div></div>`;
+        h += `</div>`;
+        h += `</div>`;
+        h += `</div>`;
+
+        // ── Section 3: Heartbeats & Leader Leases ──
+        h += `<div class="av-section-title">Heartbeats & Leader Leases</div>`;
+        h += `<div class="cq-election">`;
+        
+        const leaseSteps = [
+          { num: '1', title: 'Periodic Heartbeats', desc: 'Leader sends empty AppendEntries RPCs every 500ms', icon: '💓', color: '#f59e0b' },
+          { num: '2', title: 'Follower ACK', desc: 'Followers reset their election timers and acknowledge', icon: '✓', color: '#60a5fa' },
+          { num: '3', title: 'Lease Renewal', desc: 'Leader extends its time-based lease upon majority ACK', icon: '⏳', color: '#a78bfa' },
+          { num: '4', title: 'Local Reads', desc: 'Leader serves strong reads locally while lease is valid', icon: '📖', color: '#22c55e' },
+        ];
+        
+        h += `<div class="cq-election-steps">`;
+        leaseSteps.forEach((s, i) => {
+          h += `<div class="cq-es">`;
+          h += `<div class="cq-es-num" style="background:${s.color};color:#000">${s.num}</div>`;
+          h += `<div class="cq-es-icon">${s.icon}</div>`;
+          h += `<div class="cq-es-title">${s.title}</div>`;
+          h += `<div class="cq-es-desc">${s.desc}</div>`;
+          h += `</div>`;
+          if (i < leaseSteps.length - 1) h += `<div class="cq-es-arrow">→</div>`;
+        });
+        h += `</div>`;
+        
+        // Diagram for Heartbeats
+        h += `<div class="cq-elect-diagram" style="margin-top:20px;">`;
+        h += `<div class="cq-ed-replica" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.05);"><div class="cq-ed-icon" style="color:#f59e0b">◉</div><div class="cq-ed-role" style="color:#f59e0b">LEADER</div><div class="cq-ed-node">Tablet 1 → Node 1</div><div class="cq-ed-status" style="color:var(--txt);font-weight:400;margin-top:6px;">Lease Valid ⏳</div></div>`;
+        h += `<div class="cq-ed-mid"><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:#f59e0b">Heartbeat (500ms) →</span></div><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:var(--ok)">← ACK</span></div></div>`;
+        h += `<div class="cq-ed-replica" style="border-color:rgba(96,165,250,.3);"><div class="cq-ed-icon" style="color:#60a5fa">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 4</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
+        h += `<div class="cq-ed-replica" style="border-color:rgba(52,211,153,.3);"><div class="cq-ed-icon" style="color:#34d399">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 7</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
+        h += `</div>`;
+        h += `</div>`;
+
+        // ── Section 4: Leader Election ──
+        h += `<div class="av-section-title">Leader Election — Automatic Failover</div>`;
+        h += `<div class="cq-election">`;
+
+        const electionSteps = [
+          { num: '1', title: 'Leader Fails', desc: 'Leader stops sending heartbeats', icon: '💀', color: 'var(--err)' },
+          { num: '2', title: 'Election Timeout', desc: 'Follower\'s heartbeat timer expires (150–300ms randomized)', icon: '⏱', color: '#f59e0b' },
+          { num: '3', title: 'Become Candidate', desc: 'Follower increments term, votes for itself, sends RequestVote RPCs', icon: '🗳️', color: '#a78bfa' },
+          { num: '4', title: 'Majority Vote', desc: 'Receives votes from majority of replicas (including self)', icon: '⬡', color: '#60a5fa' },
+          { num: '5', title: 'New Leader Elected', desc: 'Candidate wins election and immediately begins sending heartbeats', icon: '◉', color: '#22c55e' },
+          { num: '6', title: 'Wait for Old Lease', desc: 'New leader waits for the old leader\'s lease to expire before serving reads/writes', icon: '⏳', color: '#f43f5e' },
+        ];
+
+        h += `<div class="cq-election-steps">`;
+        electionSteps.forEach((s, i) => {
+          h += `<div class="cq-es">`;
+          h += `<div class="cq-es-num" style="background:${s.color}">${s.num}</div>`;
+          h += `<div class="cq-es-icon">${s.icon}</div>`;
+          h += `<div class="cq-es-title">${s.title}</div>`;
+          h += `<div class="cq-es-desc">${s.desc}</div>`;
+          h += `</div>`;
+          if (i < electionSteps.length - 1) h += `<div class="cq-es-arrow">→</div>`;
+        });
+        h += `</div>`;
+
+        // Election diagram
+        h += `<div class="cq-elect-diagram">`;
+        h += `<div class="cq-ed-replica cq-ed-dead"><div class="cq-ed-icon">✕</div><div class="cq-ed-role">OLD LEADER</div><div class="cq-ed-node">Tablet 1 → Node 1 (FD-1)</div><div class="cq-ed-status">FAILED</div></div>`;
+        h += `<div class="cq-ed-mid"><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow">RequestVote →</span></div><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow">← VoteGranted</span></div><div class="cq-ed-term-badge">term: 4 → 5</div></div>`;
+        h += `<div class="cq-ed-replica cq-ed-candidate"><div class="cq-ed-icon" style="color:#22c55e">◉</div><div class="cq-ed-role" style="color:#22c55e">NEW LEADER</div><div class="cq-ed-node">Tablet 1 → Node 4 (FD-2)</div><div class="cq-ed-status cq-ed-promoted">ELECTED ✓</div></div>`;
+        h += `<div class="cq-ed-replica cq-ed-voter"><div class="cq-ed-icon" style="color:#60a5fa">○</div><div class="cq-ed-role">VOTER</div><div class="cq-ed-node">Tablet 1 → Node 7 (FD-3)</div><div class="cq-ed-status">GRANTED VOTE</div></div>`;
+        h += `</div>`;
+
+        // Quorum math
+        h += `<div class="cq-quorum-math">`;
+        h += `<div class="cq-qm-title">Quorum Requirement</div>`;
+        h += `<div class="cq-qm-formula">Quorum = ⌊RF / 2⌋ + 1 = ⌊3 / 2⌋ + 1 = <strong>2 of 3</strong></div>`;
+        h += `<div class="cq-qm-result">Tablet 1 on Node 4 (self-vote) + Tablet 1 on Node 7 (granted) = <span style="color:var(--ok);font-weight:700">2/3 = Majority ✓</span></div>`;
+        h += `</div>`;
+
+        h += `</div>`;
+
+        // ── Section 4: Key Raft Properties ──
+        h += `<div class="av-section-title">Key Raft Properties</div>`;
+        const props = [
+          { icon: '⬡', title: 'Strong Consistency', desc: 'Every committed write is visible to all subsequent reads. No stale reads from the leader.', color: '#60a5fa' },
+          { icon: '⊘', title: 'No Split-Brain', desc: 'Only one leader per term. Two candidates in the same term cannot both win — majority is exclusive.', color: '#22c55e' },
+          { icon: '↻', title: 'Automatic Failover', desc: 'Leader failure triggers election within 150–300ms. No manual intervention or external failover tool needed.', color: '#f59e0b' },
+          { icon: '≡', title: 'Log-based Replication', desc: 'Every mutation is a WAL entry replicated in order. Followers replay the exact same log — deterministic state machine.', color: '#a78bfa' },
+          { icon: '▣', title: 'Per-Tablet Leadership', desc: 'Each tablet has its own independent Raft group. Leaders are spread across nodes for load balancing.', color: '#fb7185' },
+          { icon: '⇄', title: 'Catch-up Recovery', desc: 'When a failed node recovers, it receives missing WAL entries from the current leader and rejoins the quorum.', color: '#34d399' },
+        ];
+        h += `<div class="cq-props">`;
+        props.forEach(p => {
+          h += `<div class="cq-prop" style="border-top:3px solid ${p.color}">`;
+          h += `<div class="cq-prop-icon" style="color:${p.color}">${p.icon}</div>`;
+          h += `<div class="cq-prop-title">${p.title}</div>`;
+          h += `<div class="cq-prop-desc">${p.desc}</div>`;
+          h += `</div>`;
+        });
+        h += `</div>`;
 
         container.innerHTML = h;
       }
