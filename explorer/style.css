@@ -646,6 +646,39 @@
       box-shadow: 0 0 14px rgba(52, 211, 153, .3) !important
     }
 
+    .tablet.t-retiring {
+      border-color: var(--warn) !important;
+      opacity: .45;
+      transition: opacity .5s ease
+    }
+
+    .tablet.t-gc-out {
+      opacity: 0 !important;
+      transform: scaleY(0);
+      transform-origin: top;
+      transition: opacity .45s ease, transform .45s ease;
+      pointer-events: none;
+      margin-bottom: 0;
+      overflow: hidden
+    }
+
+    .gc-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(245, 158, 11, .1);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--head);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--warn);
+      letter-spacing: 1.5px;
+      z-index: 3;
+      pointer-events: none
+    }
+
     @keyframes cpulse {
 
       0%,

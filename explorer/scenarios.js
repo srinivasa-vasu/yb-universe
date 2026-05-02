@@ -1,5 +1,5 @@
 // ── Multi-Region Cluster interactive state ──────────────────────────────────
-window._mrPrefs = ['us']; // array of preferred regions (multi-select)
+window._mrPrefs = ['us', 'eu', 'apac']; // default: all regions balanced
 window._mrFailed = null;   // currently failed region (null | 'us' | 'eu' | 'apac')
 window._mrCtx = null;   // live ctx reference set in scenario init
 
@@ -239,6 +239,227 @@ window.mrRestore = function () {
 };
 // ────────────────────────────────────────────────────────────────────────────
 
+// ── Multi-Zone Cluster interactive state ─────────────────────────────────────
+window._mzPrefs = ['az1', 'az2', 'az3'];
+window._mzFailed = null;
+window._mzCtx = null;
+window._mzPanelDone = {};
+
+const _mzNodes  = { az1: [1, 2, 3], az2: [4, 5, 6], az3: [7, 8, 9] };
+const _mzLabel  = { az1: 'ap-south-1a', az2: 'ap-south-1b', az3: 'ap-south-1c' };
+const _mzColors = { az1: '#60a5fa', az2: '#34d399', az3: '#f59e0b' };
+const _mzAll    = ['az1', 'az2', 'az3'];
+
+function _mzEffAzs() {
+  const active = window._mzPrefs.filter(a => a !== window._mzFailed);
+  return active.length ? active : _mzAll.filter(a => a !== window._mzFailed);
+}
+
+function _mzEffAz(gi = 0) { const e = _mzEffAzs(); return e[gi % e.length]; }
+function _mzLeader(gi) { return _mzNodes[_mzEffAz(gi)][gi]; }
+function _mzNodeAz(nid) { return _mzAll.find(a => _mzNodes[a].includes(nid)); }
+
+// All AZs in the same region are equidistant — no meaningful latency difference
+function _mzOW(a, b) { return 2; }
+
+function _mzLatsAll() {
+  return [0, 1, 2].map(gi => {
+    const eff = _mzEffAz(gi);
+    return { az: eff, cl: 2, read: 3, raft: 2, write: 5 };
+  });
+}
+
+function _mzLats() { return [2, 3, 2, 5]; }
+
+function _mzAzLats(az) {
+  if (az === window._mzFailed) return null;
+  return { read: 3, write: 5 };
+}
+
+function _mzAnimDur() { return 400; }
+
+function _mzRenderLatPanel() {
+  const panel = document.getElementById('mr-lat-panel');
+  if (!panel) return;
+  const effAzs = _mzEffAzs();
+  const failed = window._mzFailed;
+  const prefs = window._mzPrefs;
+
+  let rows = '';
+  _mzAll.forEach(az => {
+    const isEff = effAzs.includes(az);
+    const isFailed = az === failed;
+    const isPref = prefs.includes(az);
+    const done = window._mzPanelDone || {};
+    const lats = !isFailed ? _mzAzLats(az) : null;
+    const c = _mzColors[az];
+
+    let st, stCls;
+    if (isFailed) { st = '✕ OFFLINE'; stCls = 'mr-st-fail'; }
+    else if (isEff && isPref) { st = '● Pinned'; stCls = 'mr-st-pin'; }
+    else if (isEff) { st = '◉ Balancing'; stCls = 'mr-st-eff'; }
+    else { st = '—'; stCls = 'mr-st-idle'; }
+
+    const readVal = (lats && done[az + ':read']) ? lats.read + 'ms' : '—';
+    const writeVal = (lats && done[az + ':write']) ? lats.write + 'ms' : '—';
+    const bl = isEff ? `border-left:3px solid ${c}` : isFailed ? 'border-left:3px solid var(--err)' : 'border-left:3px solid transparent';
+    const dim = isFailed ? 'opacity:.38' : '';
+    rows += `<tr class="mr-lat-tr ${isEff ? 'mr-lat-tr-eff' : ''}" style="${bl};${dim}">
+      <td class="mr-lat-td mr-lat-rname" style="color:${isFailed ? 'var(--txt3)' : c}">${_mzLabel[az]}</td>
+      <td class="mr-lat-td">${readVal}</td>
+      <td class="mr-lat-td">${writeVal}</td>
+      <td class="mr-lat-td ${stCls}">${st}</td>
+    </tr>`;
+  });
+
+  panel.innerHTML = `
+    <div class="mr-lat-hdr-row">
+      <span class="mr-lat-title">Latency Comparison</span>
+      <span class="mr-lat-sub">· client in ap-south-1a · reads from leader · writes include Raft quorum</span>
+    </div>
+    <table class="mr-lat-tbl">
+      <thead><tr>
+        <th class="mr-lat-th">AZ</th>
+        <th class="mr-lat-th">Read (RTT)</th>
+        <th class="mr-lat-th">Write (end-to-end)</th>
+        <th class="mr-lat-th">Leader Status</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function _mzRenderAll() { _mzUpdateBtns(); _mzRenderLatPanel(); }
+
+function _mzResetLatBars() {
+  for (let i = 0; i < 4; i++) {
+    const fill = document.getElementById(`lat-fill-${i}`);
+    const val = document.getElementById(`lat-val-${i}`);
+    if (fill) fill.style.width = '0%';
+    if (val) val.textContent = '—';
+  }
+  document.querySelectorAll('#lat-rows .lat-row').forEach(el => el.classList.remove('hl-lat'));
+}
+
+function _mzUpdateBtns() {
+  const prefs = window._mzPrefs, failed = window._mzFailed;
+  _mzAll.forEach(az => {
+    const btn = document.getElementById(`mz-pref-${az}`);
+    if (!btn) return;
+    const active = prefs.includes(az), c = _mzColors[az];
+    btn.classList.toggle('active', active);
+    btn.style.background = active ? c : '';
+    btn.style.color = active ? '#0f172a' : c;
+    btn.style.borderColor = active ? c : `${c}55`;
+    btn.disabled = az === failed;
+  });
+  const toFail = prefs.find(az => az !== failed) || prefs[0];
+  const failBtn = document.getElementById('mz-fail');
+  if (failBtn) { failBtn.disabled = !!failed; failBtn.innerHTML = `⚡ Fail ${_mzLabel[toFail]}`; }
+  const restBtn = document.getElementById('mz-restore');
+  if (restBtn) { restBtn.disabled = !failed; restBtn.innerHTML = failed ? `↺ Restore ${_mzLabel[failed]}` : '↺ Restore'; }
+}
+
+function _mzApplyLeaders(ctx) {
+  ['mz1', 'mz2', 'mz3'].forEach((id, i) => ctx.setRole(id, _mzLeader(i), 'LEADER'));
+}
+
+function _mzAnimateLeaderTransfer(ctx, oldLeaders, newLeaders) {
+  [0, 1, 2].filter(gi => oldLeaders[gi] !== newLeaders[gi]).forEach(gi => {
+    const oldA = _mzNodeAz(oldLeaders[gi]), newA = _mzNodeAz(newLeaders[gi]);
+    ctx.pktTabletToTablet(`mz${gi + 1}`, oldLeaders[gi], `mz${gi + 1}`, newLeaders[gi], 'pk-vote', _mzAnimDur(_mzOW(oldA, newA)));
+  });
+}
+
+function _mzLogShards() {
+  const effAzs = _mzEffAzs();
+  if (effAzs.length > 1) {
+    [0, 1, 2].forEach(gi => {
+      const l = _mzLatsAll()[gi];
+      addLog(`  shard-${gi + 1} → ${_mzLabel[l.az]} (Node ${_mzLeader(gi)}) · read ~${l.read}ms · write ~${l.write}ms`, 'li');
+    });
+  }
+}
+
+window.mzSetPrefAz1 = () => window.mzSetPref('az1');
+window.mzSetPrefAz2 = () => window.mzSetPref('az2');
+window.mzSetPrefAz3 = () => window.mzSetPref('az3');
+
+window.mzSetPref = function(az) {
+  if (window._mzFailed === az) return;
+  window._mzPanelDone = {};
+  _mzResetLatBars();
+  const oldLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+
+  const idx = window._mzPrefs.indexOf(az);
+  if (idx === -1) {
+    window._mzPrefs.push(az);
+    window._mzPrefs.sort((a, b) => _mzAll.indexOf(a) - _mzAll.indexOf(b));
+  } else {
+    if (window._mzPrefs.length === 1) return;
+    window._mzPrefs.splice(idx, 1);
+  }
+
+  const newLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+  const ctx = window._mzCtx; if (!ctx) return;
+
+  _mzAnimateLeaderTransfer(ctx, oldLeaders, newLeaders);
+  _mzApplyLeaders(ctx);
+  _mzRenderAll();
+
+  const effAzs = _mzEffAzs();
+  const [cl, read, raft, write] = _mzLats();
+  addLog(`Leader preference → ${effAzs.map(a => _mzLabel[a]).join(' & ')}`, 'ls');
+  _mzLogShards();
+  if (effAzs.length === 1) addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'li');
+};
+
+window.mzFailAz = function() {
+  const ctx = window._mzCtx; if (!ctx || window._mzFailed) return;
+  window._mzPanelDone = {};
+  _mzResetLatBars();
+  const toFail = window._mzPrefs.find(a => a !== window._mzFailed) || window._mzPrefs[0];
+  const oldLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+
+  window._mzFailed = toFail;
+  _mzNodes[toFail].forEach(n => ctx.killNode(n));
+
+  const newLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+  _mzAnimateLeaderTransfer(ctx, oldLeaders, newLeaders);
+  _mzApplyLeaders(ctx);
+  _mzRenderAll();
+
+  const effAzs = _mzEffAzs();
+  const [cl, read, raft, write] = _mzLats();
+  addLog(`⚡ ${_mzLabel[toFail]} OFFLINE — nodes ${_mzNodes[toFail].join(', ')} unreachable`, 'le');
+  addLog(`Raft re-election: leaders balanced across ${effAzs.map(a => _mzLabel[a]).join(' & ')}`, 'lw');
+  _mzLogShards();
+  addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'lw');
+};
+
+window.mzRestore = function() {
+  const ctx = window._mzCtx; if (!ctx || !window._mzFailed) return;
+  window._mzPanelDone = {};
+  _mzResetLatBars();
+  const failed = window._mzFailed;
+  const oldLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+
+  window._mzFailed = null;
+  _mzNodes[failed].forEach(n => ctx.reviveNode(n));
+
+  const newLeaders = [0, 1, 2].map(gi => _mzLeader(gi));
+  _mzAnimateLeaderTransfer(ctx, oldLeaders, newLeaders);
+  _mzApplyLeaders(ctx);
+  _mzRenderAll();
+
+  const effAzs = _mzEffAzs();
+  const [cl, read, raft, write] = _mzLats();
+  addLog(`↺ ${_mzLabel[failed]} RESTORED — rejoining cluster`, 'ls');
+  addLog(`Leaders rebalanced across ${effAzs.map(a => _mzLabel[a]).join(' & ')}`, 'ls');
+  _mzLogShards();
+  if (effAzs.length === 1) addLog(`Read: ~${read}ms  |  Raft: ~${raft}ms  |  Write: ~${write}ms`, 'li');
+};
+// ────────────────────────────────────────────────────────────────────────────
+
 const SCENARIOS = {
   "home": {
     group: "Home", icon: "🏠", title: "Architecture Explorer", subtitle: "Interactive Distributed SQL Visualizer",
@@ -252,7 +473,7 @@ const SCENARIOS = {
   },
   // Architecture: Universe Hierarchy
   "universe-hierarchy": {
-    group: "Architecture Concepts", icon: "🏗️",
+    group: "Foundations", icon: "🏗️", sortOrder: 1,
     name: 'Universe', title: 'Universe Hierarchy', subtitle: 'Logical object hierarchy',
     isArch: true,
     desc: 'A <b>Universe</b> is the top-level deployment unit in YugabyteDB. It encompasses one primary cluster and optionally multiple read replica clusters. Within each cluster, data is organized into databases (or keyspaces), schemas, tables, indexes, and other objects — all of which are physically sharded into tablets.',
@@ -264,7 +485,7 @@ const SCENARIOS = {
   },
   // Architecture: Fault Domains
   "fault-domains": {
-    group: "Architecture Concepts", icon: "🛡️",
+    group: "Foundations", icon: "🛡️", sortOrder: 2,
     name: 'Fault Domains', title: 'Fault Domains', subtitle: 'RF, quorum & failure isolation',
     isArch: true,
     desc: 'A <b>fault domain</b> is a group of nodes that can fail together. YugabyteDB places one Raft replica per fault domain — so a single failure never takes down the majority. Domains range from individual nodes to entire clouds. RF must be odd and ≥ the number of fault domains you want to survive.',
@@ -276,7 +497,7 @@ const SCENARIOS = {
   },
   // Architecture: Consensus Quorum
   "consensus": {
-    group: "Architecture Concepts", icon: "⬡",
+    group: "Foundations", icon: "⬡", sortOrder: 3,
     name: 'Consensus (Raft) Quorum', title: 'Consensus (Raft) Quorum', subtitle: 'Raft roles, writes & elections',
     isArch: true,
     desc: 'Every tablet in YugabyteDB is a <b>Raft group</b> — a set of replicas that use the Raft consensus protocol to guarantee strong consistency. Raft assigns roles (Leader, Follower), manages the write-ahead log, and handles leader elections automatically when failures occur.',
@@ -288,7 +509,7 @@ const SCENARIOS = {
   },
   // Architecture: Control Plane (Master vs TServer)
   "control-plane": {
-    group: "Architecture Concepts", icon: "🧠",
+    group: "Foundations", icon: "🧠", sortOrder: 4,
     name: 'Control Plane', title: 'YB-Master vs YB-TServer', subtitle: 'The Control & Data Planes',
     isArch: true,
     desc: 'A YugabyteDB cluster consists of two types of processes. The <b>YB-Master</b> nodes form the control plane (managing cluster metadata, DDL, and tablet load balancing). The <b>YB-TServer</b> nodes form the data plane (handling client queries, DML, and Raft consensus).',
@@ -299,7 +520,7 @@ const SCENARIOS = {
   },
   // Architecture: Hybrid Time
   "hybrid-time": {
-    group: "Architecture Concepts", icon: "⏳",
+    group: "System Internals", icon: "⏳", sortOrder: 3,
     name: 'Hybrid Time', title: 'Distributed Hybrid Time', subtitle: 'Global MVCC & Ordering',
     isArch: true,
     desc: 'YugabyteDB uses <b>Hybrid Logical Clocks (HLC)</b> to order events across distributed nodes without requiring expensive atomic clocks. A Hybrid Time timestamp combines physical clock time with a logical sequence number to guarantee strict serializability.',
@@ -310,7 +531,7 @@ const SCENARIOS = {
   },
   // Architecture: Global Universe
   "universe": {
-    group: "Architecture", icon: "🌐",
+    group: "Deployment Architectures", icon: "🌐", sortOrder: 1,
     name: 'Global Universe', title: 'Global Universe Architecture', subtitle: 'Fault domains',
     isArch: true,
     desc: 'A single logical database spanning multiple fault domains (zones or regions). Highly available with Zero RPO and Zero RTO, using synchronous replication.',
@@ -322,8 +543,8 @@ const SCENARIOS = {
   },
   // Architecture: xCluster
   "xcl": {
-    group: "Architecture", icon: "🔗",
-    name: 'xCluster', title: 'xCluster Topology', subtitle: 'Cross-cluster',
+    group: "Deployment Architectures", icon: "🔗", sortOrder: 2,
+    name: 'xCluster Overview', title: 'xCluster Topology', subtitle: 'Cross-cluster',
     isArch: true,
     desc: 'Asynchronous replication between independent clusters. Used for disaster recovery (DR), low-latency local reads in multiple regions, and data migration.',
     guidedTour: [
@@ -334,7 +555,7 @@ const SCENARIOS = {
   },
   // Architecture: Read Replica
   "read-replica": {
-    group: "Architecture", icon: "📖",
+    group: "Deployment Architectures", icon: "📖", sortOrder: 3,
     name: 'Read Replica', title: 'Read Replica Topology', subtitle: 'Low-latency reads',
     isArch: true,
     desc: 'Read-only clones of a primary universe. They provide low-latency reads in remote regions without affecting the write performance of the primary cluster.',
@@ -346,7 +567,7 @@ const SCENARIOS = {
   },
   // Architecture: Cluster Overview
   "cluster-overview": {
-    group: "Architecture", icon: "🗺️",
+    group: "Foundations", icon: "🗺️", sortOrder: 5,
     name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
     steps: [], latencies: [],
     desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.',
@@ -359,7 +580,7 @@ const SCENARIOS = {
 
   // 1: Hash Sharding
   "1": {
-    group: "Sharding", icon: "🔢",
+    group: "Data Distribution", icon: "🔢", sortOrder: 1,
     name: 'Hash Sharding', title: 'Hash Sharding', subtitle: 'MurmurHash2 distribution',
     desc: 'The Primary Key is hashed to determine tablet placement. This provides uniform distribution across the cluster, preventing hotspots.',
     guidedTour: [
@@ -426,7 +647,7 @@ const SCENARIOS = {
 
   // 2: Range (Default)
   "2": {
-    group: "Sharding", icon: "📏",
+    group: "Data Distribution", icon: "📏", sortOrder: 2,
     name: 'Range (Default)', title: 'Range (Default)', subtitle: 'Single tablet start',
     filterTable: 'users',
     desc: 'Standard Range Sharding starts with a single tablet. As data grows, YugabyteDB automatically splits the tablet. This is ideal for small tables or when range scans are frequently used.',
@@ -497,7 +718,7 @@ const SCENARIOS = {
 
   // 3: Range (Pre-split)
   "3": {
-    group: "Sharding", icon: "✂️",
+    group: "Data Distribution", icon: "✂️", sortOrder: 3,
     name: 'Range (Pre-split)', title: 'Range (Pre-split)', subtitle: 'SPLIT AT VALUES',
     filterTable: 'users',
     desc: 'Optimize range sharding by pre-splitting the table into multiple tablets during creation.',
@@ -568,7 +789,7 @@ const SCENARIOS = {
   },
 
   "4": {
-    group: "Write & Read Paths", icon: "⚡",
+    group: "Read & Write Paths", icon: "⚡", sortOrder: 1,
     name: 'Fast Path Write', title: 'Fast Path Write', subtitle: 'Quorum & near-follower',
     filterTable: 'users',
     desc: 'YSQL INSERT flows to Raft LEADER → WAL append → replicate to followers → majority ACK → commit. Near follower (TServer-2, ~0.8ms) enables fast majority. If near follower is down, must wait for far follower (TServer-3, ~2.5ms).',
@@ -593,13 +814,17 @@ const SCENARIOS = {
       },
       { label: 'Leader WAL & Replicate', desc: 'Leader fans out AppendEntries to both followers simultaneously — near follower (N2, ~0.8ms) and far follower (N3, ~2.5ms).', action: async (ctx) => { ctx.setLat(0, 0.8); ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300); ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 1000); await ctx.delay(800); } },
       {
-        label: 'First ACK = Majority', desc: 'Near follower ACKs first (~0.8ms). Majority reached. Far follower ACK arrives later but not on critical path.', action: async (ctx) => {
+        label: 'First ACK = Majority', desc: 'Near follower (N2) ACKs first (~0.8ms) → majority reached. Far follower (N3) ACK also arrives shortly after — async, not on critical path.', action: async (ctx) => {
           if (S.nodes[1].alive) {
             ctx.setLat(1, 1.2); ctx.setLat(2, 9.5);
             await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 300);
+            addLog('N2 (near follower) ACK → 2/3 majority ✓ critical path done', 'ls');
+            ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 900);
+            addLog('N3 (far follower) ACK in-flight — async, not blocking commit', 'li');
             ctx.setLat(3, 0.5); ctx.setLat(4, 2.5);
           } else {
             await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000);
+            addLog('N3 (far follower) ACK → 2/3 majority ✓ (near follower down)', 'ls');
             ctx.setLat(1, 0); ctx.setLat(2, 10.5); ctx.setLat(3, 0.5); ctx.setLat(4, 11.8);
           }
         }
@@ -624,7 +849,7 @@ const SCENARIOS = {
   },
 
   "5": {
-    group: "Write & Read Paths", icon: "⚖️",
+    group: "Read & Write Paths", icon: "⚖️", sortOrder: 4,
     name: 'Distributed Transactions', title: 'Distributed Transactions', subtitle: 'Multi-tablet atomicity (2PC)',
     filterTable: ['users', 'transactions'],
     desc: 'Transactions spanning multiple tablets (e.g. updating users in different shards) use a high-performance 2-Phase Commit protocol (2PC). Visibility is atomic across all shards.',
@@ -732,7 +957,7 @@ const SCENARIOS = {
   },
 
   "6": {
-    group: "Write & Read Paths", icon: "🧬",
+    group: "Read & Write Paths", icon: "🧬", sortOrder: 5,
     name: 'Index Data Write', title: 'Index Data Write', subtitle: 'Primary + Secondary (2PC)',
     filterTable: ['users', 'users_email_idx', 'transactions'],
     desc: 'Secondary indexes are stored in separate tablets. Updating a row with an index requires a distributed transaction to ensure both are updated atomically.',
@@ -840,7 +1065,7 @@ const SCENARIOS = {
   },
 
   "7": {
-    group: "Write & Read Paths", icon: "📖",
+    group: "Read & Write Paths", icon: "📖", sortOrder: 2,
     name: 'Consistent Read', title: 'Consistent Read', subtitle: 'Leader reads',
     filterTable: 'users',
     desc: 'Strong-consistency reads always go to the Raft LEADER. If request lands on a follower, it transparently redirects to the leader.',
@@ -858,7 +1083,7 @@ const SCENARIOS = {
   },
 
   "8": {
-    group: "Write & Read Paths", icon: "⚡",
+    group: "Read & Write Paths", icon: "⚡", sortOrder: 3,
     name: 'Follower Reads', title: 'Follower Reads', subtitle: 'Bounded staleness',
     filterTable: 'users',
     desc: 'SET yb_read_from_followers=TRUE allows reads from nearest replica, skipping the leader. Data may be bounded-stale (default 10ms).',
@@ -876,18 +1101,22 @@ const SCENARIOS = {
 
 
   "10": {
-    group: "Global & High Availability", icon: "🗳️",
+    group: "Consistency & High Availability", icon: "🗳️", sortOrder: 1,
     name: 'Leader Election', title: 'Leader Election', subtitle: 'Raft lifecycle & recovery',
-    desc: 'Full Raft lifecycle: 6 consecutive heartbeat failures → node declared dead → election timeout → Follower→Candidate→Leader. Leaders are distributed fairly across surviving peers. Also supports graceful Blacklist/Drain for planned maintenance.',
+    desc: 'Full Raft lifecycle: 6 consecutive heartbeat failures → node declared dead → election timeout → Follower→Candidate→Leader. Leaders are distributed fairly across surviving peers. Supports graceful Blacklist/Drain for planned maintenance and Unblacklist to rebalance leaders back.',
     guidedTour: [
       { text: "Raft ensures there is always exactly one <b>Leader</b> per tablet.", element: ".canvas-wrap" },
       { text: "Click <b>Step Forward</b> to witness the heartbeat failure and re-election logic.", element: "#btn-step" },
       { text: "Watch the <b>Raft Term</b> increment in the toolbar as new leaders are elected.", element: "#term-display" },
-      { text: "Try <b>Blacklist TS-2</b> to see how leaders are gracefully moved away before maintenance.", element: "#btn-bl" }
+      { text: "Try <b>Blacklist TS-2</b> to see how leaders are gracefully moved away before maintenance.", element: "#btn-bl" },
+      { text: "Then click <b>Unblacklist TS-2</b> to see YB-Master rebalance leaders back to TS-2 automatically.", element: "#btn-ubl" }
     ],
     latencies: [{ lbl: 'Heartbeat RTT', cls: 'll', max: 2 }, { lbl: 'HB Failures', cls: 'lh', max: 6 }, { lbl: 'Crash Detection', cls: 'lh', max: 400 }, { lbl: 'Leader Lease Expiry', cls: 'lm', max: 2000 }, { lbl: 'Vote RPCs', cls: 'lm', max: 10 }, { lbl: 'New Leaders Up', cls: 'll', max: 5 }, { lbl: 'Re-replication', cls: 'lm', max: 200 }, { lbl: 'Leader Balancing', cls: 'll', max: 15 }],
     electionSteps: ['Heartbeats', 'Miss ×1-3', 'Miss ×4-6', 'Timeout', 'Candidate', 'RequestVote', 'Vote Grant', 'Elected', 'Recovery', 'Balancing'],
-    extraBtns: [{ id: 'btn-bl', label: '🚫 Blacklist TS-2', cls: 'btn-d', cb: 'blacklistDrainNode' }],
+    extraBtns: [
+      { id: 'btn-bl',  label: '🚫 Blacklist TS-2',   cls: 'btn-d', cb: 'blacklistDrainNode',  disabled: false },
+      { id: 'btn-ubl', label: '✅ Unblacklist TS-2', cls: 'btn-g', cb: 'unblacklistNode',     disabled: true  },
+    ],
     steps: [
       {
         label: 'Healthy — Heartbeats Flowing',
@@ -1031,7 +1260,7 @@ const SCENARIOS = {
     ]
   },
   "11": {
-    group: "Global & High Availability", icon: "💥",
+    group: "Consistency & High Availability", icon: "💥", sortOrder: 2,
     name: 'Node Failure', title: 'Node Failure', subtitle: 'Crash & catch-up',
     desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.tablet3) & tg6 (products.tablet2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
     guidedTour: [
@@ -1120,7 +1349,7 @@ const SCENARIOS = {
     ]
   },
   "12": {
-    group: "Global & High Availability", icon: "🔀",
+    group: "Consistency & High Availability", icon: "🔀", sortOrder: 3,
     name: 'Network Partition', title: 'Network Partition', subtitle: 'Split-brain & quorum',
     desc: 'TServer-3 is cut off from TServer-1 and TServer-2 by a network partition. TS-3 tries to elect itself leader but cannot win majority (1/3 < 2). TS-1 & TS-2 (quorum) continue serving writes. TS-3 returns stale reads.',
     guidedTour: [
@@ -1225,7 +1454,7 @@ const SCENARIOS = {
   },
 
   "13": {
-    group: "Horizontal Scalability", icon: "📈",
+    group: "Scalability", icon: "📈", sortOrder: 1,
     name: 'Horizontal Scaling', title: 'Horizontal Scaling', subtitle: 'Add/remove nodes & rebalance',
     desc: 'Observe how YugabyteDB scales out from 3 to 6 nodes within the APAC region. As new nodes are added, YB-Master automatically rebalances both tablet leaders and followers to distribute data and load evenly across all available zones.',
     guidedTour: [
@@ -1458,18 +1687,34 @@ const SCENARIOS = {
 
   // 14: Tablet Split
   "14": {
-    group: "Horizontal Scalability", icon: "🔄",
+    group: "Scalability", icon: "🔄", sortOrder: 2,
     name: 'Tablet Split', title: 'Tablet Split', subtitle: 'Auto-sharding growth',
     filterTable: 'users',
-    desc: 'YugabyteDB automatically splits tablets when they exceed ~64MB. New Raft groups are created for the split halves, and the parent is retired.',
+    desc: 'YugabyteDB automatically splits tablets when they exceed ~128MB. Child tablets appear right below the parent, then the parent is drained and garbage collected.',
     guidedTour: [
-      { text: "When a tablet grows beyond ~64MB, YugabyteDB automatically finds the <b>median split point</b> and divides it into two new tablets.", element: ".canvas-wrap" },
+      { text: "When a tablet grows beyond ~64MB, YugabyteDB finds the <b>median split point</b> and spawns two child tablets directly below the parent.", element: ".canvas-wrap" },
       { text: "Click <b>Step Forward</b> to bulk-insert data, trigger the size threshold, and watch the split and new Raft group creation.", element: "#btn-step" },
-      { text: "After the split, the parent tablet is retired. Each child starts <b>independent Raft replication</b>, spreading load across nodes.", element: ".n-body" }
+      { text: "After the split, the parent tablet is garbage collected eventually. Each child starts <b>independent Raft replication</b>, spreading load across nodes.", element: ".n-body" },
+      { text: "Watch the final <b>GC step</b>: the parent enters RETIRING state, the Raft group is dissolved, and storage is reclaimed.", element: ".n-body" }
     ],
     latencies: [{ lbl: 'Size Check', cls: 'll', max: 1 }, { lbl: 'Split Point', cls: 'll', max: 2 }, { lbl: 'New Group', cls: 'lm', max: 50 }],
     steps: [
-      { label: 'Growth', desc: 'Bulk writes fill the tablet beyond the 64MB threshold.', action: async (ctx) => { for (let i = 0; i < 3; i++) { await ctx.pktClientToTablet('tg1', 1, 'pk-write', 300); ctx.addMem('tg1', 1, 20); } } },
+      {
+        label: 'Growth', desc: 'Bulk writes fill the tablet beyond the 64MB threshold. New rows land in tg1 as it approaches the split limit.',
+        action: async (ctx) => {
+          const tg1 = S.groups.find(g => g.id === 'tg1');
+          const bulkRows = [
+            [10, 'Jack Torres',  'Denver',  82, 1713289100.1],
+            [13, 'Karen Liu',    'Atlanta', 79, 1713289100.4],
+            [16, 'Leo Park',     'Seattle', 91, 1713289100.7],
+          ];
+          for (let i = 0; i < 3; i++) {
+            await ctx.pktClientToTablet('tg1', 1, 'pk-write', 300);
+            ctx.addMem('tg1', 1, 20);
+            if (tg1) { tg1.data.push(bulkRows[i]); for (const n of [1, 2, 3]) ctx.reRenderTablet('tg1', n, true); }
+          }
+        }
+      },
       {
         label: 'Analyze Range', desc: 'TServer identifies the median split point for the hash range.', action: async (ctx) => {
           ctx.setLat(0, 0.8); ctx.setLat(1, 1.2);
@@ -1479,28 +1724,61 @@ const SCENARIOS = {
         }
       },
       {
-        label: 'Spawn Children', desc: 'Two new child tablets (tg1a, tg1b) are created. For a brief moment, parent and children coexist.', action: async (ctx) => {
+        label: 'Spawn Children', desc: 'Two new child tablets (tg1a, tg1b) are created directly below the parent, each inheriting half of the parent\'s rows. For a brief moment, parent and children coexist.', action: async (ctx) => {
           addLog('Spawning child tablets: tg1a and tg1b', 'ls');
-          const g1a = { id: 'tg1a', table: 'users', tnum: '1a', range: '0x0000–0x2A87', leaderNode: 1, term: 5, replicas: [1, 2, 3], data: [[1, 'A', 'NY', 87]] };
-          const g1b = { id: 'tg1b', table: 'users', tnum: '1b', range: '0x2A88–0x54FF', leaderNode: 1, term: 5, replicas: [1, 2, 3], data: [[4, 'D', 'P', 95]] };
-          S.groups.push(g1a, g1b);
+          // Split tg1's real rows at the median — lower half to tg1a, upper half to tg1b
+          const tg1 = S.groups.find(g => g.id === 'tg1');
+          const allData = tg1 ? [...tg1.data] : [];
+          const mid = Math.ceil(allData.length / 2);
+          const g1a = { id: 'tg1a', table: 'users', tnum: '1a', range: '0x0000–0x2A87', leaderNode: 1, term: 5, replicas: [1, 2, 3], data: allData.slice(0, mid) };
+          const g1b = { id: 'tg1b', table: 'users', tnum: '1b', range: '0x2A88–0x54FF', leaderNode: 1, term: 5, replicas: [1, 2, 3], data: allData.slice(mid) };
+          // Insert children immediately after tg1, not at the end
+          const tg1Idx = S.groups.findIndex(g => g.id === 'tg1');
+          S.groups.splice(tg1Idx + 1, 0, g1a, g1b);
           S.replicaState['tg1a'] = {}; S.replicaState['tg1b'] = {};
           for (let n of [1, 2, 3]) {
             S.replicaState['tg1a'][n] = { mem: 10, ss: 15, ssts: [15], newRows: [], readRow: undefined };
             S.replicaState['tg1b'][n] = { mem: 10, ss: 15, ssts: [15], newRows: [], readRow: undefined };
           }
           renderAllTablets(); renderConnections();
+          // Highlight children as newly born
+          for (const id of ['tg1a', 'tg1b']) {
+            for (const n of [1, 2, 3]) {
+              const el = document.getElementById(`tablet-${id}-${n}`);
+              if (el) el.classList.add('t-new');
+            }
+          }
           ctx.setLat(2, 42);
           addLog('Child tablets online. Transitioning traffic...', 'li');
         }
       },
       {
-        label: 'Finalize Split', desc: 'Traffic fully moved to children. Parent tablet (tg1) is retired and removed from the nodes.', action: async (ctx) => {
-          addLog('Retiring parent tablet tg1...', 'lw');
+        label: 'GC Parent Tablet', desc: 'Traffic fully moved to children. Parent tablet (tg1) enters RETIRING state — WAL entries are drained, Raft group is dissolved, and storage is reclaimed by the garbage collector.', action: async (ctx) => {
+          addLog('tg1: all writes redirected to tg1a & tg1b — entering retire state', 'lw');
+          // Mark tg1 as retiring on all replicas
+          for (const nId of [1, 2, 3]) {
+            const el = document.getElementById(`tablet-tg1-${nId}`);
+            if (!el) continue;
+            el.classList.add('t-retiring');
+            const ov = document.createElement('div');
+            ov.className = 'gc-overlay';
+            ov.textContent = 'RETIRING';
+            el.appendChild(ov);
+          }
+          await ctx.delay(700);
+          addLog('tg1: WAL drained · Raft group dissolved · GC reclaiming storage...', 'lw');
+          // Animate collapse
+          for (const nId of [1, 2, 3]) {
+            const el = document.getElementById(`tablet-tg1-${nId}`);
+            if (el) el.classList.add('t-gc-out');
+          }
+          await ctx.delay(500);
+          // Remove parent from state
           S.groups = S.groups.filter(g => g.id !== 'tg1');
           renderAllTablets(); renderConnections();
           showSplitPanel(false);
-          addLog('Split complete. tg1 retired. children tg1a & tg1b now active ✓', 'ls');
+          addLog('GC complete: tg1 parent reclaimed ✓  storage freed', 'ls');
+          addLog('Split complete: tg1a [0x0000–0x2A87]  tg1b [0x2A88–0x54FF] active ✓', 'ls');
         }
       }
     ]
@@ -1508,7 +1786,7 @@ const SCENARIOS = {
 
   // 15: LSM Compaction
   "15": {
-    group: "Storage & Scalability", icon: "🗜️",
+    group: "System Internals", icon: "🗜️", sortOrder: 2,
     name: 'LSM Compaction', title: 'LSM Compaction', subtitle: 'DocDB storage engine',
     desc: 'DocDB (RocksDB LSM-tree): writes → MemTable → L0 SSTable flush → L0→L1 compaction → lower read amplification.',
     guidedTour: [
@@ -1569,7 +1847,7 @@ const SCENARIOS = {
   },
 
   "16": {
-    group: "Storage & Scalability", icon: "📦",
+    group: "Data Distribution", icon: "📦", sortOrder: 4,
     name: 'Colocated Tables', title: 'Colocated Tables', subtitle: 'Shared tablet groups',
     filterTable: 'colocated',
     desc: 'Colocation allows multiple small tables to share the same underlying tablet group. These shared tablets are range-sharded by default, using the entire row key (including Colocation ID) to maintain global order. This significantly reduces metadata overhead and per-table Raft costs for reference or master tables.',
@@ -1669,7 +1947,7 @@ const SCENARIOS = {
   },
 
   "17": {
-    group: "Multi-Cluster & DR", icon: "🔁",
+    group: "xCluster", icon: "🔁", sortOrder: 1,
     name: 'xCluster DR', title: 'xCluster DR', subtitle: 'Turnkey async replication',
     desc: 'Turnkey xCluster Disaster Recovery replicates changes from a PRIMARY cluster (ap-south-1) to a SECONDARY cluster (ap-south-2) asynchronously via CDCSDK pollers. Writes commit via Raft on PRIMARY (~2ms), then stream near-realtime (~45ms) to SECONDARY. A single n:m poller bridges multiple source tablets to multiple target tablets simultaneously.',
     guidedTour: [
@@ -1894,7 +2172,7 @@ const SCENARIOS = {
   },
 
   "18": {
-    group: "Multi-Cluster & DR", icon: "⚡",
+    group: "xCluster", icon: "⚡", sortOrder: 2,
     name: 'Active-Active xCluster', title: 'Active-Active xCluster', subtitle: 'Bidirectional xCluster',
     desc: 'Bidirectional xCluster: both clusters act as PRIMARY and accept local writes simultaneously. P-1 (forward) and P-2 (reverse) stream changes in both directions. The REG column in every tablet shows the origin cluster of each row. Conflicts on the same key are resolved via Last-Writer-Wins (LWW) using Hybrid Logical Clocks (HLC).',
     guidedTour: [
@@ -2170,7 +2448,7 @@ const SCENARIOS = {
   },
 
   "19": {
-    group: "Storage & Scalability", icon: "🗄️",
+    group: "System Internals", icon: "🗄️", sortOrder: 1,
     name: 'DocDB Storage', title: 'DocDB Storage', subtitle: 'LSM + MVCC internals',
     desc: "DocDB is YugabyteDB’s RocksDB-based storage engine. Every write is an immutable append — updates create new versions, deletes write tombstones. MVCC keeps all versions for consistent snapshot reads without locks.",
     guidedTour: [
@@ -2377,8 +2655,164 @@ const SCENARIOS = {
     ]
   },
 
+  "mz": {
+    group: "Global Universe", icon: "🏢", sortOrder: 1,
+    name: 'Multi-Zone', title: 'Multi-Zone', subtitle: 'Single region · 3 AZs',
+    desc: 'A single YugabyteDB cluster within <b>ap-south-1</b>, spread across 3 Availability Zones. RF=3 keeps one replica per AZ — survives any single AZ failure with zero RPO and zero RTO. All Raft stays intra-region; latency is uniform across AZs (~5ms write).',
+    latencies: [
+      { lbl: 'Client → Leader', cls: 'll', max: 20 },
+      { lbl: 'Read Latency',    cls: 'll', max: 20 },
+      { lbl: 'Raft Replication',cls: 'll', max: 10 },
+      { lbl: 'Write Latency',   cls: 'll', max: 20 },
+    ],
+    guidedTour: [
+      { text: "9 nodes across 3 AZs in <b>ap-south-1</b>. The orders table has 3 shards, one replica per AZ (RF=3).", element: ".canvas-wrap" },
+      { text: "Use <b>📍 preference buttons</b> to pin leaders to any AZ. All AZs are in the same region — latency barely changes.", element: "#extra-btns" },
+      { text: "Click <b>⚡ Fail</b> to take an AZ offline. Raft elects new leaders in the surviving AZs within ~150ms.", element: "#extra-btns" },
+      { text: "Compare write latency here (~5ms, uniform across AZs) vs Multi-Region (~100ms+) — same resilience, dramatically lower latency.", element: ".step-bar" }
+    ],
+    extraBtns: [
+      { id: 'mz-pref-az1', label: '📍 ap-south-1a', cls: 'btn-info', cb: 'mzSetPrefAz1', disabled: false },
+      { id: 'mz-pref-az2', label: '📍 ap-south-1b', cls: 'btn-info', cb: 'mzSetPrefAz2', disabled: false },
+      { id: 'mz-pref-az3', label: '📍 ap-south-1c', cls: 'btn-info', cb: 'mzSetPrefAz3', disabled: false },
+      { id: 'mz-fail',     label: '⚡ Fail ap-south-1a', cls: 'btn-warn', cb: 'mzFailAz',    disabled: false },
+      { id: 'mz-restore',  label: '↺ Restore',          cls: 'btn-ok',   cb: 'mzRestore',  disabled: true  },
+    ],
+    init: (ctx) => {
+      window._mzPrefs = ['az1', 'az2', 'az3'];
+      window._mzFailed = null;
+      window._mzCtx = ctx;
+      window._mzPanelDone = {};
+
+      ctx.setCanvasGeoMode(true);
+      for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
+      // Borrow region color codes (us=blue, eu=green, apac=amber) for AZ color distinction
+      ctx.setNodeRegion(1,'us','ap-south-1a'); ctx.setNodeRegion(2,'us','ap-south-1a'); ctx.setNodeRegion(3,'us','ap-south-1a');
+      ctx.setNodeRegion(4,'eu','ap-south-1b'); ctx.setNodeRegion(5,'eu','ap-south-1b'); ctx.setNodeRegion(6,'eu','ap-south-1b');
+      ctx.setNodeRegion(7,'apac','ap-south-1c'); ctx.setNodeRegion(8,'apac','ap-south-1c'); ctx.setNodeRegion(9,'apac','ap-south-1c');
+      // Fix zone labels — setNodeRegion auto-generates region-specific names; override for single-region AZ view
+      const azMap = {1:'ap-south-1a',2:'ap-south-1a',3:'ap-south-1a',4:'ap-south-1b',5:'ap-south-1b',6:'ap-south-1b',7:'ap-south-1c',8:'ap-south-1c',9:'ap-south-1c'};
+      for (let n = 1; n <= 9; n++) { const z = document.querySelector(`#node-${n} .n-zone`); if (z) z.textContent = azMap[n]; }
+      // Hide region labels inside node cards — not meaningful in single-region view
+      for (let n = 1; n <= 9; n++) { const lbl = document.querySelector(`#node-${n} .region-label`); if (lbl) lbl.style.display = 'none'; }
+      // Relabel region info cards as AZ cards (reuse same layout, same grid positions)
+      [
+        { id: 'ric-us',   flag: '🔵', name: 'ap-south-1a', meta: 'Availability Zone 1', color: _mzColors.az1 },
+        { id: 'ric-eu',   flag: '🟢', name: 'ap-south-1b', meta: 'Availability Zone 2', color: _mzColors.az2 },
+        { id: 'ric-apac', flag: '🟠', name: 'ap-south-1c', meta: 'Availability Zone 3', color: _mzColors.az3 },
+      ].forEach(({ id, flag, name, meta, color }) => {
+        const el = document.getElementById(id); if (!el) return;
+        el.style.display = ''; el.style.borderLeftColor = color;
+        el.querySelector('.ric-flag').textContent = flag;
+        el.querySelector('.ric-name').textContent = name;
+        el.querySelector('.ric-meta').textContent = meta;
+      });
+
+      S.groups = [
+        { id:'mz1', table:'orders', tnum:1, range:'[0x0000, 0x5554]', leaderNode:1, term:4, replicas:[1,4,7],
+          data:[[1042,'Widget Pro','Alice','DONE',1713.241],[1087,'Keyboard','Bob','SHIP',1713.298],[1103,'Monitor','Carol','PEND',1713.341]] },
+        { id:'mz2', table:'orders', tnum:2, range:'[0x5555, 0xAAA9]', leaderNode:5, term:4, replicas:[2,5,8],
+          data:[[2011,'Headset','Dave','DONE',1713.188],[2056,'SSD 1TB','Eve','DONE',1713.221],[2098,'Cable','Frank','PEND',1713.317]] },
+        { id:'mz3', table:'orders', tnum:3, range:'[0xAAAA, 0xFFFF]', leaderNode:9, term:4, replicas:[3,6,9],
+          data:[[3007,'Desk Lamp','Grace','SHIP',1713.163],[3049,'Notebook','Hank','DONE',1713.275],[3091,'Pen Set','Iris','PEND',1713.359]] },
+      ];
+      S.replicaState = buildRS(S.groups);
+      document.getElementById('client-box').textContent = '⬡ ap-south-1a Client';
+
+      renderAllTablets();
+      _mzRenderAll();
+      setTimeout(() => { renderConnections(); }, 100);
+    },
+    steps: [
+      // Setup step
+      {
+        label: () => `Setup — RF=3 · Leaders in ${_mzEffAzs().map(az => _mzLabel[az]).join(' & ')}`,
+        desc: () => {
+          const azs = _mzEffAzs(), multi = azs.length > 1;
+          return `9 nodes across 3 AZs in <b>ap-south-1</b>, RF=3 (1 replica per AZ). The <b>orders</b> table has 3 hash-sharded tablets, leaders in <b>${azs.map(az => _mzLabel[az]).join(' &amp; ')}</b>${multi?' (round-robin)':''}. All Raft stays intra-region — latency is uniform across AZs (~5ms write, ~3ms read).`;
+        },
+        action: async (ctx) => {
+          const azs = _mzEffAzs();
+          const healthEl = document.getElementById('health-txt');
+          if (healthEl) healthEl.textContent = `${window._mzFailed ? '⚠️ Degraded' : 'Healthy'} · RF=3 · 9 TServers · Leaders: ${azs.map(az => _mzLabel[az]).join(' & ')}`;
+          addLog(`Cluster ${window._mzFailed ? `degraded — ${_mzLabel[window._mzFailed]} offline` : 'healthy — all AZs up'}`, window._mzFailed ? 'lw' : 'ls');
+          addLog(`orders table · 3 shards · RF=3 · leaders → ${azs.map(az => _mzLabel[az]).join(' & ')}`, 'li');
+          _mzLogShards();
+        }
+      },
+      // Read + Write per shard (6 steps)
+      ...[0,1,2].flatMap(gi => {
+        const ranges  = ['[0x0000,0x5554]','[0x5555,0xAAA9]','[0xAAAA,0xFFFF]'];
+        const hranges = ['0x0000–0x5554','0x5555–0xAAA9','0xAAAA–0xFFFF'];
+        return [
+          {
+            label: () => `Shard-${gi+1} Read · ${ranges[gi]} · ${_mzLabel[_mzEffAz(gi)]}`,
+            desc: () => {
+              const eff = _mzEffAz(gi), {cl, read} = _mzLatsAll()[gi];
+              return `Client reads <b>shard-${gi+1}</b> leader in <b>${_mzLabel[eff]}</b>. Intra-region read — ~${read}ms regardless of which AZ holds the leader.`;
+            },
+            action: async (ctx) => {
+              _mzResetLatBars();
+              const eff = _mzEffAz(gi), leaderNode = _mzLeader(gi);
+              const {cl, read} = _mzLatsAll()[gi];
+              const tid = `mz${gi+1}`;
+              addLog(`READ  shard-${gi+1} → Node ${leaderNode} (${_mzLabel[eff]}) [${hranges[gi]}]`, 'li');
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet(tid, leaderNode, 'pk-read', _mzAnimDur(cl));
+              ctx.hlTablet(tid, leaderNode, 't-hl');
+              await ctx.pktTabletToClient(tid, leaderNode, 'pk-ack', _mzAnimDur(cl));
+              ctx.setLat(0, cl); ctx.setLat(1, read);
+              ctx.hlLatRow(0); ctx.hlLatRow(1);
+              addLog(`  ✓ read ~${read}ms (intra-region)`, 'ls');
+              window._mzPanelDone[eff+':read'] = true; _mzRenderLatPanel();
+              ctx.activateClient(false);
+            }
+          },
+          {
+            label: () => `Shard-${gi+1} Write · ${ranges[gi]} · ${_mzLabel[_mzEffAz(gi)]}`,
+            desc: () => {
+              const eff = _mzEffAz(gi), fail = window._mzFailed;
+              const {cl, raft, write} = _mzLatsAll()[gi];
+              const followers = _mzAll.filter(a => a !== eff && a !== fail);
+              return `Leader in <b>${_mzLabel[eff]}</b> replicates via Raft to <b>${followers.map(a => _mzLabel[a]).join(' &amp; ')}</b>. Cross-AZ Raft is negligible (~${raft}ms) — end-to-end write ~${write}ms. Compare to Multi-Region: 100ms+.`;
+            },
+            action: async (ctx) => {
+              _mzResetLatBars();
+              const eff = _mzEffAz(gi), leaderNode = _mzLeader(gi), fail = window._mzFailed;
+              const {cl, raft, write} = _mzLatsAll()[gi];
+              const followers = _mzAll.filter(a => a !== eff && a !== fail);
+              const followerNodes = followers.map(az => _mzNodes[az][gi]);
+              const tid = `mz${gi+1}`;
+              addLog(`WRITE shard-${gi+1} → Node ${leaderNode} (${_mzLabel[eff]}) [${hranges[gi]}]`, 'li');
+              ctx.activateClient(true);
+              await ctx.pktClientToTablet(tid, leaderNode, 'pk-write', _mzAnimDur(cl));
+              addLog(`  WAL → Raft → ${followers.map(a => _mzLabel[a]).join(', ')}`, 'li');
+              const raftPkts = followerNodes.map((fn, i) =>
+                ctx.pktTabletToTablet(tid, leaderNode, tid, fn, 'pk-raft', _mzAnimDur(_mzOW(eff, followers[i])))
+              );
+              await raftPkts[0];
+              ctx.setLat(0, cl); ctx.setLat(2, raft); ctx.setLat(3, write);
+              ctx.hlLatRow(0); ctx.hlLatRow(2); ctx.hlLatRow(3);
+              const g = S.groups.find(x => x.id === tid);
+              const nextId = 4000 + Math.floor(Math.random() * 999);
+              const items = ['Laptop','Phone','Tablet','Camera','Watch'];
+              const customers = ['Zara','Yusuf','Xavier','Wendy','Victor'];
+              g.data.push([nextId, items[Math.floor(Math.random()*5)], customers[Math.floor(Math.random()*5)], 'PEND', performance.now()/1000]);
+              [leaderNode, ...followerNodes].forEach(nid => ctx.reRenderTablet(tid, nid, true));
+              addLog(`  ✓ quorum (${_mzLabel[followers[0]]} acked ~${raft}ms) — write ~${write}ms`, 'ls');
+              if (raftPkts.length > 1) { await raftPkts[1]; addLog(`  ${_mzLabel[followers[1]]} synced`, 'li'); }
+              await ctx.pktTabletToClient(tid, leaderNode, 'pk-ack', _mzAnimDur(cl));
+              window._mzPanelDone[eff+':write'] = true; _mzRenderLatPanel();
+              ctx.activateClient(false);
+            }
+          }
+        ];
+      })
+    ]
+  },
+
   "20": {
-    group: "Geo-distribution", icon: "🌍",
+    group: "Global Universe", icon: "🌍", sortOrder: 2,
     name: 'Multi-Region', title: 'Multi-Region', subtitle: 'Leader preference',
     desc: 'A single YugabyteDB cluster spanning US-East, EU-West, and APAC. The <b>orders</b> table has 3 shards, each replicated to all 3 regions (RF=3). Pin leaders to any region, simulate a regional outage, and observe Raft re-election and latency impact in real time.',
     latencies: [
@@ -2401,12 +2835,24 @@ const SCENARIOS = {
       { id: 'mr-restore', label: '↺ Restore', cls: 'btn-ok', cb: 'mrRestore', disabled: true },
     ],
     init: (ctx) => {
-      window._mrPrefs = ['us']; // reset to single-region default
+      window._mrPrefs = ['us', 'eu', 'apac'];
       window._mrFailed = null;
       window._mrCtx = ctx;
       window._mrPanelDone = {};
 
       ctx.setCanvasGeoMode(true);
+      // Restore region info cards to original multi-region content
+      [
+        { id: 'ric-us',   flag: '🇺🇸', name: 'US-East', meta: 'AWS us-east-1'    },
+        { id: 'ric-eu',   flag: '🇪🇺', name: 'Europe',  meta: 'AWS eu-central-1' },
+        { id: 'ric-apac', flag: '🇮🇳', name: 'APAC',    meta: 'AWS ap-south-1'   },
+      ].forEach(({ id, flag, name, meta }) => {
+        const el = document.getElementById(id); if (!el) return;
+        el.style.display = ''; el.style.borderLeftColor = '';
+        el.querySelector('.ric-flag').textContent = flag;
+        el.querySelector('.ric-name').textContent = name;
+        el.querySelector('.ric-meta').textContent = meta;
+      });
       for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
       ctx.setNodeRegion(1, 'us', 'us-east-1a'); ctx.setNodeRegion(2, 'us', 'us-east-1b'); ctx.setNodeRegion(3, 'us', 'us-east-1c');
       ctx.setNodeRegion(4, 'eu', 'eu-central-1a'); ctx.setNodeRegion(5, 'eu', 'eu-central-1b'); ctx.setNodeRegion(6, 'eu', 'eu-central-1c');
@@ -2528,7 +2974,7 @@ const SCENARIOS = {
   },
 
   "21": {
-    group: "Geo-distribution", icon: "🌎",
+    group: "Global Universe", icon: "🌎", sortOrder: 3,
     name: 'Geo-Partition', title: 'Geo-Partition', subtitle: 'Multi-region geo(row) pinning',
     filterTable: 'users',
     desc: 'YugabyteDB pins rows to specific regions via a <b>tablegroup</b> per region. Each Raft group has 3 replicas in the same region — reads and writes are always local. Region-specific clients see sub-5ms latency; a global client crossing regions pays the full cross-region RTT penalty.',
@@ -2545,6 +2991,18 @@ const SCENARIOS = {
     ],
     init: (ctx) => {
       ctx.setCanvasGeoMode(true);
+      // Restore region info cards to original geo-partition content
+      [
+        { id: 'ric-us',   flag: '🇺🇸', name: 'US-East', meta: 'AWS us-east-1'    },
+        { id: 'ric-eu',   flag: '🇪🇺', name: 'Europe',  meta: 'AWS eu-central-1' },
+        { id: 'ric-apac', flag: '🇮🇳', name: 'APAC',    meta: 'AWS ap-south-1'   },
+      ].forEach(({ id, flag, name, meta }) => {
+        const el = document.getElementById(id); if (!el) return;
+        el.style.display = ''; el.style.borderLeftColor = '';
+        el.querySelector('.ric-flag').textContent = flag;
+        el.querySelector('.ric-name').textContent = name;
+        el.querySelector('.ric-meta').textContent = meta;
+      });
       document.getElementById('canvas-wrap').classList.add('geo-partition');
       for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, true);
       ctx.setNodeRegion(1, 'us', 'US-East'); ctx.setNodeRegion(2, 'us', 'US-East'); ctx.setNodeRegion(3, 'us', 'US-East');

@@ -1042,7 +1042,7 @@ function buildSidebar() {
       `;
   sb.appendChild(homeBtn);
 
-  const groupOrder = ["Architecture Concepts", "Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-distribution", "Storage & Scalability", "Multi-Cluster & DR"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;
@@ -1050,6 +1050,7 @@ function buildSidebar() {
     if (!groups[s.group]) groups[s.group] = [];
     groups[s.group].push({ id, ...s });
   });
+  Object.keys(groups).forEach(g => groups[g].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)));
 
   groupOrder.forEach(gname => {
     if (!groups[gname]) return;
@@ -1101,26 +1102,26 @@ function renderHome() {
   gridWrap.className = 'home-sections-grid';
 
   const groupOrder = [
-    "Architecture Concepts",
-    "Architecture",
-    "Sharding",
-    "Write & Read Paths",
-    "Global & High Availability",
-    "Horizontal Scalability",
-    "Geo-distribution",
-    "Storage & Scalability",
-    "Multi-Cluster & DR"
+    "Foundations",
+    "Deployment Architectures",
+    "Global Universe",
+    "xCluster",
+    "Data Distribution",
+    "Consistency & High Availability",
+    "Read & Write Paths",
+    "Scalability",
+    "System Internals"
   ];
   const groupMeta = {
-    "Architecture Concepts": { chapter: "CHAPTER 1", icon: "⚙️", desc: "Internal building blocks: Layers, Raft, and Distributed Time." },
-    "Architecture": { chapter: "CHAPTER 2", icon: "🌐", desc: "Global deployment patterns and multi-cluster topologies." },
-    "Sharding": { chapter: "CHAPTER 3", icon: "📦", desc: "Data distribution strategies for scale and performance." },
-    "Write & Read Paths": { chapter: "CHAPTER 4", icon: "⚡", desc: "How requests flow through the distributed Raft layers." },
-    "Global & High Availability": { chapter: "CHAPTER 5", icon: "🌎", desc: "Resilience, election, and multi-region patterns." },
-    "Horizontal Scalability": { chapter: "CHAPTER 6", icon: "📈", desc: "Elastic scale-out and automatic data rebalancing." },
-    "Geo-distribution": { chapter: "CHAPTER 7", icon: "📍", desc: "Multi-region clusters, data pinning, and leader preference." },
-    "Storage & Scalability": { chapter: "CHAPTER 8", icon: "🗄️", desc: "Compaction, and storage internals." },
-    "Multi-Cluster & DR": { chapter: "CHAPTER 9", icon: "🔁", desc: "Disaster recovery and active-active replication." }
+    "Foundations":                     { chapter: "CHAPTER 1", icon: "🏗️", desc: "Core concepts: cluster structure, fault domains, and Raft consensus." },
+    "Deployment Architectures":        { chapter: "CHAPTER 2", icon: "🗺️", desc: "The two YugabyteDB deployment models: Global Universe, xCluster, and Read Replica." },
+    "Global Universe":                 { chapter: "CHAPTER 3", icon: "🌐", desc: "Single-universe deployment: global distribution and geo-partitioning." },
+    "xCluster":                        { chapter: "CHAPTER 4", icon: "🔗", desc: "Multi-universe deployment: async replication for DR and active-active." },
+    "Data Distribution":               { chapter: "CHAPTER 5", icon: "📦", desc: "Sharding strategies, tablet management, and data colocation." },
+    "Consistency & High Availability": { chapter: "CHAPTER 6", icon: "🛡️", desc: "Raft leader election, node failure recovery, and partition handling." },
+    "Read & Write Paths":              { chapter: "CHAPTER 7", icon: "⚡", desc: "How reads and writes flow through the distributed Raft layers." },
+    "Scalability":                     { chapter: "CHAPTER 8", icon: "📈", desc: "Elastic scale-out and automatic tablet splitting as the cluster grows." },
+    "System Internals":                { chapter: "CHAPTER 9", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." }
   };
 
   const groups = {};
@@ -1130,6 +1131,7 @@ function renderHome() {
     if (!groups[s.group]) groups[s.group] = [];
     groups[s.group].push({ id, ...s });
   });
+  Object.keys(groups).forEach(g => groups[g].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)));
 
   groupOrder.forEach(gname => {
     if (!groups[gname]) return;
@@ -1287,7 +1289,7 @@ function selectScenario(id) {
   sd.style.display = ''; sd.classList.toggle('visible', isScaling);
 
   const mrp = document.getElementById('mr-lat-panel');
-  if (mrp) { mrp.style.display = ''; mrp.classList.toggle('visible', sc.name === 'Multi-Region'); }
+  if (mrp) { mrp.style.display = ''; mrp.classList.toggle('visible', sc.name === 'Multi-Region' || sc.name === 'Multi-Zone'); }
 
   document.getElementById('canvas-wrap').style.flex = (isFailure || isScaling) ? '1' : '1';
 
@@ -1648,19 +1650,79 @@ function _renderHashRangeMap(targetTg) {
   const el = document.getElementById('hash-range-map');
   if (!el) return;
   const groups = S.groups.filter(g => g.table === 'users');
-  el.innerHTML = `
-          <div class="hrm-hdr">
-            <span>Tablet</span><span>Hash Range</span><span>Leader</span>
-          </div>
-          ${groups.map(g => {
+  const TC = { 1: '#f59e0b', 2: '#60a5fa', 3: '#34d399' };
+
+  function hexRangeToDec(rangeStr) {
+    const m = rangeStr.match(/0x([0-9A-Fa-f]+)[–-]0x([0-9A-Fa-f]+)/);
+    return m ? { lo: parseInt(m[1], 16), hi: parseInt(m[2], 16) } : null;
+  }
+
+  let h = '';
+
+  // ── Key space header ──
+  h += `<div style="background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;">`;
+  h += `<div style="font-size:10px;font-weight:700;color:var(--txt2);letter-spacing:.07em;margin-bottom:7px;text-transform:uppercase;">16-bit Hash Key Space</div>`;
+  h += `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">`;
+  h += `<div style="font-size:11px;font-family:var(--mono);color:var(--txt);background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);border-radius:4px;padding:3px 7px;">2<sup>16</sup> = <strong>65,536</strong></div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);">·</div>`;
+  h += `<div style="font-size:11px;font-family:var(--mono);color:var(--txt2);">0x0000 – 0xFFFF</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);">·</div>`;
+  h += `<div style="font-size:11px;font-family:var(--mono);color:var(--txt2);">0 – 65,535</div>`;
+  h += `</div></div>`;
+
+  // ── Visual key space bar ──
+  h += `<div style="margin-bottom:10px;">`;
+  h += `<div style="display:flex;gap:3px;height:40px;">`;
+  groups.forEach(g => {
+    const c = TC[g.tnum] || '#aaa';
     const hit = targetTg && g.id === targetTg.id;
-    return `<div class="hrm-row${hit ? ' hrm-hit' : ''}">
-              <span class="hrm-name">tablet${g.tnum}</span>
-              <span class="hrm-range">${g.range}</span>
-              <span class="hrm-leader">N${g.leaderNode}</span>
-              ${hit ? '<span class="hrm-ptr">◄</span>' : '<span></span>'}
-            </div>`;
-  }).join('')}`;
+    h += `<div style="flex:1;background:${hit ? c + '35' : c + '18'};border:${hit ? '2' : '1'}px solid ${c}${hit ? '' : '44'};border-radius:5px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1px;">`;
+    h += `<div style="font-size:10px;font-weight:700;color:${c};">tablet${g.tnum}${hit ? ' ◄' : ''}</div>`;
+    h += `<div style="font-size:9px;color:var(--txt2);font-family:var(--mono);">${g.range}</div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  // boundary tick labels
+  const decs = groups.map(g => hexRangeToDec(g.range));
+  if (decs[0] && decs[decs.length - 1]) {
+    h += `<div style="display:flex;font-size:9px;color:var(--txt2);font-family:var(--mono);margin-top:3px;">`;
+    h += `<span style="flex:0 0 auto;">${decs[0].lo}</span>`;
+    for (let i = 0; i < decs.length - 1; i++) {
+      if (decs[i] && decs[i + 1]) {
+        h += `<span style="flex:1;text-align:center;">${decs[i].hi.toLocaleString()}&hairsp;/&hairsp;${decs[i + 1].lo.toLocaleString()}</span>`;
+      }
+    }
+    h += `<span style="flex:0 0 auto;">${decs[decs.length - 1].hi.toLocaleString()}</span>`;
+    h += `</div>`;
+  }
+  h += `</div>`;
+
+  // ── Routing table ──
+  h += `<div style="font-size:10px;font-weight:700;color:var(--txt2);letter-spacing:.06em;margin-bottom:5px;text-transform:uppercase;">Tablet Routing</div>`;
+  h += `<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:10px;">`;
+  // header row
+  h += `<div style="display:grid;grid-template-columns:0.8fr 1.2fr 1.3fr 0.5fr;background:var(--s2);">`;
+  ['Tablet', 'Hex Range', 'Decimal Range', 'N'].forEach(lbl =>
+    h += `<div style="padding:5px 8px;color:var(--txt2);font-weight:600;">${lbl}</div>`
+  );
+  h += `</div>`;
+  groups.forEach((g, i) => {
+    const c = TC[g.tnum] || '#aaa';
+    const hit = targetTg && g.id === targetTg.id;
+    const dec = hexRangeToDec(g.range);
+    const rowBg = hit ? `${c}15` : (i % 2 ? 'rgba(255,255,255,.015)' : 'transparent');
+    const rowBorder = `border-top:1px solid var(--border);${hit ? `border-left:3px solid ${c};` : ''}`;
+    h += `<div style="display:grid;grid-template-columns:0.8fr 1.2fr 1.3fr 0.5fr;background:${rowBg};${rowBorder}">`;
+    h += `<div style="padding:6px 8px;color:${c};font-weight:600;">tablet${g.tnum}</div>`;
+    h += `<div style="padding:6px 8px;font-family:var(--mono);color:var(--txt);">${g.range}</div>`;
+    h += `<div style="padding:6px 8px;font-family:var(--mono);color:var(--txt2);font-size:9px;">${dec ? `${dec.lo.toLocaleString()} – ${dec.hi.toLocaleString()}` : '—'}</div>`;
+    h += `<div style="padding:6px 8px;color:var(--txt);">N${g.leaderNode}</div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  el.innerHTML = h;
 }
 
 function renderHashRouting(id, hashHex, tg) {
@@ -1823,6 +1885,8 @@ async function blacklistDrainNode() {
   addLog('TS-2: received BlacklistNode RPC — beginning graceful drain', 'lw');
   await ctx.delay(500);
   const ts2Leaders = S.groups.filter(g => g.leaderNode === 2);
+  // Remember exactly which groups were drained so unblacklist can restore them precisely
+  window._blDrained = ts2Leaders.map(g => g.id);
   addLog('TS-2: leader for ' + ts2Leaders.map(g => g.id).join(', ') + ' — initiating LeaderStepDown', 'lr');
   await ctx.delay(300);
   const targets = [1, 3]; let ti = 0;
@@ -1847,6 +1911,51 @@ async function blacklistDrainNode() {
   addLog('Leadership balanced: ' + S.groups.filter(g => g.leaderNode === 1).map(g => g.id).join(',') + '→TS-1, ' + S.groups.filter(g => g.leaderNode === 3).map(g => g.id).join(',') + '→TS-3', 'ls');
   document.getElementById('health-txt').textContent = '⚠️ TS-2 Blacklisted · leaders distributed to TS-1 & TS-3';
   toggleBtn('btn-bl', true);
+  toggleBtn('btn-ubl', false);
+  stepRunning = false;
+}
+
+async function unblacklistNode() {
+  if (stepRunning) return;
+  stepRunning = true;
+  const ctx = makeCtx();
+  addLog('YB-Master: Remove TS-2 from blacklist — eligible for leader placement', 'li');
+  await ctx.delay(400);
+
+  // Restore node-2 visual state
+  const card = document.getElementById('node-2');
+  card.style.opacity = ''; card.style.borderColor = '';
+  const ind = card.querySelector('.n-indicator');
+  ind.style.background = 'var(--ok)'; ind.style.animation = 'blink 3s ease infinite';
+  addLog('TS-2: removed from blacklist — accepting tablet leadership', 'ls');
+  await ctx.delay(300);
+
+  // Restore exactly the tablets that were drained during blacklist — no more, no less
+  const drainedIds = window._blDrained || [];
+  const toRestore = drainedIds.map(id => S.groups.find(g => g.id === id)).filter(Boolean);
+
+  addLog(`YB-Master: Imbalance detected — restoring ${toRestore.length} leader(s) to TS-2`, 'li');
+
+  for (const g of toRestore) {
+    const from = g.leaderNode;
+    addLog(`TS-${from}: LeaderStepDown(${g.id}) → Transfer to TS-2`, 'lr');
+    await ctx.pktTabletToTablet(g.id, from, g.id, 2, 'pk-vote', 500);
+    g.leaderNode = 2; g.term = (g.term || 5) + 1;
+    document.getElementById('term-display').textContent = `Raft Term: ${g.term}`;
+    ctx.setRole(g.id, 2, 'LEADER');
+    ctx.hlTablet(g.id, 2, 't-hl');
+    addLog(`TS-2: accepted leadership ${g.id} (term=${g.term}) ✓`, 'ls');
+    await ctx.delay(300);
+  }
+
+  renderAllTablets(); renderConnections();
+  const ts1 = S.groups.filter(g => g.leaderNode === 1).map(g => g.id).join(',') || '—';
+  const ts2 = S.groups.filter(g => g.leaderNode === 2).map(g => g.id).join(',') || '—';
+  const ts3 = S.groups.filter(g => g.leaderNode === 3).map(g => g.id).join(',') || '—';
+  addLog(`Leadership balanced: ${ts1}→TS-1  ${ts2}→TS-2  ${ts3}→TS-3`, 'ls');
+  document.getElementById('health-txt').textContent = 'Healthy · RF=3 · Leaders Balanced — TS-2 restored ✓';
+  toggleBtn('btn-ubl', true);
+  toggleBtn('btn-bl', false);
   stepRunning = false;
 }
 function execQuery() {
@@ -2963,37 +3072,65 @@ function _renderArchUniverseHierarchy(container) {
   h += uhClose(); // close universe
   h += `</div>`; // close uh-tree
 
-  // Tablet detail section
+  // Tablet sharding visual section
   h += `<div class="av-section-title">Tables & Indexes → Tablets (Sharding)</div>`;
-  h += `<div class="uh-tablet-detail">`;
-  h += `<div class="uh-td-left">`;
-  h += `<div class="uh-td-title">How Tables Become Tablets</div>`;
-  h += `<div class="uh-td-text">Every table and index in YugabyteDB is automatically sharded into <b>tablets</b>. Each tablet is a Raft group with one leader and RF−1 followers, distributed across fault domains.</div>`;
-  h += `<div class="uh-td-flow">`;
-  h += `<div class="uh-td-step"><div class="uh-td-step-num">1</div><div>CREATE TABLE users (...)</div></div>`;
-  h += `<div class="uh-td-arrow">→</div>`;
-  h += `<div class="uh-td-step"><div class="uh-td-step-num">2</div><div>Hash/Range Sharding splits key space</div></div>`;
-  h += `<div class="uh-td-arrow">→</div>`;
-  h += `<div class="uh-td-step"><div class="uh-td-step-num">3</div><div>Tablets created (default: based on node count)</div></div>`;
-  h += `<div class="uh-td-arrow">→</div>`;
-  h += `<div class="uh-td-step"><div class="uh-td-step-num">4</div><div>Each tablet → RF replicas across fault domains</div></div>`;
-  h += `</div></div>`;
-  h += `<div class="uh-td-right">`;
-  h += `<div class="uh-td-example">`;
-  h += `<div class="uh-td-ex-title">Example: users table (Hash, 3 tablets, RF=3)</div>`;
-  const tabletEx = [
-    { name: 'users.tablet1', range: '0x0000–0x54FF', leader: 'Node 1', followers: 'Node 4, Node 7', color: '#f59e0b' },
-    { name: 'users.tablet2', range: '0x5500–0xA9FF', leader: 'Node 5', followers: 'Node 2, Node 8', color: '#60a5fa' },
-    { name: 'users.tablet3', range: '0xAA00–0xFFFF', leader: 'Node 9', followers: 'Node 3, Node 6', color: '#34d399' },
+  h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:20px 20px 16px;margin-bottom:20px;">`;
+  h += `<div style="font-size:11px;font-weight:700;color:var(--txt2);letter-spacing:.07em;margin-bottom:14px;text-transform:uppercase;">Example · users table · Hash Sharding · 3 Tablets · RF=3</div>`;
+
+  // Step 1: CREATE TABLE → sharding
+  h += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">`;
+  h += `<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;padding:8px 14px;font-family:var(--mono);font-size:12px;color:#60a5fa;white-space:nowrap;"><span style="color:var(--txt2)">CREATE TABLE </span>users <span style="color:var(--txt2)">(id INT </span>PRIMARY KEY<span style="color:var(--txt2)">, name TEXT, city TEXT, ...)</span></div>`;
+  h += `<div style="color:var(--txt2);font-size:13px;flex-shrink:0;">→</div>`;
+  h += `<div style="font-size:11px;color:var(--txt);background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;white-space:nowrap;">⊞ Hash sharding on <code style="color:#60a5fa">id</code> &nbsp;·&nbsp; 3 tablets by default</div>`;
+  h += `</div>`;
+  h += `<div style="text-align:center;color:var(--txt2);font-size:16px;line-height:1;margin:2px 0 8px;">↓</div>`;
+
+  // Step 2: Key space bar
+  const tbs = [
+    { name: 'users.tablet1', range: '0x0000 – 0x54FF', color: '#f59e0b' },
+    { name: 'users.tablet2', range: '0x5500 – 0xA9FF', color: '#60a5fa' },
+    { name: 'users.tablet3', range: '0xAA00 – 0xFFFF', color: '#34d399' },
   ];
-  tabletEx.forEach(t => {
-    h += `<div class="uh-td-tablet" style="border-left:3px solid ${t.color}">`;
-    h += `<div class="uh-td-t-name" style="color:${t.color}">${t.name}</div>`;
-    h += `<div class="uh-td-t-range">${t.range}</div>`;
-    h += `<div class="uh-td-t-replicas"><span class="uh-td-t-l">◉ ${t.leader}</span> <span class="uh-td-t-f">○ ${t.followers}</span></div>`;
+  h += `<div style="font-size:10px;color:var(--txt2);font-family:var(--mono);display:flex;justify-content:space-between;margin-bottom:4px;padding:0 2px;"><span>0x0000</span><span>← Hash Key Space →</span><span>0xFFFF</span></div>`;
+  h += `<div style="display:flex;gap:4px;height:48px;margin-bottom:4px;">`;
+  tbs.forEach(t => {
+    h += `<div style="flex:1;background:${t.color}15;border:1.5px solid ${t.color}55;border-radius:6px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;">`;
+    h += `<div style="font-size:11px;font-weight:700;color:${t.color};">${t.name}</div>`;
+    h += `<div style="font-size:10px;color:var(--txt2);font-family:var(--mono);">${t.range}</div>`;
     h += `</div>`;
   });
-  h += `</div></div>`;
+  h += `</div>`;
+  h += `<div style="text-align:center;color:var(--txt2);font-size:11px;margin:8px 0 12px;">↓ &nbsp;RF=3 replication — each tablet replica placed on one node per Fault Domain</div>`;
+
+  // Step 3: Fault domain placement grid
+  const fdC = ['#fb7185', '#f59e0b', '#34d399'];
+  const ndData = [
+    [0, 1, 0, true],  [0, 2, 1, false], [0, 3, 2, false],
+    [1, 4, 0, false], [1, 5, 1, true],  [1, 6, 2, false],
+    [2, 7, 0, false], [2, 8, 1, false], [2, 9, 2, true],
+  ];
+  h += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">`;
+  for (let fi = 0; fi < 3; fi++) {
+    h += `<div style="background:${fdC[fi]}08;border:1px solid ${fdC[fi]}30;border-radius:8px;overflow:hidden;">`;
+    h += `<div style="background:${fdC[fi]}18;padding:6px 10px;font-size:10px;font-weight:700;color:${fdC[fi]};letter-spacing:.07em;text-align:center;">FAULT DOMAIN ${fi + 1}</div>`;
+    ndData.filter(n => n[0] === fi).forEach(([, nid, ti, isL]) => {
+      const tc = tbs[ti].color;
+      h += `<div style="padding:7px 10px;border-top:1px solid ${fdC[fi]}20;display:flex;align-items:center;gap:7px;">`;
+      h += `<div style="font-size:10px;color:var(--txt2);min-width:42px;flex-shrink:0;">Node ${nid}</div>`;
+      h += `<div style="width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;${isL ? `background:${tc};color:#0f172a;font-weight:700` : `border:1.5px solid ${tc};color:${tc}`}">${isL ? '◉' : '○'}</div>`;
+      h += `<div style="font-size:10px;color:${tc};font-weight:${isL ? 600 : 400};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tbs[ti].name}</div>`;
+      if (isL) h += `<div style="font-size:9px;background:${tc}22;color:${tc};border-radius:3px;padding:1px 5px;border:1px solid ${tc}44;font-weight:700;letter-spacing:.05em;flex-shrink:0;">LEADER</div>`;
+      h += `</div>`;
+    });
+    h += `</div>`;
+  }
+  h += `</div>`;
+
+  // Footer note
+  h += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--txt2);line-height:1.6;">`;
+  h += `Each tablet is an independent <strong style="color:var(--txt)">Raft group</strong> — 1 leader + 2 followers, each in a separate Fault Domain. `;
+  h += `Leaders distribute evenly so no single node becomes a hotspot. When a leader fails, the remaining followers elect a new one automatically within ~150–300 ms.`;
+  h += `</div>`;
   h += `</div>`;
 
   container.innerHTML = h;
@@ -3056,7 +3193,40 @@ function _renderArchConsensus(container) {
   h += `</div>`;
   h += `</div>`;
 
-  // ── Section 2: Write Flow ──
+  // ── Section 2: Node States ──
+  h += `<div class="av-section-title">Node States & Transitions</div>`;
+  h += `<div style="display:flex;gap:12px;align-items:stretch;margin-bottom:20px;flex-wrap:wrap;">`;
+
+  h += `<div style="flex:1;min-width:170px;background:rgba(96,165,250,.07);border:1px solid rgba(96,165,250,.3);border-radius:10px;padding:16px;">`;
+  h += `<div style="font-size:22px;text-align:center;color:#60a5fa;margin-bottom:6px;">○</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#60a5fa;letter-spacing:.07em;margin-bottom:8px;">FOLLOWER</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Default state. Receives heartbeats &amp; log entries from Leader. Resets election timer on every heartbeat.</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:#a78bfa">→ Candidate</strong><br/>Election timer expires with no heartbeat (randomized ms interval)</div>`;
+  h += `</div>`;
+
+  h += `<div style="display:flex;align-items:center;color:var(--txt2);font-size:18px;padding:0 4px;">→</div>`;
+
+  h += `<div style="flex:1;min-width:170px;background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.3);border-radius:10px;padding:16px;">`;
+  h += `<div style="font-size:22px;text-align:center;color:#a78bfa;margin-bottom:6px;">🗳️</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#a78bfa;letter-spacing:.07em;margin-bottom:8px;">CANDIDATE</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Increments term, votes for itself, broadcasts RequestVote RPCs to all peers. Only one candidate can win per term.</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;">`;
+  h += `<strong style="color:#22c55e">→ Leader</strong>&nbsp;&nbsp;Majority votes received<br/>`;
+  h += `<strong style="color:#60a5fa">→ Follower</strong>&nbsp;Higher term seen or split vote`;
+  h += `</div></div>`;
+
+  h += `<div style="display:flex;align-items:center;color:var(--txt2);font-size:18px;padding:0 4px;">→</div>`;
+
+  h += `<div style="flex:1;min-width:170px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:16px;">`;
+  h += `<div style="font-size:22px;text-align:center;color:#f59e0b;margin-bottom:6px;">◉</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#f59e0b;letter-spacing:.07em;margin-bottom:8px;">LEADER</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Handles all client reads &amp; writes. Appends to WAL, replicates to followers, commits on majority ACK. Sends periodic heartbeats.</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:#60a5fa">→ Follower</strong><br/>Discovers a higher Raft term from any peer</div>`;
+  h += `</div>`;
+
+  h += `</div>`;
+
+  // ── Section 3: Write Flow ──
   h += `<div class="av-section-title">Write Path — Raft Consensus Commit Flow</div>`;
   h += `<div class="cq-write-flow">`;
 
@@ -3100,7 +3270,7 @@ function _renderArchConsensus(container) {
   h += `</div>`;
   h += `</div>`;
 
-  // ── Section 3: Heartbeats & Leader Leases ──
+  // ── Section 4: Heartbeats & Leader Leases ──
   h += `<div class="av-section-title">Heartbeats & Leader Leases</div>`;
   h += `<div class="cq-election">`;
 
@@ -3132,13 +3302,13 @@ function _renderArchConsensus(container) {
   h += `</div>`;
   h += `</div>`;
 
-  // ── Section 4: Leader Election ──
+  // ── Section 5: Leader Election ──
   h += `<div class="av-section-title">Leader Election — Automatic Failover</div>`;
   h += `<div class="cq-election">`;
 
   const electionSteps = [
     { num: '1', title: 'Leader Fails', desc: 'Leader stops sending heartbeats', icon: '💀', color: 'var(--err)' },
-    { num: '2', title: 'Election Timeout', desc: 'Follower\'s heartbeat timer expires (150–300ms randomized)', icon: '⏱', color: '#f59e0b' },
+    { num: '2', title: 'Election Timeout', desc: 'Follower\'s heartbeat timer expires (randomized ms interval)', icon: '⏱', color: '#f59e0b' },
     { num: '3', title: 'Become Candidate', desc: 'Follower increments term, votes for itself, sends RequestVote RPCs', icon: '🗳️', color: '#a78bfa' },
     { num: '4', title: 'Majority Vote', desc: 'Receives votes from majority of replicas (including self)', icon: '⬡', color: '#60a5fa' },
     { num: '5', title: 'New Leader Elected', desc: 'Candidate wins election and immediately begins sending heartbeats', icon: '◉', color: '#22c55e' },
@@ -3174,7 +3344,7 @@ function _renderArchConsensus(container) {
 
   h += `</div>`;
 
-  // ── Section 4: Key Raft Properties ──
+  // ── Section 6: Key Raft Properties ──
   h += `<div class="av-section-title">Key Raft Properties</div>`;
   const props = [
     { icon: '⬡', title: 'Strong Consistency', desc: 'Every committed write is visible to all subsequent reads. No stale reads from the leader.', color: '#60a5fa' },
@@ -3378,7 +3548,7 @@ function initInfoPanelResize() {
 
 function _getSidebarScenarioOrder() {
   const order = ['home'];
-  const groupOrder = ["Architecture Concepts", "Architecture", "Sharding", "Write & Read Paths", "Global & High Availability", "Horizontal Scalability", "Geo-distribution", "Storage & Scalability", "Multi-Cluster & DR"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;
@@ -3386,6 +3556,7 @@ function _getSidebarScenarioOrder() {
     if (!groups[s.group]) groups[s.group] = [];
     groups[s.group].push({ id, ...s });
   });
+  Object.keys(groups).forEach(g => groups[g].sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99)));
   groupOrder.forEach(gname => {
     if (groups[gname]) groups[gname].forEach(s => order.push(s.id));
   });
@@ -3403,7 +3574,7 @@ window.addEventListener('load', () => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     const key = e.key.toLowerCase();
-    if (key === 'f') toggleFocusMode();
+    if (key === 'f' && !e.ctrlKey && !e.metaKey) toggleFocusMode();
     if (key === '[') toggleSidebar();
     if (key === ']') toggleInfoPanel();
     if (key === 'h') selectScenario('home');
