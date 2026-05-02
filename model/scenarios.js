@@ -236,7 +236,72 @@ const SCENARIOS = {
     guidedTour: [
       { text: "Multi-column hashing: <code>(tenant, app_id)</code> together determine the tablet.", element: "#visual-render-area" },
       { text: "Try inserting rows with the same Tenant but different Apps.", element: "#sim-input-val" },
-      { text: "Notice how they spread across tablets because the whole tuple is hashed.", element: ".tablet-card" }
+      { text: "Notice how they spread across tablets because the whole tuple is hashed.", element: ".tablet-card" },
+      { text: "Compare with the Hash+Range scenario — there, hash is the shard key and date is a per-tablet sort.", element: ".table-area" }
+    ]
+  },
+
+  "hash-data-org": {
+    group: "Hash Sharding", icon: "📦", title: "Hash Data: ASC vs DESC", subtitle: "Physical storage order comparison",
+    description: "Compare how changing clustering key order (ASC vs DESC) changes the physical row storage. DESC is ideal for 'latest N' queries — no re-sorting needed at read time.",
+    legend: [
+      { type: "sharding", label: "tenant_id", explain: "Sharding key — same in both blocks" },
+      { type: "clustering", label: "log_time", explain: "Clustering key — ASC sorts low→high, DESC sorts high→low" }
+    ],
+    visual: { type: "data-org" },
+    generateRow: (v) => {
+      const t = new Date().toISOString().slice(11, 19);
+      const tenant = Math.random() > 0.5 ? "Tenant-A" : "Tenant-B";
+      return [
+        { blockIdx: 0, key: tenant, cl: t, vals: [v || "New log entry", "INFO"] },
+        { blockIdx: 1, key: tenant, cl: t, vals: [v || "New log entry", "INFO"] }
+      ];
+    },
+    inputPlaceholder: "Enter log message...",
+    initialState: {
+      blocks: [
+        {
+          id: "ASC Organization (Low → High)", dir: "ASC", desc: "PRIMARY KEY (tenant_id HASH, log_time ASC)", items: [
+            { key: "Tenant-A", rows: [{ cl: "08:00:00", vals: ["Server start", "INFO"] }, { cl: "09:00:00", vals: ["Request handled", "INFO"] }, { cl: "10:00:00", vals: ["High memory", "WARN"] }] },
+            { key: "Tenant-B", rows: [{ cl: "07:30:00", vals: ["Batch started", "INFO"] }, { cl: "08:45:00", vals: ["Batch done", "INFO"] }] }
+          ]
+        },
+        {
+          id: "DESC Organization (High → Low)", dir: "DESC", desc: "PRIMARY KEY (tenant_id HASH, log_time DESC)", items: [
+            { key: "Tenant-A", rows: [{ cl: "10:00:00", vals: ["High memory", "WARN"] }, { cl: "09:00:00", vals: ["Request handled", "INFO"] }, { cl: "08:00:00", vals: ["Server start", "INFO"] }] },
+            { key: "Tenant-B", rows: [{ cl: "08:45:00", vals: ["Batch done", "INFO"] }, { cl: "07:30:00", vals: ["Batch started", "INFO"] }] }
+          ]
+        }
+      ]
+    },
+    callout: { type: "info", icon: "💡", text: "With <b>DESC</b>, the latest entries are at the top of the SSTable. <code>LIMIT 10</code> reads only the first 10 entries — zero sorting overhead." },
+    guide: {
+      richSql: `<span class="sql-comment">-- ASC: oldest entries first in storage</span>
+<span class="sql-kw">CREATE TABLE</span> logs_asc (
+    <span class="sh-key">tenant_id</span> <span class="sql-type">TEXT</span>,
+    <span class="cl-key">log_time</span>  <span class="sql-type">TIMESTAMP</span>,
+    message   <span class="sql-type">TEXT</span>,
+    level     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time ASC</span>)
+);
+
+<span class="sql-comment">-- DESC: newest entries first — ideal for "latest N"</span>
+<span class="sql-kw">CREATE TABLE</span> logs_desc (
+    <span class="sh-key">tenant_id</span> <span class="sql-type">TEXT</span>,
+    <span class="cl-key">log_time</span>  <span class="sql-type">TIMESTAMP</span>,
+    message   <span class="sql-type">TEXT</span>,
+    level     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time DESC</span>)
+);
+
+<span class="sql-comment">-- Queries for specific tenants use clustering order. </span>
+<span class="sql-comment">-- logs_desc returns newest first without an extra sort step.</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> logs_desc
+<span class="sql-kw">WHERE</span> tenant_id = <span class="sql-str">'Tenant-A'</span> <span class="sql-kw">LIMIT</span> 10;` },
+    guidedTour: [
+      { text: "Compare how data is physically stored in memory vs on disk.", element: "#visual-render-area" },
+      { text: "ASC (left) puts oldest data first; DESC (right) puts newest data first.", element: ".tablet-card" },
+      { text: "Try <b>Auto Generate</b> to see the contrasting pack patterns.", element: ".secondary-btn" }
     ]
   },
 
@@ -412,65 +477,72 @@ const SCENARIOS = {
     ]
   },
 
-  "hash-data-org": {
-    group: "Range Sharding", icon: "📦", title: "Data Organization: ASC vs DESC", subtitle: "Physical storage order comparison",
-    description: "Compare how changing clustering key order (ASC vs DESC) changes the physical row storage. DESC is ideal for 'latest N' queries — no re-sorting needed at read time.",
+  "range-data-org": {
+    group: "Range Sharding", icon: "📦", title: "Range Data: ASC vs DESC", subtitle: "Global range order comparison",
+    description: "Compare how changing the primary key direction (ASC vs DESC) changes the global physical storage order of a range-sharded table.",
     legend: [
-      { type: "sharding", label: "tenant_id", explain: "Sharding key — same in both blocks" },
-      { type: "clustering", label: "log_time", explain: "Clustering key — ASC sorts low→high, DESC sorts high→low" }
+      { type: "clustering", label: "product_id", explain: "The Range Primary Key — determines global sort order" }
     ],
     visual: { type: "data-org" },
     generateRow: (v) => {
-      const t = new Date().toISOString().slice(11, 19);
+      const id = v || "P" + Math.floor(Math.random() * 999);
+      const name = ["Laptop", "Monitor", "Keyboard", "Mouse", "Tablet", "Phone"][Math.floor(Math.random() * 6)];
+      const cat = ["Electronics", "Hardware", "Peripherals"][Math.floor(Math.random() * 3)];
+      const price = (Math.random() * 500 + 50).toFixed(2);
       return [
-        { blockIdx: 0, key: "Tenant-A", cl: t, vals: [v || "New log entry", "INFO"] },
-        { blockIdx: 1, key: "Tenant-A", cl: t, vals: [v || "New log entry", "INFO"] }
+        { blockIdx: 0, key: "Products (ASC)", cl: id, vals: [name, cat, price, "Active"] },
+        { blockIdx: 1, key: "Products (DESC)", cl: id, vals: [name, cat, price, "Active"] }
       ];
     },
-    inputPlaceholder: "Enter log message...",
+    inputPlaceholder: "Enter product code (e.g. A100)...",
     initialState: {
       blocks: [
         {
-          id: "ASC Organization (Low → High)", dir: "ASC", desc: "PRIMARY KEY (tenant_id HASH, log_time ASC)", items: [
-            { key: "Tenant-A", rows: [{ cl: "08:00:00", vals: ["Server start", "INFO"] }, { cl: "09:00:00", vals: ["Request handled", "INFO"] }, { cl: "10:00:00", vals: ["High memory", "WARN"] }] },
-            { key: "Tenant-B", rows: [{ cl: "07:30:00", vals: ["Batch started", "INFO"] }, { cl: "08:45:00", vals: ["Batch done", "INFO"] }] }
+          id: "ASC Range Order", dir: "ASC", desc: "PRIMARY KEY (product_id ASC)", items: [
+            { key: "Products (ASC)", rows: [
+                { cl: "A001", vals: ["iPhone 15", "Phone", "999.00", "OK"] }, 
+                { cl: "B050", vals: ["MacBook Pro", "Laptop", "2499.00", "OK"] }, 
+                { cl: "G200", vals: ["Keychron K2", "Hardware", "89.00", "OK"] }
+            ] }
           ]
         },
         {
-          id: "DESC Organization (High → Low)", dir: "DESC", desc: "PRIMARY KEY (tenant_id HASH, log_time DESC)", items: [
-            { key: "Tenant-A", rows: [{ cl: "10:00:00", vals: ["High memory", "WARN"] }, { cl: "09:00:00", vals: ["Request handled", "INFO"] }, { cl: "08:00:00", vals: ["Server start", "INFO"] }] },
-            { key: "Tenant-B", rows: [{ cl: "08:45:00", vals: ["Batch done", "INFO"] }, { cl: "07:30:00", vals: ["Batch started", "INFO"] }] }
+          id: "DESC Range Order", dir: "DESC", desc: "PRIMARY KEY (product_id DESC)", items: [
+            { key: "Products (DESC)", rows: [
+                { cl: "X999", vals: ["Dell U2723QE", "Monitor", "580.00", "OK"] }, 
+                { cl: "R500", vals: ["Logitech MX", "Peripherals", "99.00", "OK"] }, 
+                { cl: "M100", vals: ["iPad Air", "Tablet", "599.00", "OK"] }
+            ] }
           ]
         }
       ]
     },
-    callout: { type: "info", icon: "💡", text: "With <b>DESC</b>, the latest entries are at the top of the SSTable. <code>LIMIT 10</code> reads only the first 10 entries — zero sorting overhead." },
     guide: {
-      richSql: `<span class="sql-comment">-- ASC: oldest entries first in storage</span>
-<span class="sql-kw">CREATE TABLE</span> logs_asc (
-    <span class="sh-key">tenant_id</span> <span class="sql-type">TEXT</span>,
-    <span class="cl-key">log_time</span>  <span class="sql-type">TIMESTAMP</span>,
-    message   <span class="sql-type">TEXT</span>,
-    level     <span class="sql-type">TEXT</span>,
-    <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time ASC</span>)
+        richSql: `<span class="sql-comment">-- ASC: Smallest keys first. Perfect for range scans (A → Z)</span>
+<span class="sql-kw">CREATE TABLE</span> products_asc (
+    product_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY ASC</span>,
+    name       <span class="sql-type">TEXT</span>,
+    category   <span class="sql-type">TEXT</span>,
+    price      <span class="sql-type">DECIMAL</span>,
+    status     <span class="sql-type">TEXT</span>
 );
 
-<span class="sql-comment">-- DESC: newest entries first — ideal for "latest N"</span>
-<span class="sql-kw">CREATE TABLE</span> logs_desc (
-    <span class="sh-key">tenant_id</span> <span class="sql-type">TEXT</span>,
-    <span class="cl-key">log_time</span>  <span class="sql-type">TIMESTAMP</span>,
-    message   <span class="sql-type">TEXT</span>,
-    level     <span class="sql-type">TEXT</span>,
-    <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time DESC</span>)
+<span class="sql-comment">-- DESC: Largest keys first. Perfect for finding the "Last" entries</span>
+<span class="sql-kw">CREATE TABLE</span> products_desc (
+    product_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY DESC</span>,
+    name       <span class="sql-type">TEXT</span>,
+    category   <span class="sql-type">TEXT</span>,
+    price      <span class="sql-type">DECIMAL</span>,
+    status     <span class="sql-type">TEXT</span>
 );
 
-<span class="sql-comment">-- Fast: no sorting, just read first N rows</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> logs_desc
-<span class="sql-kw">WHERE</span> tenant_id = <span class="sql-str">'Tenant-A'</span> <span class="sql-kw">LIMIT</span> 10;` },
+<span class="sql-comment">-- Queries on PK use storage order. DESC avoids a sort step for reverse scans.</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products_desc <span class="sql-kw">LIMIT</span> 5;`
+    },
     guidedTour: [
-      { text: "Compare how data is physically stored in memory vs on disk.", element: "#visual-render-area" },
-      { text: "ASC (left) puts oldest data first; DESC (right) puts newest data first.", element: ".tablet-card" },
-      { text: "Try <b>Auto Generate</b> to see the contrasting pack patterns.", element: ".secondary-btn" }
+      { text: "In Range sharding, the table itself is sorted globally.", element: "#visual-render-area" },
+      { text: "ASC (left) sorts from A to Z; DESC (right) sorts from Z to A.", element: ".org-block" },
+      { text: "Use <b>Insert Row</b> to see where a new product code lands in both orders.", element: ".primary-btn" }
     ]
   }
 };
@@ -2860,5 +2932,4 @@ WHERE u.name = 'Dan';`,
       { text: "Type a color like <b>red</b>, <b>blue</b>, or <b>green</b> — each insert adds 1 base-table row and 3 GIN index entries spread across the two index tablets.", element: "#sim-input-val" }
     ]
   }
-
 });

@@ -1769,8 +1769,14 @@ function renderHome(container) {
                         </div>
                         <div class="home-card" onclick="selectScenario('hash-data-org')">
                             <div class="home-card-icon">📊</div>
-                            <div class="home-card-title">Data Org</div>
-                            <div class="home-card-desc">Understand DocDB's physical layout: Key-Value packing and ASC vs DESC sorting in storage.</div>
+                            <div class="home-card-title">Hash Data: ASC/DESC</div>
+                            <div class="home-card-desc">Understand DocDB's physical layout for Hash sharding: Key-Value packing and ASC vs DESC sorting in storage.</div>
+                            <button class="home-card-btn">See Layout &rarr;</button>
+                        </div>
+                        <div class="home-card" onclick="selectScenario('range-data-org')">
+                            <div class="home-card-icon">📦</div>
+                            <div class="home-card-title">Range Data: ASC/DESC</div>
+                            <div class="home-card-desc">See how Range sharding affects global storage: compare ASC and DESC physical layout and global ordering.</div>
                             <button class="home-card-btn">See Layout &rarr;</button>
                         </div>
                     </div>
