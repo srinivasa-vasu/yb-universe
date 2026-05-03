@@ -2398,6 +2398,108 @@ Object.assign(SCENARIOS, {
     ]
   },
 
+  "qe-order-by-hash": {
+    group: "Query Execution", icon: "🌪️", title: "Hash Global Sort",
+    subtitle: "Scatter-gather + YSQL-layer sort",
+    description: "In Hash sharding, the Primary Key is physically distributed by a random hash. Even when you <code>ORDER BY user_id</code> (the PK), there is no global sort order in storage. YugabyteDB must fan out to every tablet, gather all rows, and perform a Sort at the YSQL layer before returning the first row.",
+    legend: [
+      { type: "sharding", label: "user_id (Hash)", explain: "Random distribution — user-100 might be in T3 while user-101 is in T1" }
+    ],
+    visual: {
+      type: "query-exec",
+      columns: [
+        { label: "[hash]", role: "sys" }, { label: "user_id", role: "sh" },
+        { label: "name", role: "" }, { label: "created_at", role: "" }
+      ]
+    },
+    queryConfig: {
+      sql: "SELECT * FROM users ORDER BY user_id ASC LIMIT 5",
+      steps: [
+        { op: "route", detail: "Ordering by user_id ASC — table is hash-sharded by user_id. Hash order ≠ ASC order. Scatter-gather scan required.", ysqlStatus: "Planning query: ORDER BY PK (user_id) but table is HASH-sharded. Global sort order NOT preserved in storage — full cluster scan needed.", tablets: [{id:0,state:"active"},{id:1,state:"active"},{id:2,state:"active"}], rows: [] },
+        { op: "fanout", detail: "Parallel RPCs dispatched to all 3 tablets — since we need the globally 'lowest' user_ids, we must check every tablet.", ysqlStatus: "Gathering rows from all 3 tablets simultaneously for global sorting...", tablets: [{id:0,state:"active"},{id:1,state:"active"},{id:2,state:"active"}], rows: [] },
+        { op: "next", detail: "Tablets stream rows back in hash order — T1: u-105, u-120 | T2: u-101, u-111 | T3: u-100, u-115, u-125. Random arrival relative to ASC sort.", ysqlStatus: "Receiving 7 rows from 3 tablets — buffering and awaiting all data before sorting can begin...", tablets: [{id:0,state:"done"},{id:1,state:"done"},{id:2,state:"done"}], rows: [{tablet:0,row:0,state:"returned"},{tablet:0,row:1,state:"returned"},{tablet:1,row:0,state:"returned"},{tablet:1,row:1,state:"returned"},{tablet:2,row:0,state:"returned"},{tablet:2,row:1,state:"returned"},{tablet:2,row:2,state:"returned"}] },
+        { op: "return", detail: "YSQL Sort Node: All rows gathered. Performing quicksort on user_id to satisfy ORDER BY.", ysqlStatus: "Applying Sort (user_id ASC) at the YSQL layer on all 7 gathered rows. Then applying LIMIT 5.", tablets: [], rows: [] },
+        { op: "done", detail: "Result: u-100 → u-101 → u-105 → u-111 → u-115. Hash sharding required a post-scan sort even for the Primary Key.", ysqlStatus: "✓ Top 5 rows sorted by YSQL — Scatter-Gather-Sort pattern completed.", tablets: [], rows: [], summary: { tablets: 3, seeks: 3, nexts: 7, rows: 5 } }
+      ]
+    },
+    initialState: {
+      tablets: [
+        { id: "Tablet 1", range: "0x0000–0x5555", rows: [{ fields: ["0x49CE", "u-105", "Alice", "2024-03-15"] }, { fields: ["0x1122", "u-120", "Dan", "2024-01-10"] }] },
+        { id: "Tablet 2", range: "0x5556–0xAAAA", rows: [{ fields: ["0x79B0", "u-101", "Bob", "2024-02-20"] }, { fields: ["0x8A22", "u-111", "Frank", "2024-02-25"] }] },
+        { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ fields: ["0xCF06", "u-100", "Carol", "2024-04-05"] }, { fields: ["0xCEE2", "u-115", "Eve", "2024-01-01"] }, { fields: ["0xDF22", "u-125", "Grace", "2024-01-05"] }] }
+      ]
+    },
+    callout: { type: "warn", icon: "🌪️", text: "<b>The Hash Sorting Penalty:</b> Even when querying by the PK, <code>HASH</code> sharding does not preserve order. For <code>LIMIT 5</code>, the database must still scan tablets and re-sort at the YSQL layer." },
+    guide: {
+        richSql: `<span class="sql-kw">CREATE TABLE</span> users (
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    name    <span class="sql-type">TEXT</span>,
+    created_at <span class="sql-type">DATE</span>
+);
+
+<span class="sql-comment">-- PK is HASH-sharded by default</span>
+<span class="sql-comment">-- PLAN: Seq Scan (Scatter-Gather) -> Sort -> Limit</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users 
+<span class="sql-kw">ORDER BY</span> user_id <span class="sql-kw">ASC</span> 
+<span class="sql-kw">LIMIT</span> <span class="sql-str">5</span>;`
+    },
+    guidedTour: [
+      { text: "Data is hash-sharded. u-100 is in Tablet 3, but u-101 is in Tablet 2. There is no global order.", element: ".tablet-card" },
+      { text: "Click <b>Play All</b> — watch rows arrive in random order (hash order) in the RETURN step.", element: "#qe-play-btn" },
+      { text: "Notice YSQL cannot stream the first row until it has finished gathering all rows from all tablets to sort them.", element: "#ysql-layer" }
+    ]
+  },
+
+  "qe-order-by-range": {
+    group: "Query Execution", icon: "🛤️", title: "Range Ordered Scan",
+    subtitle: "Streaming scan (storage-preserved order)",
+    description: "In Range sharding, rows are stored in global sort order across the cluster. If you <code>ORDER BY product_id ASC LIMIT 5</code>, the engine can scan the tablets in sequence and stop the moment it finds the first 5 rows. This 'Ordered Streaming' approach is O(N) and uses zero extra memory for sorting.",
+    legend: [
+      { type: "sharding", label: "product_id (Range)", explain: "Global order: T1 (A-M) < T2 (M-R) < T3 (R-Z)" }
+    ],
+    visual: {
+      type: "query-exec",
+      columns: [
+        { label: "product_id", role: "sh", dir: "ASC" },
+        { label: "name", role: "" }, { label: "price", role: "" }
+      ]
+    },
+    queryConfig: {
+      sql: "SELECT * FROM products ORDER BY product_id ASC LIMIT 5",
+      steps: [
+        { op: "route", detail: "ORDER BY PK matches Range sharding — global order is preserved in storage. Serial tablet scan planned.", ysqlStatus: "Planning query: ORDER BY matches Range PK. Streaming result directly from storage — No sort node needed!", tablets: [{id:0,state:"active"}], rows: [] },
+        { op: "seek", detail: "Seek(A) positions cursor at the very first row of the first tablet (Tablet 1).", ysqlStatus: "Positioning cursor at start of Tablet 1 (A–M)...", tablets: [{id:0,state:"active"}], rows: [{tablet:0,row:0,state:"cursor"}] },
+        { op: "next", detail: "Streaming rows from Tablet 1: A001✓, A100✓, B050✓, C200✓, D400✓. Target of 5 rows reached.", ysqlStatus: "Streaming rows from Tablet 1... 5 rows read. LIMIT 5 satisfied.", tablets: [{id:0,state:"done"}], rows: [{tablet:0,row:0,state:"returned"},{tablet:0,row:1,state:"returned"},{tablet:0,row:2,state:"returned"},{tablet:0,row:3,state:"returned"},{tablet:0,row:4,state:"returned"}] },
+        { op: "done", detail: "Result: A001 → D400. Scanned exactly 5 rows from 1 tablet. Tablets 2 and 3 were never even touched.", ysqlStatus: "✓ 5 rows returned in O(1) time — Ordered Streaming scan completed. Tablets 2 and 3 skipped entirely.", tablets: [], rows: [], summary: { tablets: 1, seeks: 1, nexts: 5, rows: 5 } }
+      ]
+    },
+    initialState: {
+      tablets: [
+        { id: "Tablet 1", range: "A–M", rows: [{ fields: ["A001", "iPhone", "999"] }, { fields: ["A100", "iMac", "1299"] }, { fields: ["B050", "MacBook", "2499"] }, { fields: ["C200", "iPad", "599"] }, { fields: ["D400", "AirPods", "199"] }, { fields: ["E500", "Watch", "399"] }] },
+        { id: "Tablet 2", range: "M–R", rows: [{ fields: ["M100", "HomePod", "299"] }, { fields: ["P200", "Pencil", "99"] }, { fields: ["R100", "Remote", "59"] }] },
+        { id: "Tablet 3", range: "R–Z", rows: [{ fields: ["S100", "Studio", "1999"] }, { fields: ["T800", "Monitor", "450"] }, { fields: ["X999", "Cables", "25"] }] }
+      ]
+    },
+    callout: { type: "info", icon: "🛤️", text: "<b>The Power of Range Order:</b> Because the physical storage is sorted, <code>ORDER BY PK LIMIT 5</code> stops immediately after the first tablet. It never even wakes up Tablet 2 or 3, saving CPU and I/O cluster-wide." },
+    guide: {
+        richSql: `<span class="sql-kw">CREATE TABLE</span> products (
+    <span class="sh-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY ASC</span>,
+    name       <span class="sql-type">TEXT</span>,
+    price      <span class="sql-type">DECIMAL</span>
+);
+
+<span class="sql-comment">-- PLAN: Seq Scan (Ordered Streaming)</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products 
+<span class="sql-kw">ORDER BY</span> product_id <span class="sql-kw">ASC</span> 
+<span class="sql-kw">LIMIT</span> <span class="sql-str">5</span>;`
+    },
+    guidedTour: [
+      { text: "Data is range-sharded. Tablet 1 holds A-M, then Tablet 2 holds M-R. The order is physical.", element: ".tablet-card" },
+      { text: "Click <b>Play All</b> — watch the cursor stop after exactly 5 rows in Tablet 1.", element: "#qe-play-btn" },
+      { text: "Because Tablet 1 contains the 5 globally 'lowest' rows, YSQL can return them instantly without a sort pass.", element: "#ysql-layer" }
+    ]
+  },
+
   "qe-expr-pushdown": {
     group: "Query Execution", icon: "σ", title: "Expression Pushdown",
     subtitle: "Filter at DocDB, not YSQL",
@@ -2933,3 +3035,4 @@ WHERE u.name = 'Dan';`,
     ]
   }
 });
+;

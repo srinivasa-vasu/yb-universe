@@ -1935,6 +1935,18 @@ function renderHome(container) {
                             <div class="home-card-desc">Merge Append across all bucket tablets. Every ts range query fans out to all buckets — YSQL merges 3 ts-sorted streams without an extra sort pass.</div>
                             <button class="home-card-btn">Explore &rarr;</button>
                         </div>
+                        <div class="home-card" onclick="selectScenario('qe-order-by-hash')">
+                            <div class="home-card-icon">🌪️</div>
+                            <div class="home-card-title">Hash Global Sort</div>
+                            <div class="home-card-desc">The Scatter-Gather-Sort pattern. Hash sharding is random — sorting by non-shard keys requires a full cluster scan and a post-scan Sort node.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
+                        <div class="home-card" onclick="selectScenario('qe-order-by-range')">
+                            <div class="home-card-icon">🛤️</div>
+                            <div class="home-card-title">Range Ordered Scan</div>
+                            <div class="home-card-desc">Native streaming sort. Range-sharded tables preserve global order — YSQL scans tablets in sequence, returning data without a post-scan Sort.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
                     </div>
                 </div>
 
