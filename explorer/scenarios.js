@@ -814,35 +814,58 @@ const SCENARIOS = {
       },
       { label: 'Leader WAL & Replicate', desc: 'Leader fans out AppendEntries to both followers simultaneously — near follower (N2, ~0.8ms) and far follower (N3, ~2.5ms).', action: async (ctx) => { ctx.setLat(0, 0.8); ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300); ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 1000); await ctx.delay(800); } },
       {
-        label: 'First ACK = Majority', desc: 'Near follower (N2) ACKs first (~0.8ms) → majority reached. Far follower (N3) ACK also arrives shortly after — async, not on critical path.', action: async (ctx) => {
-          if (S.nodes[1].alive) {
-            ctx.setLat(1, 1.2); ctx.setLat(2, 9.5);
-            await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 300);
-            addLog('N2 (near follower) ACK → 2/3 majority ✓ critical path done', 'ls');
-            ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 900);
-            addLog('N3 (far follower) ACK in-flight — async, not blocking commit', 'li');
-            ctx.setLat(3, 0.5); ctx.setLat(4, 2.5);
-          } else {
-            await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000);
-            addLog('N3 (far follower) ACK → 2/3 majority ✓ (near follower down)', 'ls');
-            ctx.setLat(1, 0); ctx.setLat(2, 10.5); ctx.setLat(3, 0.5); ctx.setLat(4, 11.8);
-          }
-        }
-      },
-      {
-        label: 'Commit & ACK Client', desc: 'Majority ACK received — provisional row is committed to MemTable on all replicas. ACK returned to client.', action: async (ctx) => {
-          if (S.nodes[1].alive) { ctx.hlLatRow([0, 1, 3, 4]); }
-          else { ctx.hlLatRow([0, 2, 3, 4]); }
+        label: 'Majority ACK → Commit → Client ACK',
+        desc: 'Near follower (N2) ACKs first — 2/3 majority reached. Leader immediately commits on majority nodes (N1+N2) and ACKs the client. Far follower (N3) ACK and commit complete concurrently in the background — never on the critical path.',
+        action: async (ctx) => {
+          const nearAlive = S.nodes[1].alive;
           const g = S.groups.find(x => x.id === 'tg1');
           const rs1 = S.replicaState['tg1']?.[1];
           const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now() / 1000];
-          if (g) {
-            g.data.push(row);
-            for (const n of [1, 2, 3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+
+          if (nearAlive) {
+            ctx.setLat(1, 1.2); ctx.setLat(2, 9.5);
+            // Await only the majority (N2) ACK
+            await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 350);
+            addLog('N2 ACK → 2/3 majority ✓ — committing & ACKing client now', 'ls');
+
+            // Commit majority nodes (N1 + N2) immediately
+            if (g) {
+              g.data.push(row);
+              for (const n of [1, 2]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1, 2]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            ctx.setLat(3, 0.5); ctx.setLat(4, 2.5); ctx.hlLatRow([0, 1, 3, 4]);
+
+            // N3 ACK + commit fires concurrently — intentionally NOT awaited
+            addLog('N3 (far follower) ACK in-flight — async, not on critical path', 'li');
+            (async () => {
+              await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 900);
+              const rs = S.replicaState['tg1']?.[3];
+              if (rs) { rs.provisionalRows = []; }
+              ctx.reRenderTablet('tg1', 3, true); ctx.hlTablet('tg1', 3, 't-hl');
+              addLog('N3 applied commit in background ✓', 'li');
+            })();
+
+            // Client ACK — fires while N3 is still in-flight
+            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
+            ctx.activateClient(false);
+            addLog('Client ACK sent — write complete ✓', 'ls');
+
+          } else {
+            // Near follower dead: wait for far follower (N3) as the quorum node
+            ctx.setLat(1, 0); ctx.setLat(2, 10.5);
+            await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000);
+            addLog('N3 (far follower) ACK → 2/3 majority ✓ (near follower down)', 'ls');
+            if (g) {
+              g.data.push(row);
+              for (const n of [1, 3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
+            }
+            for (const n of [1, 3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
+            ctx.setLat(3, 0.5); ctx.setLat(4, 11.8); ctx.hlLatRow([0, 2, 3, 4]);
+            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
+            ctx.activateClient(false);
+            addLog('Client ACK sent — write complete ✓', 'ls');
           }
-          for (const n of [1, 2, 3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
-          addLog('Write committed — row visible on all replicas ✓', 'ls');
-          await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400); ctx.activateClient(false);
         }
       }
     ]
@@ -959,7 +982,12 @@ const SCENARIOS = {
   "6": {
     group: "Read & Write Paths", icon: "🧬", sortOrder: 5,
     name: 'Index Data Write', title: 'Index Data Write', subtitle: 'Primary + Secondary (2PC)',
-    filterTable: ['users', 'users_email_idx', 'transactions'],
+    filterIds: ['tg1', 'tg8', 'ts1'],
+    init: (ctx) => {
+      const tg1 = S.groups.find(g => g.id === 'tg1');
+      if (tg1) tg1.range = '0x0000–0xFFFF';
+      renderAllTablets(); setTimeout(renderConnections, 80);
+    },
     desc: 'Secondary indexes are stored in separate tablets. Updating a row with an index requires a distributed transaction to ensure both are updated atomically.',
     guidedTour: [
       { text: "Secondary indexes live in <b>separate tablets</b>. A write must update both the primary row and the index entry atomically.", element: ".canvas-wrap" },
@@ -1044,8 +1072,6 @@ const SCENARIOS = {
         desc: 'Final cleanup moves data from provisional to permanent storage in both the primary and index tablets.',
         action: async (ctx) => {
           addLog('Finalizing Primary and Index records...', 'li');
-          S.groups.find(g => g.id === 'tg1').data.push([1, 'Alice Chen', 'NY', 87, 102.0]);
-          S.groups.find(g => g.id === 'tg8').data.push(['alice@yugabyte.com', 1, 102.0]);
           S.replicaState['tg1'][1].provisionalRows = [];
           S.replicaState['tg8'][2].provisionalRows = [];
 
@@ -1101,7 +1127,7 @@ const SCENARIOS = {
 
 
   "10": {
-    group: "Consistency & High Availability", icon: "🗳️", sortOrder: 1,
+    group: "Consistency & High Availability", icon: "🗳️", sortOrder: 1, compactTablets: true,
     name: 'Leader Election', title: 'Leader Election', subtitle: 'Raft lifecycle & recovery',
     desc: 'Full Raft lifecycle: 6 consecutive heartbeat failures → node declared dead → election timeout → Follower→Candidate→Leader. Leaders are distributed fairly across surviving peers. Supports graceful Blacklist/Drain for planned maintenance and Unblacklist to rebalance leaders back.',
     guidedTour: [
@@ -1260,7 +1286,7 @@ const SCENARIOS = {
     ]
   },
   "11": {
-    group: "Consistency & High Availability", icon: "💥", sortOrder: 2,
+    group: "Consistency & High Availability", icon: "💥", sortOrder: 2, compactTablets: true,
     name: 'Node Failure', title: 'Node Failure', subtitle: 'Crash & catch-up',
     desc: 'TServer-3 crashes. Raft re-election gives new leaders for tg3 (users.tablet3) & tg6 (products.tablet2). Auto-writes continue during outage. On recovery, TServer-3 catches up all missed writes and leaders are rebalanced back to it.',
     guidedTour: [
@@ -1349,7 +1375,7 @@ const SCENARIOS = {
     ]
   },
   "12": {
-    group: "Consistency & High Availability", icon: "🔀", sortOrder: 3,
+    group: "Consistency & High Availability", icon: "🔀", sortOrder: 3, compactTablets: true,
     name: 'Network Partition', title: 'Network Partition', subtitle: 'Split-brain & quorum',
     desc: 'TServer-3 is cut off from TServer-1 and TServer-2 by a network partition. TS-3 tries to elect itself leader but cannot win majority (1/3 < 2). TS-1 & TS-2 (quorum) continue serving writes. TS-3 returns stale reads.',
     guidedTour: [
@@ -1454,7 +1480,7 @@ const SCENARIOS = {
   },
 
   "13": {
-    group: "Scalability", icon: "📈", sortOrder: 1,
+    group: "Scalability", icon: "📈", sortOrder: 1, compactTablets: true,
     name: 'Horizontal Scaling', title: 'Horizontal Scaling', subtitle: 'Add/remove nodes & rebalance',
     desc: 'Observe how YugabyteDB scales out from 3 to 6 nodes within the APAC region. As new nodes are added, YB-Master automatically rebalances both tablet leaders and followers to distribute data and load evenly across all available zones.',
     guidedTour: [
@@ -1486,6 +1512,7 @@ const SCENARIOS = {
       ];
       S.groups = scalingGroups;
       S.replicaState = buildRS(S.groups);
+      renderAllTablets(); setTimeout(renderConnections, 80);
     },
     steps: [
       {

@@ -22,8 +22,8 @@
       --users-c: #f59e0b;
       --categories-c: #34d399;
       --prod-c: #60a5fa;
-      --head: 'Rajdhani', sans-serif;
-      --body: 'Outfit', sans-serif;
+      --head: 'Space Grotesk', sans-serif;
+      --body: 'Inter', sans-serif;
       --mono: 'JetBrains Mono', monospace;
       --hh: 56px;
       --ch: 64px;
@@ -49,7 +49,12 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      font-size: 14px
+      font-size: 14px;
+      line-height: 1.6;
+      font-weight: 400;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
     }
 
     /* ── HEADER ── */
@@ -602,6 +607,22 @@
 
     .tablet:hover {
       border-color: var(--border-hi)
+    }
+
+    .tablet.compact {
+      padding: 7px 10px;
+      margin-bottom: 3px;
+    }
+
+    .tablet.compact .t-top { margin-bottom: 3px; }
+    .tablet.compact .t-meta { margin-bottom: 0; }
+
+    .lsm-mini {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--txt3);
+      margin-top: 5px;
+      letter-spacing: 0.3px;
     }
 
     .tablet.t-leader {

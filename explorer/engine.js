@@ -321,24 +321,92 @@ function switchFDTab(tab) {
   }
 }
 
+// Drain leaders off a node onto the remaining alive, non-partitioned peers (balanced)
+function _fdDrainLeaders(nodeId) {
+  for (const g of S.groups) {
+    if (g.leaderNode !== nodeId) continue;
+    const candidates = g.replicas.filter(r =>
+      r !== nodeId && S.nodes.find(n => n.id === r)?.alive && !S.partitioned.includes(r)
+    );
+    if (!candidates.length) continue;
+    const newLeader = candidates.reduce((best, r) =>
+      S.groups.filter(x => x.leaderNode === r).length <
+      S.groups.filter(x => x.leaderNode === best).length ? r : best
+    );
+    g.leaderNode = newLeader;
+    g.term = (g.term || 4) + 1;
+    addLog(`Raft re-election: ${g.table}.tablet${g.tnum} → LEADER: TS-${newLeader} (term=${g.term})`, 'lw');
+  }
+}
+
+// Animate FOLLOWER → CANDIDATE → LEADER transfers back to nodeId (balanced fair share)
+async function _fdRebalanceToNode(nodeId) {
+  const ctx = makeCtx();
+  const eligible = S.groups.filter(g => g.replicas.includes(nodeId) && g.leaderNode !== nodeId);
+  const totalWithNode = S.groups.filter(g => g.replicas.includes(nodeId)).length;
+  const aliveCount = [...new Set(S.groups.flatMap(g => g.replicas))]
+    .filter(r => S.nodes.find(n => n.id === r)?.alive && !S.partitioned.includes(r)).length;
+  const target = Math.round(totalWithNode / aliveCount);
+  const current = S.groups.filter(g => g.leaderNode === nodeId).length;
+  const toTransfer = Math.max(0, target - current);
+
+  // Greedy pick: maximise table diversity, break ties by draining busiest source node
+  const chosen = [];
+  const pickedTables = {};
+  const remaining = [...eligible];
+  for (let i = 0; i < toTransfer && remaining.length; i++) {
+    const minUsed = Math.min(...remaining.map(g => pickedTables[g.table] || 0));
+    const leastUsed = remaining.filter(g => (pickedTables[g.table] || 0) === minUsed);
+    leastUsed.sort((a, b) =>
+      S.groups.filter(g => g.leaderNode === b.leaderNode).length -
+      S.groups.filter(g => g.leaderNode === a.leaderNode).length
+    );
+    const pick = leastUsed[0];
+    chosen.push(pick);
+    pickedTables[pick.table] = (pickedTables[pick.table] || 0) + 1;
+    remaining.splice(remaining.indexOf(pick), 1);
+  }
+
+  for (const g of chosen) {
+    const oldLeader = g.leaderNode;
+    addLog(`YB-Master: LeaderStepDown(${g.table}.tablet${g.tnum}) → TS-${nodeId}`, 'li');
+    // FOLLOWER → CANDIDATE
+    ctx.setRole(g.id, nodeId, 'CANDIDATE');
+    await ctx.delay(300);
+    // Vote request + grant
+    await ctx.pktTabletToTablet(g.id, nodeId, g.id, oldLeader, 'pk-vote', 500);
+    await ctx.pktTabletToTablet(g.id, oldLeader, g.id, nodeId, 'pk-ack', 400);
+    // Promote
+    g.leaderNode = nodeId;
+    g.term = (g.term || 4) + 1;
+    renderAllTablets(); renderConnections();
+    ctx.hlTablet(g.id, nodeId, 't-hl');
+    addLog(`${g.table}.tablet${g.tnum} → LEADER: TS-${nodeId} (term=${g.term}) ✓`, 'ls');
+    await ctx.delay(250);
+  }
+}
+
 function fdKillNode3() {
   S.nodes.find(n => n.id === 3).alive = false;
-  renderNodeAlive(3, false); renderAllTablets();
+  renderNodeAlive(3, false);
   addLog('TServer-3: KILLED', 'le');
+  _fdDrainLeaders(3);
+  renderAllTablets(); renderConnections();
   toggleBtn('btn-k3', true); toggleBtn('btn-r3', false);
   fdRenderNodes();
 }
-function fdReviveNode3() {
+async function fdReviveNode3() {
   S.nodes.find(n => n.id === 3).alive = true;
   renderNodeAlive(3, true); renderAllTablets(); setTimeout(renderConnections, 50);
-  addLog('TServer-3: REVIVED', 'ls');
+  addLog('TServer-3: REVIVED · catch-up starting', 'ls');
   toggleBtn('btn-r3', true); toggleBtn('btn-k3', false);
   fdRenderNodes();
-  if (S.nodeStats[3].lagRows > 0) fdCatchUp(3);
+  if (S.nodeStats?.[3]?.lagRows > 0) await fdCatchUp(3);
+  addLog('TServer-3 caught up · rebalancing leaders', 'ls');
+  await _fdRebalanceToNode(3);
 }
 function fdPartitionNode3() {
   if (!S.partitioned.includes(3)) S.partitioned.push(3);
-  // Draw partition wall
   drawPartitionWall(true);
   const card = document.getElementById('node-3');
   card.classList.add('n-partitioned');
@@ -347,10 +415,12 @@ function fdPartitionNode3() {
   ov.innerHTML = '⟊ PARTITIONED';
   card.appendChild(ov);
   addLog('Network partition: TS-3 isolated', 'le');
+  _fdDrainLeaders(3);
+  renderAllTablets(); renderConnections();
   toggleBtn('btn-prt', true); toggleBtn('btn-heal', false);
   fdRenderNodes();
 }
-function fdHealPartition() {
+async function fdHealPartition() {
   S.partitioned = S.partitioned.filter(n => n !== 3);
   drawPartitionWall(false);
   const card = document.getElementById('node-3');
@@ -359,7 +429,9 @@ function fdHealPartition() {
   addLog('Partition healed: TS-3 reconnected', 'ls');
   toggleBtn('btn-heal', true); toggleBtn('btn-prt', false);
   fdRenderNodes();
-  if (S.nodeStats[3].lagRows > 0) fdCatchUp(3);
+  if (S.nodeStats?.[3]?.lagRows > 0) await fdCatchUp(3);
+  addLog('Rebalancing leaders back to TS-3', 'li');
+  await _fdRebalanceToNode(3);
 }
 
 function drawPartitionWall(show) {
@@ -414,9 +486,11 @@ function renderAllTablets() {
   }
 
   const sc = SCENARIOS[currentScenario];
+  const filterIds = sc?.filterIds;
   const filter = sc?.filterTable;
   for (const g of S.groups) {
-    if (filter) {
+    if (filterIds) { if (!filterIds.includes(g.id)) continue; }
+    else if (filter) {
       if (Array.isArray(filter)) { if (!filter.includes(g.table)) continue; }
       else if (g.table !== filter) continue;
     }
@@ -438,6 +512,7 @@ function buildTabletHTML(g, nodeId) {
   const ti = TABLES[g.table] || { name: g.table, color: '#94a3b8' };
   const memP = rs ? Math.min(100, rs.mem) : 0;
   const ssP = rs ? Math.min(100, rs.ss) : 0;
+  const compact = !!SCENARIOS[currentScenario]?.compactTablets;
   const ssts = rs?.ssts || [];
   const compacting = rs?.compacting || false;
 
@@ -450,7 +525,7 @@ function buildTabletHTML(g, nodeId) {
   const roleC = isLdr ? 't-leader' : !alive ? 't-dead' : isPartitioned ? 't-follower t-stale' : 't-follower';
 
   let dHtml = '';
-  if (g.data?.length || rs?.provisionalRows?.length) {
+  if (!compact && (g.data?.length || rs?.provisionalRows?.length)) {
     const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
     const showReg = isGeo || !!g.showReg;
     const showScore = showReg || !!g.showScore;
@@ -504,7 +579,7 @@ function buildTabletHTML(g, nodeId) {
     }
     dHtml += '</div>';
   }
-  return { roleC, ti, memP, ssP, role, dHtml, sstHtml };
+  return { roleC, ti, memP, ssP, role, dHtml, sstHtml, compact };
 }
 
 function renderTxPanel() {
@@ -541,13 +616,21 @@ function renderTxPanel() {
 }
 
 function renderTabletCard(g, nodeId) {
-  const { roleC, ti, memP, ssP, role, dHtml, sstHtml } = buildTabletHTML(g, nodeId);
+  const { roleC, ti, memP, ssP, role, dHtml, sstHtml, compact } = buildTabletHTML(g, nodeId);
   const div = document.createElement('div');
   div.id = `tablet-${g.id}-${nodeId}`;
-  div.className = `tablet ${roleC}`;
+  div.className = `tablet ${roleC}${compact ? ' compact' : ''}`;
   const nodeCard = document.getElementById(`node-${nodeId}`);
   const zoneTxt = nodeCard?.querySelector('.n-zone')?.textContent || '';
   const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
+  const lsmHtml = compact
+    ? `<div class="lsm-mini">Mem:${Math.round(memP)}% · SST:${Math.round(ssP)}%</div>`
+    : `<div class="lsm-box">
+      <div class="lsm-title">DocDB Storage <span class="lsm-fi">Mem=${Math.round(memP)}% SST=${Math.round(ssP)}%</span></div>
+      <div class="lsm-row"><div class="lsm-lbl">Mem</div><div class="lsm-track"><div class="lsm-fill lsm-mem" style="width:${memP}%"></div></div><div class="lsm-pct">${Math.round(memP)}%</div></div>
+      <div class="lsm-row"><div class="lsm-lbl">SST</div><div class="lsm-track"><div class="lsm-fill lsm-ss" style="width:${ssP}%"></div></div><div class="lsm-pct">${Math.round(ssP)}%</div></div>
+      ${sstHtml}
+    </div>`;
 
   div.innerHTML = `
     <div class="t-top">
@@ -562,12 +645,7 @@ function renderTabletCard(g, nodeId) {
     </div>
     <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
     ${dHtml}
-    <div class="lsm-box">
-      <div class="lsm-title">DocDB Storage <span class="lsm-fi">Mem=${Math.round(memP)}% SST=${Math.round(ssP)}%</span></div>
-      <div class="lsm-row"><div class="lsm-lbl">Mem</div><div class="lsm-track"><div class="lsm-fill lsm-mem" style="width:${memP}%"></div></div><div class="lsm-pct">${Math.round(memP)}%</div></div>
-      <div class="lsm-row"><div class="lsm-lbl">SST</div><div class="lsm-track"><div class="lsm-fill lsm-ss" style="width:${ssP}%"></div></div><div class="lsm-pct">${Math.round(ssP)}%</div></div>
-      ${sstHtml}
-    </div>`;
+    ${lsmHtml}`;
   div.onclick = () => onTabletClick(g, nodeId);
   document.getElementById(`nb-${nodeId}`).appendChild(div);
 }
@@ -576,18 +654,21 @@ function reRenderTabletInternal(tgId, nodeId) {
   const g = S.groups.find(x => x.id === tgId); if (!g) return;
   const el = document.getElementById(`tablet-${tgId}-${nodeId}`); if (!el) return;
   const saved = ['t-hl', 't-hl2', 't-new', 't-candidate', 't-stale', 't-syncing'].filter(c => el.classList.contains(c));
-  const { roleC, ti, memP, ssP, role, dHtml, sstHtml } = buildTabletHTML(g, nodeId);
-  el.className = `tablet ${roleC} ${saved.join(' ')}`;
-  el.innerHTML = `
-    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${ti.name}.tablet${g.tnum}</div><div class="role-badge r-${role}">${role}</div></div>
-    <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
-    ${dHtml}
-    <div class="lsm-box">
+  const { roleC, ti, memP, ssP, role, dHtml, sstHtml, compact } = buildTabletHTML(g, nodeId);
+  el.className = `tablet ${roleC} ${saved.join(' ')}${compact ? ' compact' : ''}`;
+  const lsmHtml = compact
+    ? `<div class="lsm-mini">Mem:${Math.round(memP)}% · SST:${Math.round(ssP)}%</div>`
+    : `<div class="lsm-box">
       <div class="lsm-title">DocDB Storage <span class="lsm-fi">Mem=${Math.round(memP)}% SST=${Math.round(ssP)}%</span></div>
       <div class="lsm-row"><div class="lsm-lbl">Mem</div><div class="lsm-track"><div class="lsm-fill lsm-mem" style="width:${memP}%"></div></div><div class="lsm-pct">${Math.round(memP)}%</div></div>
       <div class="lsm-row"><div class="lsm-lbl">SST</div><div class="lsm-track"><div class="lsm-fill lsm-ss" style="width:${ssP}%"></div></div><div class="lsm-pct">${Math.round(ssP)}%</div></div>
       ${sstHtml}
     </div>`;
+  el.innerHTML = `
+    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${ti.name}.tablet${g.tnum}</div><div class="role-badge r-${role}">${role}</div></div>
+    <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
+    ${dHtml}
+    ${lsmHtml}`;
   el.onclick = () => onTabletClick(g, nodeId);
 }
 
