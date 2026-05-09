@@ -44,6 +44,14 @@ const SCENARIOS = {
     created_at <span class="sql-type">DATE</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, region, status, created_at)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i, <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)],
+       <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- By default, single-column PK = HASH sharded</span>
 <span class="sql-comment">-- Point lookup: HASH(user_id) → determines tablet → single RPC</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users <span class="sql-kw">WHERE</span> user_id = <span class="sql-str">'user-105'</span>;
@@ -108,6 +116,15 @@ const SCENARIOS = {
     <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time ASC</span>)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> tenant_logs (tenant_id, log_time, level, message, version)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'AcmeCorp'</span>,<span class="sql-str">'Globex'</span>,<span class="sql-str">'Initech'</span>])[1 + mod(i,3)],
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'INFO'</span>,<span class="sql-str">'WARN'</span>,<span class="sql-str">'ERROR'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'Log message '</span> || i,
+       <span class="sql-str">'v'</span> || (1 + mod(i,3))
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Rows sorted ASC: oldest first within each tenant partition</span>
 <span class="sql-comment">-- Efficient for time-range queries within a single tenant</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> tenant_logs
@@ -170,6 +187,14 @@ const SCENARIOS = {
     <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">sensor_id HASH</span>, <span class="cl-key">ts DESC</span>)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> sensor_readings (sensor_id, ts, value, unit, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'S-'</span> || (100 + mod(i,3)),
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' minutes'</span>)<span class="sql-type">::INTERVAL</span>,
+       20.0 + <span class="sql-fn">random</span>() * 10,
+       <span class="sql-str">'°C'</span>, <span class="sql-str">'Normal'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- DESC = newest first. No sorting required.</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> sensor_readings
 <span class="sql-kw">WHERE</span> sensor_id = <span class="sql-str">'S-101'</span> <span class="sql-kw">LIMIT</span> 5;` },
@@ -228,6 +253,14 @@ const SCENARIOS = {
     status     <span class="sql-type">TEXT</span>,
     <span class="sql-kw">PRIMARY KEY</span> ((<span class="sh-key">tenant, app_id</span>) <span class="sh-key">HASH</span>, <span class="cl-key">event_time ASC</span>)
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> audit_events (tenant, app_id, event_time, event, status)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Acme'</span>,<span class="sql-str">'Globex'</span>])[1 + mod(i,2)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'web'</span>,<span class="sql-str">'api'</span>,<span class="sql-str">'mobile'</span>])[1 + mod(i,3)],
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       <span class="sql-str">'Event '</span> || i, <span class="sql-str">'OK'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Hash is on the COMBINATION of tenant + app_id</span>
 <span class="sql-comment">-- Different (tenant, app_id) pairs go to different tablets</span>
@@ -294,6 +327,21 @@ const SCENARIOS = {
     <span class="sql-kw">PRIMARY KEY</span> (<span class="sh-key">tenant_id HASH</span>, <span class="cl-key">log_time DESC</span>)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> logs_asc (tenant_id, log_time, message, level)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Tenant-A'</span>,<span class="sql-str">'Tenant-B'</span>])[1 + mod(i,2)],
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       <span class="sql-str">'Log entry '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'INFO'</span>,<span class="sql-str">'WARN'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-kw">INSERT INTO</span> logs_desc (tenant_id, log_time, message, level)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Tenant-A'</span>,<span class="sql-str">'Tenant-B'</span>])[1 + mod(i,2)],
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       <span class="sql-str">'Log entry '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'INFO'</span>,<span class="sql-str">'WARN'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Queries for specific tenants use clustering order. </span>
 <span class="sql-comment">-- logs_desc returns newest first without an extra sort step.</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> logs_desc
@@ -346,6 +394,15 @@ const SCENARIOS = {
     status     <span class="sql-type">TEXT</span>,
     supplier   <span class="sql-type">TEXT</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, category, price, status, supplier)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Electronics'</span>,<span class="sql-str">'Books'</span>,<span class="sql-str">'Home'</span>])[1 + mod(i,3)],
+       (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'TechCo'</span>,<span class="sql-str">'PubCo'</span>,<span class="sql-str">'HomeCo'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- ASC/DESC on PK → Range sharding in YugabyteDB</span>
 <span class="sql-comment">-- Initially starts as 1 tablet and splits automatically</span>
@@ -408,6 +465,15 @@ const SCENARIOS = {
     supplier   <span class="sql-type">TEXT</span>
 ) <span class="sql-kw">SPLIT AT VALUES</span> ((<span class="sql-str">'J'</span>), (<span class="sql-str">'R'</span>));
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, category, price, status, supplier)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Electronics'</span>,<span class="sql-str">'Books'</span>,<span class="sql-str">'Home'</span>])[1 + mod(i,3)],
+       (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'TechCo'</span>,<span class="sql-str">'PubCo'</span>,<span class="sql-str">'HomeCo'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Pre-creates 3 tablets: (-inf, 'J'), ['J', 'R'), ['R', inf)</span>
 <span class="sql-comment">-- Prevents write hotspots for balanced key distributions</span>` },
     guidedTour: [
@@ -463,6 +529,15 @@ const SCENARIOS = {
     check_status <span class="sql-type">TEXT</span>,
     <span class="sql-kw">PRIMARY KEY</span> (<span class="cl-key">sensor_id ASC</span>, <span class="cl-key">ts DESC</span>)
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> metrics (sensor_id, ts, value, unit, check_status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'S-'</span> || (100 + mod(i,3)) * 100,
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' minutes'</span>)<span class="sql-type">::INTERVAL</span>,
+       20.0 + <span class="sql-fn">random</span>() * 10,
+       <span class="sql-str">'°C'</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'OK'</span>,<span class="sql-str">'WARN'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Initially starts as 1 tablet and splits automatically</span>
 <span class="sql-comment">-- Splits happen based on data size (e.g. at the midpoint)</span>
@@ -535,6 +610,21 @@ const SCENARIOS = {
     price      <span class="sql-type">DECIMAL</span>,
     status     <span class="sql-type">TEXT</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products_asc (product_id, name, category, price, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Electronics'</span>,<span class="sql-str">'Books'</span>,<span class="sql-str">'Home'</span>])[1 + mod(i,3)],
+       (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>, <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-kw">INSERT INTO</span> products_desc (product_id, name, category, price, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Electronics'</span>,<span class="sql-str">'Books'</span>,<span class="sql-str">'Home'</span>])[1 + mod(i,3)],
+       (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>, <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Queries on PK use storage order. DESC avoids a sort step for reverse scans.</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products_desc <span class="sql-kw">LIMIT</span> 5;`
@@ -622,6 +712,15 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-kw">CREATE INDEX</span> idx_users_email
   <span class="sql-kw">ON</span> users (<span class="sh-key">email HASH</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Execution plan:</span>
 <span class="sql-comment">-- 1. Index Scan → find user_id for email</span>
@@ -713,6 +812,15 @@ Object.assign(SCENARIOS, {
     <span class="cl-key">order_date DESC</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, customer_id, order_date, total, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       <span class="sql-str">'cust-'</span> || (1 + mod(i,5)),
+       <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>,
+       (50 + i * 9.99)<span class="sql-type">::NUMERIC(10,2)</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'pending'</span>,<span class="sql-str">'shipped'</span>,<span class="sql-str">'delivered'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Equality on hash key + range on clustering key</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> customer_id = <span class="sql-str">'cust-1'</span>
@@ -783,7 +891,23 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE INDEX</span> idx_products_price
   <span class="sql-kw">ON</span> products (<span class="cl-key">price ASC</span>);
 
-<span class="sql-comment">-- Initially starts as 1 tablet and splits automatically</span>` },
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, name, price, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (10 + i * 14.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-comment">-- Initially starts as 1 tablet and splits automatically</span>
+
+<span class="sql-comment">-- ✅ Range scan: uses the index for efficient price filtering</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">WHERE</span> price <span class="sql-kw">BETWEEN</span> <span class="sql-str">20</span> <span class="sql-kw">AND</span> <span class="sql-str">100</span>;
+
+<span class="sql-comment">-- ✅ ORDER BY price: served in sorted order, no re-sort needed</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> price <span class="sql-kw">ASC LIMIT</span> 5;` },
     guidedTour: [
       { text: "Range indexes are physically sorted by the indexed column.", element: ".index-area" },
       { text: "Type a price like '10.50' and watch the index placement.", element: "#sim-input-val" },
@@ -859,7 +983,24 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">ON</span> products (<span class="cl-key">price ASC</span>)
   <span class="sql-kw">SPLIT AT VALUES</span> ((50), (150));
 
-<span class="sql-comment">-- Pre-creates tablets for ranges: (-∞, 50), [50, 150), [150, ∞)</span>` },
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, name, price, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (10 + i * 14.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-comment">-- Pre-creates tablets for ranges: (-∞, 50), [50, 150), [150, ∞)</span>
+
+<span class="sql-comment">-- ✅ Range scan routes to the correct pre-split tablet</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">WHERE</span> price <span class="sql-kw">BETWEEN</span> <span class="sql-str">20</span> <span class="sql-kw">AND</span> <span class="sql-str">100</span>;
+
+<span class="sql-comment">-- ✅ High-price query → Idx Tablet 3 only ([150, ∞))</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">WHERE</span> price > <span class="sql-str">150</span>
+<span class="sql-kw">ORDER BY</span> price <span class="sql-kw">ASC</span>;` },
     guidedTour: [
       { text: "Use pre-splitting to distribute index write load across multiple nodes immediately.", element: ".index-area" },
       { text: "Insert a high price like '175.00'.", element: "#sim-input-val" },
@@ -930,6 +1071,16 @@ Object.assign(SCENARIOS, {
     <span class="cl-key">region ASC</span>,
     <span class="cl-key">created_at DESC</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, product, total, status, region, created_at)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'pending'</span>,<span class="sql-str">'shipped'</span>,<span class="sql-str">'delivered'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Multi-column range scan:</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
@@ -1013,6 +1164,15 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE INDEX</span> idx_email_cover
   <span class="sql-kw">ON</span> users (<span class="sh-key">email HASH</span>)
   <span class="sql-kw">INCLUDE</span> (<span class="inc-key">name, region</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Index-only scan: no main table access needed</span>
 <span class="sql-kw">SELECT</span> name, region <span class="sql-kw">FROM</span> users
@@ -1103,6 +1263,14 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE INDEX</span> idx_active_users
   <span class="sql-kw">ON</span> users (<span class="sh-key">email HASH</span>)
   <span class="sql-kw">WHERE</span> <span class="sql-fn">status = 'active'</span>;
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, status, name)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'active'</span>,<span class="sql-str">'inactive'</span>])[1 + mod(i,2)],
+       <span class="sql-str">'User '</span> || i
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Only rows with status='active' are in this index</span>
 <span class="sql-comment">-- Rows with status='inactive' are excluded entirely</span>
@@ -1196,6 +1364,14 @@ Object.assign(SCENARIOS, {
     total      <span class="sql-type">DECIMAL</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, created_at, event, total)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Purchase'</span>,<span class="sql-str">'Refund'</span>,<span class="sql-str">'Return'</span>])[1 + mod(i,3)],
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- ❌ WRONG: Range index on timestamp → hotspot</span>
 <span class="sql-kw">CREATE INDEX</span> idx_orders_date
   <span class="sql-kw">ON</span> orders (created_at <span class="sql-kw">DESC</span>);
@@ -1208,7 +1384,13 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-comment">-- N=3 buckets → 2 split points → 3 tablets from day one</span>
 <span class="sql-comment">-- Query fans out across all 3 buckets automatically:</span>
-<span class="sql-kw">WHERE</span> created_at >= <span class="sql-str">NOW()</span> - <span class="sql-str">INTERVAL '7 days'</span>;` },
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
+<span class="sql-kw">WHERE</span> created_at >= <span class="sql-fn">NOW</span>() - <span class="sql-str">'7 days'</span><span class="sql-type">::INTERVAL</span>;
+
+<span class="sql-comment">-- ✅ Date-range query with explicit bucket range:</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
+<span class="sql-kw">WHERE</span> created_at <span class="sql-kw">BETWEEN</span> <span class="sql-str">'2024-03-22 00:00:00'</span> <span class="sql-kw">AND</span> <span class="sql-str">'2024-03-25 23:59:59'</span>
+<span class="sql-kw">ORDER BY</span> created_at <span class="sql-kw">DESC</span>;` },
     guidedTour: [
       { text: "Monotonic keys (like timestamps) usually create hotspots in range indexes.", element: ".index-area" },
       { text: "Bucket indexing (Hash + Range) splits the 'hot' key into multiple hash buckets.", element: ".index-row" },
@@ -1278,6 +1460,15 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- Expression index: lower(email) is stored, not the raw email</span>
 <span class="sql-kw">CREATE INDEX</span> idx_lower_email
   <span class="sql-kw">ON</span> users (<span class="sh-key">lower(email) HASH</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'User'</span> || i || <span class="sql-str">'@Company.COM'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- ✅ Uses the index (expression matches WHERE clause):</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
@@ -1350,6 +1541,19 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-kw">CREATE UNIQUE INDEX</span> idx_unique_email
   <span class="sql-kw">ON</span> users (<span class="sh-key">email HASH</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-comment">-- ✅ Lookup by unique email — single-RPC index scan</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
+<span class="sql-kw">WHERE</span> email = <span class="sql-str">'alice@co.com'</span>;
 
 <span class="sql-comment">-- ✅ New email → insert succeeds</span>
 <span class="sql-kw">INSERT INTO</span> users <span class="sql-kw">VALUES</span> (<span class="sql-str">'user-999'</span>, <span class="sql-str">'new@co.com'</span>, ...);
@@ -1428,6 +1632,15 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- Compound hash key: both columns hashed together</span>
 <span class="sql-kw">CREATE INDEX</span> idx_events_multi
   <span class="sql-kw">ON</span> events ((<span class="sh-key">tenant_id, event_type</span>) <span class="sh-key">HASH</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> events (event_id, tenant_id, event_type, payload, created_at)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'evt-'</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'t-1'</span>,<span class="sql-str">'t-2'</span>,<span class="sql-str">'t-3'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'click'</span>,<span class="sql-str">'view'</span>,<span class="sql-str">'purchase'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'payload-'</span> || i,
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- ✅ Uses index: full compound key specified</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> events
@@ -1530,7 +1743,16 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">FOR VALUES FROM</span> (<span class="sql-str">'2024-01-01'</span>) <span class="sql-kw">TO</span> (<span class="sql-str">'2025-01-01'</span>);
 
 <span class="sql-kw">CREATE TABLE</span> orders_default <span class="sql-kw">PARTITION OF</span> orders
-  <span class="sql-kw">DEFAULT</span>;` },
+  <span class="sql-kw">DEFAULT</span>;
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, order_date, customer_id, region, total)
+<span class="sql-kw">SELECT</span> i,
+       (<span class="sql-str">'2023-01-01'</span><span class="sql-type">::DATE</span> + (i * 60 || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>)<span class="sql-type">::DATE</span>,
+       <span class="sql-str">'cust-'</span> || (1 + mod(i,5)),
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;` },
     guidedTour: [
       { text: "Table Partitioning splits one logical table into multiple physical tables.", element: ".partitioning-view" },
       { text: "Insert a date from 2023 and then one from 2024.", element: "#sim-input-val" },
@@ -1654,7 +1876,20 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- These tables share the same physical tablet:</span>
 <span class="sql-kw">CREATE TABLE</span> users (id <span class="sql-type">INT PRIMARY KEY</span>, name <span class="sql-type">TEXT</span>);
 <span class="sql-kw">CREATE TABLE</span> roles (id <span class="sql-type">INT PRIMARY KEY</span>, role <span class="sql-type">TEXT</span>);
-<span class="sql-kw">CREATE TABLE</span> settings (id <span class="sql-type">INT PRIMARY KEY</span>, val <span class="sql-type">TEXT</span>);` },
+<span class="sql-kw">CREATE TABLE</span> settings (id <span class="sql-type">INT PRIMARY KEY</span>, val <span class="sql-type">TEXT</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (id, name)
+<span class="sql-kw">SELECT</span> i, <span class="sql-str">'User '</span> || i
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-kw">INSERT INTO</span> roles (id, role)
+<span class="sql-kw">SELECT</span> i, (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Admin'</span>,<span class="sql-str">'Editor'</span>,<span class="sql-str">'Viewer'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-kw">INSERT INTO</span> settings (id, val)
+<span class="sql-kw">SELECT</span> i, (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'DarkMode'</span>,<span class="sql-str">'LightMode'</span>,<span class="sql-str">'AutoMode'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;` },
     guidedTour: [
       { text: "Colocation allows many small tables to share the same tablets.", element: ".colocated-view" },
       { text: "Notice how rows from <code>users</code>, <code>roles</code>, and <code>settings</code> all live together.", element: ".tablet-card" },
@@ -1728,7 +1963,14 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">FOR VALUES IN</span> (<span class="sql-str">'US'</span>) <span class="sql-kw">TABLESPACE</span> us_east_ts;
 
 <span class="sql-kw">CREATE TABLE</span> trans_eu <span class="sql-kw">PARTITION OF</span> transactions
-  <span class="sql-kw">FOR VALUES IN</span> (<span class="sql-str">'EU'</span>) <span class="sql-kw">TABLESPACE</span> eu_central_ts;` },
+  <span class="sql-kw">FOR VALUES IN</span> (<span class="sql-str">'EU'</span>) <span class="sql-kw">TABLESPACE</span> eu_central_ts;
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> transactions (order_id, geo_region, amount)
+<span class="sql-kw">SELECT</span> i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>])[1 + mod(i,4)],
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;` },
     guidedTour: [
       { text: "Geo-partitioning is the ultimate 'Data Sovereignty' pattern.", element: ".partitioning-view" },
       { text: "Try inserting a 'US' order and then an 'EU' order.", element: "#sim-input-val" },
@@ -1790,6 +2032,14 @@ Object.assign(SCENARIOS, {
   region  <span class="sql-type">TEXT</span>,
   status  <span class="sql-type">TEXT</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Hash point lookup: single RPC to one tablet</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
@@ -1860,6 +2110,14 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, product_id)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (price, product_id, name, status)
+<span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Range point lookup:</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
 <span class="sql-kw">WHERE</span> price = <span class="sql-str">89.99</span>;` },
@@ -1922,6 +2180,14 @@ Object.assign(SCENARIOS, {
   region  <span class="sql-type">TEXT</span>,
   status  <span class="sql-type">TEXT</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Full table scan: no index on 'name' column</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
@@ -1998,6 +2264,14 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, product_id)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (price, product_id, name, status)
+<span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Range scan: contiguous walk across tablets</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
 <span class="sql-kw">WHERE</span> price <span class="sql-kw">BETWEEN</span> <span class="sql-str">25</span> <span class="sql-kw">AND</span> <span class="sql-str">100</span>;
@@ -2067,6 +2341,14 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">PRIMARY KEY</span> (region <span class="sql-kw">ASC</span>, created_at <span class="sql-kw">DESC</span>)
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (region, created_at, order_id, total)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'APAC'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'US'</span>])[1 + mod(i,3)],
+       <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>,
+       <span class="sql-str">'ord-'</span> || i,
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Query on 2nd column only → Skip Scan</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> created_at = <span class="sql-str">'2024-03-18'</span>;
@@ -2125,6 +2407,15 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE INDEX</span> idx_users_email
   <span class="sql-kw">ON</span> users (email);
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Requires 2 RPCs (Index lookup + Main table fetch)</span>
 <span class="sql-kw">SELECT</span> name, region <span class="sql-kw">FROM</span> users
 <span class="sql-kw">WHERE</span> email = <span class="sql-str">'dan@co.com'</span>;` },
@@ -2179,6 +2470,15 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE INDEX</span> idx_users_email_covering
   <span class="sql-kw">ON</span> users (email)
   <span class="sql-kw">INCLUDE</span> (name, region);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'user'</span> || i || <span class="sql-str">'@co.com'</span>,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'Active'</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Extremely fast! 1 RPC Index Only Scan</span>
 <span class="sql-kw">SELECT</span> name, region <span class="sql-kw">FROM</span> users
@@ -2249,6 +2549,14 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">ON</span> products (<span class="cl-key">price ASC</span>)
   <span class="sql-kw">INCLUDE</span> (<span class="inc-key">product, qty</span>);
 <span class="sql-comment">-- Idx T1: (-∞,60)  Idx T2: [60,120)  Idx T3: [120,∞)</span>
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, product, price, qty)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (10 + i * 14.99)<span class="sql-type">::DECIMAL</span>,
+       1 + mod(i,5)
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Covering index scan — no heap fetch needed</span>
 <span class="sql-kw">SELECT</span> product_id, product, qty <span class="sql-kw">FROM</span> products
@@ -2379,6 +2687,14 @@ Object.assign(SCENARIOS, {
 ) <span class="sql-kw">INCLUDE</span> (<span class="inc-key">metric, value</span>)
   <span class="sql-kw">SPLIT AT VALUES</span> ((1), (2));
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> events (event_id, ts, metric, value)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ev-'</span> || i,
+       <span class="sql-fn">NOW</span>() - (i * 7 || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'cpu_pct'</span>,<span class="sql-str">'mem_mb'</span>,<span class="sql-str">'disk_io'</span>,<span class="sql-str">'net_rx'</span>])[1 + mod(i,4)],
+       (20 + i * 5.5)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- EXPLAIN (Merge Append of 3 sub-scans):</span>
 <span class="sql-comment">-- Merge Append  (Sort Key: ts DESC)</span>
 <span class="sql-comment">--   -> Index Scan idx_events_ts (bucket=0 ∧ ts BETWEEN)</span>
@@ -2437,10 +2753,17 @@ Object.assign(SCENARIOS, {
     created_at <span class="sql-type">DATE</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, created_at)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'User '</span> || i,
+       <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- PK is HASH-sharded by default</span>
 <span class="sql-comment">-- PLAN: Seq Scan (Scatter-Gather) -> Sort -> Limit</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users 
-<span class="sql-kw">ORDER BY</span> user_id <span class="sql-kw">ASC</span> 
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
+<span class="sql-kw">ORDER BY</span> user_id <span class="sql-kw">ASC</span>
 <span class="sql-kw">LIMIT</span> <span class="sql-str">5</span>;`
     },
     guidedTour: [
@@ -2488,9 +2811,16 @@ Object.assign(SCENARIOS, {
     price      <span class="sql-type">DECIMAL</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, name, price)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       <span class="sql-str">'Product '</span> || i,
+       (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- PLAN: Seq Scan (Ordered Streaming)</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products 
-<span class="sql-kw">ORDER BY</span> product_id <span class="sql-kw">ASC</span> 
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> product_id <span class="sql-kw">ASC</span>
 <span class="sql-kw">LIMIT</span> <span class="sql-str">5</span>;`
     },
     guidedTour: [
@@ -2554,6 +2884,14 @@ Object.assign(SCENARIOS, {
   status   <span class="sql-type">TEXT</span>,
   total    <span class="sql-type">DECIMAL</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, region, status, total)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'active'</span>,<span class="sql-str">'inactive'</span>])[1 + mod(i,2)],
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Predicate pushed to DocDB — evaluated at each tablet</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
@@ -2626,6 +2964,14 @@ Object.assign(SCENARIOS, {
   region   <span class="sql-type">TEXT</span>
 );
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> orders (order_id, customer, total, region)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       <span class="sql-str">'Customer '</span> || i,
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Aggregate is pushed down into each tablet server</span>
 <span class="sql-kw">SELECT</span> <span class="sql-fn">COUNT</span>(*), <span class="sql-fn">SUM</span>(total) <span class="sql-kw">FROM</span> orders;
 
@@ -2694,6 +3040,17 @@ WHERE u.name = 'Dan';`,
   user_id  <span class="sql-type">TEXT</span>,
   total    <span class="sql-type">DECIMAL</span>
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i, <span class="sql-str">'User '</span> || i
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-kw">INSERT INTO</span> orders (order_id, user_id, total)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ord-'</span> || i,
+       <span class="sql-str">'user-'</span> || (1 + mod(i,5)),
+       (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Join executed at the query layer</span>
 <span class="sql-kw">SELECT</span> u.name, o.total
@@ -2801,6 +3158,15 @@ WHERE u.name = 'Dan';`,
     <span class="cl-key">ts DESC</span>
 ) <span class="sql-kw">SPLIT AT VALUES</span> ((1), (2));
 
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> events (event_id, ts, device_id, metric, value)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'ev-'</span> || i,
+       <span class="sql-fn">NOW</span>() - (i * 7 || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'dev-A1'</span>,<span class="sql-str">'dev-B2'</span>,<span class="sql-str">'dev-C3'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'cpu_pct'</span>,<span class="sql-str">'mem_mb'</span>,<span class="sql-str">'disk_io'</span>,<span class="sql-str">'net_rx'</span>])[1 + mod(i,4)],
+       (20 + i * 5.5)<span class="sql-type">::DECIMAL</span>
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
 <span class="sql-comment">-- Range query: planner fans out across all 3 buckets</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> events
 <span class="sql-kw">WHERE</span> ts >= <span class="sql-str">'2024-03-01'</span> <span class="sql-kw">AND</span> ts < <span class="sql-str">'2024-04-01'</span>
@@ -2883,6 +3249,15 @@ WHERE u.name = 'Dan';`,
     resource   <span class="sql-type">TEXT</span>,
     <span class="sql-kw">PRIMARY KEY</span> ((<span class="sh-key">tenant_id</span>) <span class="sql-kw">HASH</span>, <span class="cl-key">user_id</span> <span class="sql-kw">ASC</span>, <span class="cl-key">event_time</span> <span class="sql-kw">DESC</span>)
 );
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> user_activity (tenant_id, user_id, event_time, action, resource)
+<span class="sql-kw">SELECT</span> (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'acme-corp'</span>,<span class="sql-str">'globex-inc'</span>,<span class="sql-str">'initech'</span>])[1 + mod(i,3)],
+       <span class="sql-str">'u-'</span> || <span class="sql-fn">lpad</span>(mod(i,5)<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+       <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' hours'</span>)<span class="sql-type">::INTERVAL</span>,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'login'</span>,<span class="sql-str">'view'</span>,<span class="sql-str">'edit'</span>,<span class="sql-str">'create'</span>])[1 + mod(i,4)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'/dashboard'</span>,<span class="sql-str">'/users'</span>,<span class="sql-str">'/reports'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Single-tablet: hash(tenant_id) → 1 RPC</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> user_activity
@@ -2997,6 +3372,18 @@ WHERE u.name = 'Dan';`,
 <span class="sql-comment">-- Readable (key, value) entries — supports @>, ?, ?|, ?&amp; operators</span>
 <span class="sql-kw">CREATE INDEX</span> gin_products_metadata
     <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> gin (metadata <span class="sql-kw">jsonb_ops</span>);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> products (product_id, name, metadata)
+<span class="sql-kw">SELECT</span>
+    <span class="sql-str">'prod-'</span> || i,
+    <span class="sql-str">'Product '</span> || i,
+    <span class="sql-fn">jsonb_build_object</span>(
+        <span class="sql-str">'color'</span>,    (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'red'</span>,<span class="sql-str">'blue'</span>,<span class="sql-str">'green'</span>])[1 + mod(i,3)],
+        <span class="sql-str">'category'</span>, (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'apparel'</span>,<span class="sql-str">'electronics'</span>,<span class="sql-str">'furniture'</span>])[1 + mod(i,3)],
+        <span class="sql-str">'in_stock'</span>, mod(i,2) = 0
+    )
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- DocDB stores the JSONB column as a single opaque blob:</span>
 <span class="sql-comment">-- prod-001 → {"color":"red","category":"apparel","in_stock":true}</span>

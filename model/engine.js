@@ -1747,6 +1747,133 @@ function renderHome(container) {
                 <p>Welcome to the interactive visualization engine. Explore how YugabyteDB's distributed DocDB storage layer handles sharding, secondary indexes, advanced topologies, and query execution under the hood.</p>
             </div>
 
+            <div class="learning-path-section">
+                <div class="lp-heading">Recommended Learning Path</div>
+                <div class="lp-phases">
+                    <div class="lp-phase-row phase-foundation">
+                        <div class="lp-phase-tag">
+                            <div class="lp-phase-name">Foundation</div>
+                            <div class="lp-phase-sub">How data is stored &amp; distributed</div>
+                        </div>
+                        <div class="lp-steps">
+                            <div class="lp-step" onclick="selectScenario('hash-single')">
+                                <span class="lp-step-num">1</span>
+                                <span class="lp-step-icon">🔢</span>
+                                <span class="lp-step-title">Hash Sharding</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('range-single')">
+                                <span class="lp-step-num">2</span>
+                                <span class="lp-step-icon">📏</span>
+                                <span class="lp-step-title">Range Sharding</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('hash-comp-ab')">
+                                <span class="lp-step-num">3</span>
+                                <span class="lp-step-icon">🔀</span>
+                                <span class="lp-step-title">Hash + Range Keys</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('hash-data-org')">
+                                <span class="lp-step-num">4</span>
+                                <span class="lp-step-icon">📦</span>
+                                <span class="lp-step-title">Physical Layout</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lp-phase-row phase-indexes">
+                        <div class="lp-phase-tag">
+                            <div class="lp-phase-name">Secondary Indexes</div>
+                            <div class="lp-phase-sub">Efficient non-PK lookups</div>
+                        </div>
+                        <div class="lp-steps">
+                            <div class="lp-step" onclick="selectScenario('idx-hash-single')">
+                                <span class="lp-step-num">5</span>
+                                <span class="lp-step-icon">📇</span>
+                                <span class="lp-step-title">Hash Index</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('idx-hash-composite')">
+                                <span class="lp-step-num">6</span>
+                                <span class="lp-step-icon">🧩</span>
+                                <span class="lp-step-title">Hash + Range Index</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('idx-covering')">
+                                <span class="lp-step-num">7</span>
+                                <span class="lp-step-icon">⚡</span>
+                                <span class="lp-step-title">Covering Index</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('idx-partial')">
+                                <span class="lp-step-num">8</span>
+                                <span class="lp-step-icon">✂️</span>
+                                <span class="lp-step-title">Partial Index</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('idx-bucket')">
+                                <span class="lp-step-num">9</span>
+                                <span class="lp-step-icon">🪣</span>
+                                <span class="lp-step-title">Hot Key Mitigation</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lp-phase-row phase-advanced">
+                        <div class="lp-phase-tag">
+                            <div class="lp-phase-name">Advanced</div>
+                            <div class="lp-phase-sub">Queries &amp; topologies</div>
+                        </div>
+                        <div class="lp-steps">
+                            <div class="lp-step" onclick="selectScenario('qe-hash-point')">
+                                <span class="lp-step-num">10</span>
+                                <span class="lp-step-icon">🎯</span>
+                                <span class="lp-step-title">Query Execution</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('colocated-tables')">
+                                <span class="lp-step-num">11</span>
+                                <span class="lp-step-icon">📦</span>
+                                <span class="lp-step-title">Colocated Tables</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('geo-partitioning')">
+                                <span class="lp-step-num">12</span>
+                                <span class="lp-step-icon">🌍</span>
+                                <span class="lp-step-title">Geo-Partitioning</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lp-phase-row phase-patterns">
+                        <div class="lp-phase-tag">
+                            <div class="lp-phase-name">Design Patterns</div>
+                            <div class="lp-phase-sub">Production schema recipes</div>
+                        </div>
+                        <div class="lp-steps">
+                            <div class="lp-step" onclick="selectScenario('pattern-timeseries')">
+                                <span class="lp-step-num">13</span>
+                                <span class="lp-step-icon">📅</span>
+                                <span class="lp-step-title">Time-Series</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('pattern-multitenant')">
+                                <span class="lp-step-num">14</span>
+                                <span class="lp-step-icon">🏢</span>
+                                <span class="lp-step-title">Multi-Tenant</span>
+                            </div>
+                            <span class="lp-arrow">›</span>
+                            <div class="lp-step" onclick="selectScenario('pattern-jsonb')">
+                                <span class="lp-step-num">15</span>
+                                <span class="lp-step-icon">🗄️</span>
+                                <span class="lp-step-title">JSONB &amp; GIN Index</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="home-sections-grid">
                 <div class="home-section">
                     <div class="home-section-hdr">
