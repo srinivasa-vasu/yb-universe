@@ -1098,19 +1098,11 @@ function renderHome() {
       `;
   container.appendChild(hero);
 
-  const gridWrap = document.createElement('div');
-  gridWrap.className = 'home-sections-grid';
-
+  // Declare shared metadata before learning path and chapter grid both use it
   const groupOrder = [
-    "Foundations",
-    "Deployment Architectures",
-    "Global Universe",
-    "xCluster",
-    "Data Distribution",
-    "Consistency & High Availability",
-    "Read & Write Paths",
-    "Scalability",
-    "System Internals"
+    "Foundations", "Deployment Architectures", "Global Universe", "xCluster",
+    "Data Distribution", "Consistency & High Availability", "Read & Write Paths",
+    "Scalability", "System Internals"
   ];
   const groupMeta = {
     "Foundations":                     { chapter: "CHAPTER 1", icon: "🏗️", desc: "Core concepts: cluster structure, fault domains, and Raft consensus." },
@@ -1123,6 +1115,175 @@ function renderHome() {
     "Scalability":                     { chapter: "CHAPTER 8", icon: "📈", desc: "Elastic scale-out and automatic tablet splitting as the cluster grows." },
     "System Internals":                { chapter: "CHAPTER 9", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." }
   };
+
+  // ── Learning Path ──────────────────────────────────────────────────────────
+  const lpPhases = [
+    { label: 'Cluster Basics',    color: '#60a5fa', chapters: ['Foundations', 'Deployment Architectures'] },
+    { label: 'Global Topology',   color: '#34d399', chapters: ['Global Universe', 'xCluster'] },
+    { label: 'Data Sharding',     color: '#f59e0b', chapters: ['Data Distribution'] },
+    { label: 'High Availability', color: '#fb7185', chapters: ['Consistency & High Availability'] },
+    { label: 'Read & Write',      color: '#a78bfa', chapters: ['Read & Write Paths'] },
+    { label: 'Scalability',       color: '#6366f1', chapters: ['Scalability'] },
+    { label: 'System Internals',  color: '#94a3b8', chapters: ['System Internals'] },
+  ];
+
+  const personas = [
+    { id: 'all',  icon: '🗺️', label: 'All Chapters',       desc: 'Complete curriculum',         color: '#60a5fa',
+      chapters: null },
+    { id: 'dev',  icon: '💻', label: 'App Developer',       desc: 'Build on YugabyteDB',         color: '#34d399',
+      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Consistency & High Availability'] },
+    { id: 'dba',  icon: '🛠️', label: 'DBA / SRE',           desc: 'Operate and tune clusters',   color: '#fb7185',
+      chapters: ['Foundations', 'Deployment Architectures', 'Consistency & High Availability', 'Scalability', 'System Internals'] },
+    { id: 'arch', icon: '🏛️', label: 'Solutions Architect', desc: 'Design global topologies',    color: '#f59e0b',
+      chapters: ['Foundations', 'Deployment Architectures', 'Data Distribution', 'Global Universe', 'xCluster'] },
+    { id: 'de',   icon: '📊', label: 'Data Engineer',       desc: 'Manage and scale data',       color: '#a78bfa',
+      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Scalability', 'System Internals'] },
+  ];
+
+  function lpFirstScenario(groupName) {
+    return Object.keys(SCENARIOS)
+      .filter(id => id !== 'home' && SCENARIOS[id].group === groupName)
+      .map(id => ({ id, ...SCENARIOS[id] }))
+      .sort((a, b) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99))[0];
+  }
+
+  const lpWrap = document.createElement('div');
+  lpWrap.className = 'lp-wrap';
+  lpWrap.innerHTML = `<div class="lp-heading">📚 Learning Path</div>
+    <div class="lp-sub">Select your role for a curated sequence, or browse all chapters</div>`;
+
+  // Persona selector bar
+  const personaBar = document.createElement('div');
+  personaBar.className = 'lp-personas';
+  personas.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'lp-persona-card' + (p.id === 'all' ? ' active' : '');
+    card.style.setProperty('--pc-color', p.color);
+    card.dataset.pid = p.id;
+    card.onclick = () => window.lpSetPersona(p.id);
+    card.innerHTML = `<span class="lp-pcard-icon">${p.icon}</span>
+      <span class="lp-pcard-label">${p.label}</span>
+      <span class="lp-pcard-desc">${p.desc}</span>`;
+    personaBar.appendChild(card);
+  });
+  lpWrap.appendChild(personaBar);
+
+  const lpTrackWrap = document.createElement('div');
+  lpTrackWrap.id = 'lp-track-wrap';
+  lpWrap.appendChild(lpTrackWrap);
+
+  function renderLpTrack(pid) {
+    lpTrackWrap.innerHTML = '';
+    const persona = personas.find(p => p.id === pid) || personas[0];
+
+    if (pid === 'all') {
+      // Phase-grouped view
+      const lpTrack = document.createElement('div');
+      lpTrack.className = 'lp-track';
+
+      lpPhases.forEach((phase, pi) => {
+        const phaseEl = document.createElement('div');
+        phaseEl.className = 'lp-phase';
+        phaseEl.style.setProperty('--ph-color', phase.color);
+
+        const phaseLabel = document.createElement('div');
+        phaseLabel.className = 'lp-phase-label';
+        phaseLabel.textContent = phase.label;
+        phaseEl.appendChild(phaseLabel);
+
+        const nodesRow = document.createElement('div');
+        nodesRow.className = 'lp-nodes';
+
+        phase.chapters.forEach((chName, ci) => {
+          const meta = groupMeta[chName];
+          const first = lpFirstScenario(chName);
+          if (!meta) return;
+
+          const node = document.createElement('div');
+          node.className = 'lp-node';
+          node.title = `Start: ${first?.name || chName}`;
+          node.onclick = () => {
+            if (!first) return;
+            first.isArch ? selectArch(first.id) : selectScenario(first.id);
+          };
+          node.innerHTML = `
+            <div class="lp-node-icon">${meta.icon}</div>
+            <div class="lp-node-badge">${meta.chapter.replace('CHAPTER ', 'CH')}</div>
+            <div class="lp-node-name">${chName}</div>
+            <div class="lp-node-cta">Start →</div>`;
+          nodesRow.appendChild(node);
+
+          if (ci < phase.chapters.length - 1) {
+            const arr = document.createElement('div');
+            arr.className = 'lp-arr-inner';
+            arr.textContent = '→';
+            nodesRow.appendChild(arr);
+          }
+        });
+
+        phaseEl.appendChild(nodesRow);
+        lpTrack.appendChild(phaseEl);
+
+        if (pi < lpPhases.length - 1) {
+          const sep = document.createElement('div');
+          sep.className = 'lp-arr-phase';
+          sep.textContent = '▶';
+          lpTrack.appendChild(sep);
+        }
+      });
+
+      lpTrackWrap.appendChild(lpTrack);
+
+    } else {
+      // Flat numbered sequence for persona
+      const seqRow = document.createElement('div');
+      seqRow.className = 'lp-seq-row';
+
+      persona.chapters.forEach((chName, i) => {
+        const meta = groupMeta[chName];
+        const first = lpFirstScenario(chName);
+        if (!meta) return;
+
+        const step = document.createElement('div');
+        step.className = 'lp-node lp-seq-step';
+        step.style.setProperty('--ph-color', persona.color);
+        step.title = `Start: ${first?.name || chName}`;
+        step.onclick = () => {
+          if (!first) return;
+          first.isArch ? selectArch(first.id) : selectScenario(first.id);
+        };
+        step.innerHTML = `
+          <div class="lp-seq-num">${i + 1}</div>
+          <div class="lp-node-icon">${meta.icon}</div>
+          <div class="lp-node-name">${chName}</div>
+          <div class="lp-node-cta">Start →</div>`;
+        seqRow.appendChild(step);
+
+        if (i < persona.chapters.length - 1) {
+          const arr = document.createElement('div');
+          arr.className = 'lp-arr-persona';
+          arr.innerHTML = `<span>→</span>`;
+          seqRow.appendChild(arr);
+        }
+      });
+
+      lpTrackWrap.appendChild(seqRow);
+    }
+  }
+
+  window.lpSetPersona = function(pid) {
+    lpWrap.querySelectorAll('.lp-persona-card').forEach(c => {
+      c.classList.toggle('active', c.dataset.pid === pid);
+    });
+    renderLpTrack(pid);
+  };
+
+  renderLpTrack('all');
+  container.appendChild(lpWrap);
+  // ── End Learning Path ──────────────────────────────────────────────────────
+
+  const gridWrap = document.createElement('div');
+  gridWrap.className = 'home-sections-grid';
 
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
@@ -1540,7 +1701,7 @@ function renderSplitInfo(parentRange, splitPoint) {
               </div>
             </div>
           </div>
-          
+
           <div class="rs-note" style="flex: 1; min-width: 250px; padding: 12px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--info); border-radius: 4px; font-size: 12.5px; line-height: 1.5; color: var(--txt2); margin-top: 0;">
             <div style="font-weight: 700; color: var(--info); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 14px;">💡</span> Split Logic Note
@@ -2567,7 +2728,7 @@ function _renderArchFaultDomains(container) {
 
   h += `<div style="flex:1.8;background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:18px 22px;display:flex;flex-direction:column;justify-content:center">`;
   h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:var(--txt2);margin-bottom:10px">What is a Fault Domain?</div>`;
-  h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.65">A <b>fault/failure domain (fd)</b> is a group of nodes that share a common failure mode — power, switch, zone, or region. When one node in the domain fails, all nodes in that domain may be affected simultaneously. It is any shared failure boundary — a node, a rack, an availability zone, a region, or a cloud provider. A failure of 1 FD not necessarily affect the others.</div>`;
+  h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.65">A <b>fault/failure domain (fd)</b> is a group of nodes that share a common failure mode — power, switch, zone, or region. When one node in the domain fails, all nodes in that domain may be affected simultaneously. It is any shared failure boundary — a node, a rack, an availability zone, a region, or a cloud provider. A failure of one fault domain does not necessarily affect the others.</div>`;
   h += `<div style="font-size:13.5px;color:var(--txt);line-height:1.65;margin-top:8px">YugabyteDB places exactly <b>one Raft replica per fault domain</b>. Raft requires a strict majority (&gt;50%) to commit — so RF and the number of fault domains must always be <b>odd</b>.</div>`;
   h += `</div>`;
 
