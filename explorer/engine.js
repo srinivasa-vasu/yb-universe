@@ -63,7 +63,8 @@ function freshState(numNodes = 9) {
     replicaState: buildRS(INITIAL_GROUPS),
     term: 4,
     transactions: [], // { id, status, hb }
-    nodeStats
+    nodeStats,
+    compactMode: false
   };
 }
 function buildRS(groups = INITIAL_GROUPS) {
@@ -245,6 +246,130 @@ async function fdCatchUp(nodeId) {
   })();
 
   return fdCatchingUp[nodeId];
+}
+
+function renderShardingPerfPanel({ nodes = 1, shards = 6, throughput = 10000, maxThroughput = 60000, latency = 28, maxLatency = 28, nodeLoads = [] }) {
+  const container = document.getElementById('shp-content');
+  if (!container) return;
+
+  const allNodes = [1, 2, 3, 4, 5, 6];
+  const nodeGridHtml = allNodes.map(n => {
+    const info = nodeLoads.find(x => x.node === n);
+    const isActive = !!info;
+    const pct = info ? info.pct : 0;
+    const loadClass = pct >= 80 ? 'load-critical' : pct >= 50 ? 'load-high' : pct >= 25 ? 'load-medium' : 'load-low';
+    return `<div class="shp-node-box ${isActive ? 'active ' + loadClass : 'inactive'}">
+      <div class="shp-node-lbl">TS-${n}</div>
+      <div class="shp-node-load-bar"><div class="shp-node-load-fill" style="width:${isActive ? pct : 0}%"></div></div>
+      <div class="shp-node-load-pct">${isActive ? pct + '%' : '—'}</div>
+    </div>`;
+  }).join('');
+
+  const tpFill = Math.min(100, (throughput / maxThroughput) * 100);
+  const latFill = Math.min(100, (latency / maxLatency) * 100);
+  const ndFill = Math.min(100, (nodes / 6) * 100);
+
+  container.innerHTML = `
+    <div class="shp-section-lbl">Node Write Load</div>
+    <div class="shp-node-grid">${nodeGridHtml}</div>
+    <div class="shp-divider"></div>
+    <div class="shp-metric-row">
+      <div class="shp-metric-lbl">Throughput</div>
+      <div class="shp-metric-track"><div class="shp-metric-fill tp" style="width:${tpFill}%"></div></div>
+      <div class="shp-metric-val">${throughput.toLocaleString()} /sec</div>
+    </div>
+    <div class="shp-metric-row">
+      <div class="shp-metric-lbl">Write Latency</div>
+      <div class="shp-metric-track"><div class="shp-metric-fill lat" style="width:${latFill}%"></div></div>
+      <div class="shp-metric-val">${latency} ms avg</div>
+    </div>
+    <div class="shp-metric-row">
+      <div class="shp-metric-lbl">Active Nodes</div>
+      <div class="shp-metric-track"><div class="shp-metric-fill nd" style="width:${ndFill}%"></div></div>
+      <div class="shp-metric-val">${nodes} of 6 nodes</div>
+    </div>`;
+}
+
+function renderHaPanel({ nodes = [], rf = 3, quorum = true, availability = 100, phase = 'healthy', systems = null }) {
+  const container = document.getElementById('hap-content');
+  if (!container) return;
+
+  // Split-view mode: two live systems shown side by side
+  if (systems) {
+    const colsHtml = systems.map(sys => {
+      const aliveCount = sys.nodes.filter(n => n.alive).length;
+      const ok = sys.available;
+      const degraded = sys.degraded;
+      const colCls = ok ? (degraded ? ' hap-sys-warn' : ' hap-sys-ok') : ' hap-sys-err';
+      const badgeCls = ok ? (degraded ? 'hap-cmp-warn' : 'hap-cmp-ok') : 'hap-cmp-err';
+      const badgeTxt = ok ? (degraded ? '⚠ DEGRADED' : '● AVAILABLE') : '✕ OUTAGE';
+      const nodesHtml = sys.nodes.map(n => {
+        const cls = n.alive ? 'hap-node-ok' : 'hap-node-dead';
+        const dot = n.alive ? '●' : '✕';
+        return `<div class="hap-node-box ${cls}">
+          <div class="hap-nd-dot">${dot}</div>
+          <div class="hap-nd-name">${n.name ?? `TS-${n.id}`}</div>
+          <div class="hap-nd-lbl">${n.alive ? 'OK' : 'DOWN'}</div>
+        </div>`;
+      }).join('');
+      return `<div class="hap-sys-col${colCls}">
+        <div class="hap-sys-title">${sys.label}</div>
+        <div class="hap-node-grid">${nodesHtml}</div>
+        <div class="hap-sys-badge ${badgeCls}">${badgeTxt}</div>
+        <div class="hap-sys-detail">${sys.detail || ''}</div>
+      </div>`;
+    }).join('<div class="hap-sys-vs">vs</div>');
+    container.innerHTML = `<div class="hap-sys-row">${colsHtml}</div>`;
+    return;
+  }
+
+  // Classic single-cluster mode
+  const aliveCount = nodes.filter(n => n.alive).length;
+  const totalNodes = nodes.length;
+  const overallOk = quorum && aliveCount > 0;
+  const badgeCls = overallOk ? 'hap-badge-ok' : 'hap-badge-err';
+  const badgeTxt = overallOk ? '● AVAILABLE' : '✕ OUTAGE';
+  const quorumTxt = `${aliveCount} of ${totalNodes} nodes alive — quorum ${quorum ? 'held ✓' : 'LOST ✗'}`;
+  const nodeGridHtml = nodes.map(n => {
+    const cls = n.alive ? 'hap-node-ok' : 'hap-node-dead';
+    const dot = n.alive ? '●' : '✕';
+    const lbl = n.alive ? `${n.leaders ?? 0}L` : 'DOWN';
+    return `<div class="hap-node-box ${cls}">
+      <div class="hap-nd-dot">${dot}</div>
+      <div class="hap-nd-name">TS-${n.id}</div>
+      <div class="hap-nd-lbl">${lbl}</div>
+    </div>`;
+  }).join('');
+  const rf3Ok = quorum;
+  const rf1Ok = aliveCount === totalNodes;
+  const rf3StatusCls = rf3Ok ? 'hap-cmp-ok' : 'hap-cmp-err';
+  const rf1StatusCls = rf1Ok ? 'hap-cmp-ok' : 'hap-cmp-err';
+  const rf3Txt  = rf3Ok ? '● Serving normally' : '✕ OUTAGE';
+  const rf1Txt  = rf1Ok ? '● Serving normally' : '✕ TOTAL OUTAGE';
+  const rf3Note = rf3Ok ? `${aliveCount}/${totalNodes} alive — quorum held` : 'No quorum';
+  const rf1Note = rf1Ok ? 'All nodes alive' : `${totalNodes - aliveCount} node(s) down — data unreachable`;
+  const rf1Emphasis = !rf1Ok ? ' hap-cmp-emphasis' : '';
+  container.innerHTML = `
+    <div class="hap-top-row">
+      <div class="hap-avail-badge ${badgeCls}">${badgeTxt}</div>
+      <div class="hap-quorum-txt">${quorumTxt}</div>
+    </div>
+    <div class="hap-section-lbl">Node Health</div>
+    <div class="hap-node-grid">${nodeGridHtml}</div>
+    <div class="hap-divider"></div>
+    <div class="hap-section-lbl">Why Replication Matters</div>
+    <div class="hap-compare-row">
+      <div class="hap-cmp-box">
+        <div class="hap-cmp-title">RF=${rf} — this cluster</div>
+        <div class="hap-cmp-status ${rf3StatusCls}">${rf3Txt}</div>
+        <div class="hap-cmp-note">${rf3Note}</div>
+      </div>
+      <div class="hap-cmp-box${rf1Emphasis}">
+        <div class="hap-cmp-title">RF=1 — no replication</div>
+        <div class="hap-cmp-status ${rf1StatusCls}">${rf1Txt}</div>
+        <div class="hap-cmp-note">${rf1Note}</div>
+      </div>
+    </div>`;
 }
 
 function renderScalingStats() {
@@ -512,7 +637,7 @@ function buildTabletHTML(g, nodeId) {
   const ti = TABLES[g.table] || { name: g.table, color: '#94a3b8' };
   const memP = rs ? Math.min(100, rs.mem) : 0;
   const ssP = rs ? Math.min(100, rs.ss) : 0;
-  const compact = !!SCENARIOS[currentScenario]?.compactTablets;
+  const compact = !!SCENARIOS[currentScenario]?.compactTablets || !!S.compactMode;
   const ssts = rs?.ssts || [];
   const compacting = rs?.compacting || false;
 
@@ -544,7 +669,7 @@ function buildTabletHTML(g, nodeId) {
     }
 
     const combined = [...g.data.map(d => ({ ...d, data: d, type: 'comm' })), ... (rs?.provisionalRows || []).map(d => ({ ...d, data: d, type: 'prov' }))];
-    const rowsToShow = combined.slice(-3);
+    const rowsToShow = combined.slice(-(g.maxRows ?? 3));
 
     for (let i = 0; i < rowsToShow.length; i++) {
       const entry = rowsToShow[i];
@@ -619,11 +744,12 @@ function renderTabletCard(g, nodeId) {
   const { roleC, ti, memP, ssP, role, dHtml, sstHtml, compact } = buildTabletHTML(g, nodeId);
   const div = document.createElement('div');
   div.id = `tablet-${g.id}-${nodeId}`;
-  div.className = `tablet ${roleC}${compact ? ' compact' : ''}`;
+  const effectiveRoleC = g.simpleTable ? 't-follower' : roleC;
+  div.className = `tablet ${effectiveRoleC}${compact ? ' compact' : ''}`;
   const nodeCard = document.getElementById(`node-${nodeId}`);
   const zoneTxt = nodeCard?.querySelector('.n-zone')?.textContent || '';
   const isGeo = document.getElementById('canvas-wrap').classList.contains('geo-mode');
-  const lsmHtml = compact
+  const lsmHtml = g.hideStorage ? '' : compact
     ? `<div class="lsm-mini">Mem:${Math.round(memP)}% · SST:${Math.round(ssP)}%</div>`
     : `<div class="lsm-box">
       <div class="lsm-title">DocDB Storage <span class="lsm-fi">Mem=${Math.round(memP)}% SST=${Math.round(ssP)}%</span></div>
@@ -640,10 +766,10 @@ function renderTabletCard(g, nodeId) {
           <div class="t-colordot" style="background:${TABLES['categories'].color}"></div>
         </div>
       ` : `<div class="t-colordot" style="background:${ti.color}"></div>`}
-      <div class="t-name">${g.isColocated ? 'Colocated Tablet' : ti.name + '.tablet' + g.tnum}</div>
-      <div class="role-badge r-${role}">${role}</div>
+      <div class="t-name">${g.isColocated ? 'Colocated Tablet' : g.simpleTable ? ti.name : ti.name + '.tablet' + g.tnum}</div>
+      ${g.simpleTable ? '' : `<div class="role-badge r-${role}">${role}</div>`}
     </div>
-    <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
+    ${g.simpleTable ? '' : `<div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>`}
     ${dHtml}
     ${lsmHtml}`;
   div.onclick = () => onTabletClick(g, nodeId);
@@ -655,8 +781,9 @@ function reRenderTabletInternal(tgId, nodeId) {
   const el = document.getElementById(`tablet-${tgId}-${nodeId}`); if (!el) return;
   const saved = ['t-hl', 't-hl2', 't-new', 't-candidate', 't-stale', 't-syncing'].filter(c => el.classList.contains(c));
   const { roleC, ti, memP, ssP, role, dHtml, sstHtml, compact } = buildTabletHTML(g, nodeId);
-  el.className = `tablet ${roleC} ${saved.join(' ')}${compact ? ' compact' : ''}`;
-  const lsmHtml = compact
+  const effectiveRoleC2 = g.simpleTable ? 't-follower' : roleC;
+  el.className = `tablet ${effectiveRoleC2} ${saved.join(' ')}${compact ? ' compact' : ''}`;
+  const lsmHtml = g.hideStorage ? '' : compact
     ? `<div class="lsm-mini">Mem:${Math.round(memP)}% · SST:${Math.round(ssP)}%</div>`
     : `<div class="lsm-box">
       <div class="lsm-title">DocDB Storage <span class="lsm-fi">Mem=${Math.round(memP)}% SST=${Math.round(ssP)}%</span></div>
@@ -665,8 +792,8 @@ function reRenderTabletInternal(tgId, nodeId) {
       ${sstHtml}
     </div>`;
   el.innerHTML = `
-    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${ti.name}.tablet${g.tnum}</div><div class="role-badge r-${role}">${role}</div></div>
-    <div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>
+    <div class="t-top"><div class="t-colordot" style="background:${ti.color}"></div><div class="t-name">${g.simpleTable ? ti.name : ti.name + '.tablet' + g.tnum}</div>${g.simpleTable ? '' : `<div class="role-badge r-${role}">${role}</div>`}</div>
+    ${g.simpleTable ? '' : `<div class="t-meta"><div class="t-range">${g.range}</div><div class="t-term">term:${g.term}</div></div>`}
     ${dHtml}
     ${lsmHtml}`;
   el.onclick = () => onTabletClick(g, nodeId);
@@ -854,10 +981,11 @@ function makeCtx() {
         const g = S.groups.find(x => x.id === tgId);
         if (g) {
           const rs = S.replicaState[tgId][nId];
+          const maxRows = g.maxRows ?? 3;
           const dataIdx = (markRow === true) ? g.data.length - 1 : markRow;
-          const start = Math.max(0, g.data.length - 3);
+          const start = Math.max(0, g.data.length - maxRows);
           const sliceIdx = dataIdx - start;
-          rs.newRows = (sliceIdx >= 0 && sliceIdx < 3) ? [sliceIdx] : [];
+          rs.newRows = (sliceIdx >= 0 && sliceIdx < maxRows) ? [sliceIdx] : [];
           reRenderTabletInternal(tgId, nId);
           setTimeout(() => { rs.newRows = []; reRenderTabletInternal(tgId, nId); }, 2000);
           return;
@@ -952,6 +1080,8 @@ function makeCtx() {
     rebuildReplicaState: () => {
       S.replicaState = buildRS(S.groups);
     },
+    shardingPanel: (data) => renderShardingPerfPanel(data),
+    haPanel: (data) => renderHaPanel(data),
     setNodeRegion: (nId, region, label) => {
       const card = document.getElementById(`node-${nId}`);
       if (!card) return;
@@ -1123,7 +1253,7 @@ function buildSidebar() {
       `;
   sb.appendChild(homeBtn);
 
-  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "System Internals"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;
@@ -1183,7 +1313,7 @@ function renderHome() {
   const groupOrder = [
     "Foundations", "Deployment Architectures", "Global Universe", "xCluster",
     "Data Distribution", "Consistency & High Availability", "Read & Write Paths",
-    "Scalability", "System Internals"
+    "Scalability", "Security", "System Internals"
   ];
   const groupMeta = {
     "Foundations":                     { chapter: "CHAPTER 1", icon: "🏗️", desc: "Core concepts: cluster structure, fault domains, and Raft consensus." },
@@ -1194,7 +1324,8 @@ function renderHome() {
     "Consistency & High Availability": { chapter: "CHAPTER 6", icon: "🛡️", desc: "Raft leader election, node failure recovery, and partition handling." },
     "Read & Write Paths":              { chapter: "CHAPTER 7", icon: "⚡", desc: "How reads and writes flow through the distributed Raft layers." },
     "Scalability":                     { chapter: "CHAPTER 8", icon: "📈", desc: "Elastic scale-out and automatic tablet splitting as the cluster grows." },
-    "System Internals":                { chapter: "CHAPTER 9", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." }
+    "Security":                         { chapter: "CHAPTER 9",  icon: "🔒", desc: "Encryption in transit, encryption at rest, row-level security, column-level encryption, authentication, and audit logging." },
+    "System Internals":                { chapter: "CHAPTER 10", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." },
   };
 
   // ── Learning Path ──────────────────────────────────────────────────────────
@@ -1205,6 +1336,7 @@ function renderHome() {
     { label: 'High Availability', color: '#fb7185', chapters: ['Consistency & High Availability'] },
     { label: 'Read & Write',      color: '#a78bfa', chapters: ['Read & Write Paths'] },
     { label: 'Scalability',       color: '#6366f1', chapters: ['Scalability'] },
+    { label: 'Security',          color: '#f43f5e', chapters: ['Security'] },
     { label: 'System Internals',  color: '#94a3b8', chapters: ['System Internals'] },
   ];
 
@@ -1212,9 +1344,9 @@ function renderHome() {
     { id: 'all',  icon: '🗺️', label: 'All Chapters',       desc: 'Complete curriculum',         color: '#60a5fa',
       chapters: null },
     { id: 'dev',  icon: '💻', label: 'App Developer',       desc: 'Build on YugabyteDB',         color: '#34d399',
-      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Consistency & High Availability'] },
+      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Consistency & High Availability', 'Security'] },
     { id: 'dba',  icon: '🛠️', label: 'DBA / SRE',           desc: 'Operate and tune clusters',   color: '#fb7185',
-      chapters: ['Foundations', 'Deployment Architectures', 'Consistency & High Availability', 'Scalability', 'System Internals'] },
+      chapters: ['Foundations', 'Deployment Architectures', 'Consistency & High Availability', 'Scalability', 'Security', 'System Internals'] },
     { id: 'arch', icon: '🏛️', label: 'Solutions Architect', desc: 'Design global topologies',    color: '#f59e0b',
       chapters: ['Foundations', 'Deployment Architectures', 'Data Distribution', 'Global Universe', 'xCluster'] },
     { id: 'de',   icon: '📊', label: 'Data Engineer',       desc: 'Manage and scale data',       color: '#a78bfa',
@@ -1452,6 +1584,10 @@ function selectScenario(id) {
     sd.classList.remove('visible'); sd.style.display = '';
     const _mrp = document.getElementById('mr-lat-panel');
     if (_mrp) { _mrp.classList.remove('visible'); _mrp.style.display = ''; }
+    const _shp2 = document.getElementById('sharding-perf-panel');
+    if (_shp2) _shp2.classList.remove('visible');
+    const _hap2 = document.getElementById('ha-panel');
+    if (_hap2) _hap2.classList.remove('visible');
     dp.style.display = 'none';
     sp.style.display = 'none';
     dbp.style.display = 'none';
@@ -1495,7 +1631,15 @@ function selectScenario(id) {
   // Clean up leftover DOM artifacts from previous scenarios
   drawPartitionWall(false);  // Remove partition wall SVG
   document.querySelectorAll('.canvas-wrap .pkt').forEach(el => el.remove()); // Remove stale packets
+  const _cvd = document.getElementById('canvas-vs-divider');
+  if (_cvd) _cvd.remove();
   fdCatchingUp = {};  // Cancel pending catch-up promises
+
+  // Reset node display names before scenario init can override them
+  for (let n = 1; n <= 9; n++) {
+    const nameEl = document.querySelector(`#node-${n} .n-name`);
+    if (nameEl) nameEl.textContent = `TServer-${n}`;
+  }
 
   renderAllTablets(); setTimeout(renderConnections, 80);
   for (let n = 1; n <= 9; n++) renderNodeAlive(n, true);
@@ -1529,6 +1673,12 @@ function selectScenario(id) {
 
   const isScaling = sc.name === 'Horizontal Scaling';
   sd.style.display = ''; sd.classList.toggle('visible', isScaling);
+
+  const shp = document.getElementById('sharding-perf-panel');
+  if (shp) shp.classList.toggle('visible', !!sc.shardingPanel);
+
+  const hap = document.getElementById('ha-panel');
+  if (hap) hap.classList.toggle('visible', !!sc.haPanel);
 
   const mrp = document.getElementById('mr-lat-panel');
   if (mrp) { mrp.style.display = ''; mrp.classList.toggle('visible', sc.name === 'Multi-Region' || sc.name === 'Multi-Zone'); }
@@ -2425,8 +2575,8 @@ function selectArch(tab) {
   const av = document.getElementById('arch-view');
   if (!av) return;
   av.style.display = 'flex';
-  const badgeMap = { 'universe-hierarchy': 'Architecture · Universe', universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains', consensus: 'Architecture · Consensus Quorum' };
-  const titleMap = { 'universe-hierarchy': 'Universe Hierarchy', universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains', consensus: 'Consensus (Raft) Quorum' };
+  const badgeMap = { 'universe-hierarchy': 'Architecture · Universe', universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains', consensus: 'Architecture · Consensus Quorum', 'security-tls': 'Security · Encryption in Transit', 'security-rest': 'Security · Encryption at Rest', 'security-rls': 'Security · Row Level Security', 'security-column': 'Security · Column Level Encryption', 'security-auth': 'Security · Authentication', 'security-audit': 'Security · Audit Logging' };
+  const titleMap = { 'universe-hierarchy': 'Universe Hierarchy', universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains', consensus: 'Consensus (Raft) Quorum', 'security-tls': 'Encryption in Transit', 'security-rest': 'Encryption at Rest', 'security-rls': 'Row Level Security', 'security-column': 'Column Level Encryption', 'security-auth': 'Authentication Methods', 'security-audit': 'Audit Logging' };
   document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
   document.getElementById('i-title').textContent = titleMap[tab] || tab;
   _archFailedFD = -1;
@@ -2441,6 +2591,12 @@ function selectArch(tab) {
   else if (tab === 'hybrid-time') _renderArchHybridTime(av);
   else if (tab === 'read-replica') _renderArchReadReplica(av);
   else if (tab === 'fault-domains') _renderArchFaultDomains(av);
+  else if (tab === 'security-tls') _renderArchSecurityTLS(av);
+  else if (tab === 'security-rest') _renderArchSecurityRest(av);
+  else if (tab === 'security-rls') _renderArchSecurityRLS(av);
+  else if (tab === 'security-column') _renderArchSecurityColumn(av);
+  else if (tab === 'security-auth') _renderArchSecurityAuth(av);
+  else if (tab === 'security-audit') _renderArchSecurityAudit(av);
   else _renderArchXCluster(av);
 
   if (SCENARIOS[tab]) renderTour(SCENARIOS[tab]);
@@ -3756,6 +3912,569 @@ function _renderArchHybridTime(container) {
 }
 
 
+function _renderArchSecurityTLS(container) {
+  let h = '';
+  h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+  h += `<div class="av-xcl-title">Encryption in Transit</div>`;
+  h += `<div class="av-xcl-sub" style="margin-bottom:16px">All network traffic in YugabyteDB — client-to-node and node-to-node — is encrypted using TLS 1.2+. Mutual TLS (mTLS) with certificate-based authentication is supported on both paths.</div>`;
+  const stats = [
+    { val: 'TLS 1.2+', lbl: 'Protocol' }, { val: 'mTLS', lbl: 'Auth Mode' },
+    { val: 'AES-256', lbl: 'Cipher' }, { val: '0', lbl: 'Plaintext on wire' }
+  ];
+  h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+  h += `</div>`;
+
+  h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">`;
+
+  // Client-to-Node
+  h += `<div class="sec-client-node" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div style="font-size:13px;font-weight:700;color:#60a5fa;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Client → Node Traffic</div>`;
+  h += `<div style="font-size:13px;color:var(--txt2);line-height:1.6;margin-bottom:16px;">Application drivers and admin tools connect over TLS 1.2+. Supports one-way TLS (server certificate only) or full mutual TLS where the client also presents a certificate.</div>`;
+  h += `<div style="display:flex;flex-direction:column;gap:10px;">`;
+  const clientPorts = [
+    { port: ':5433', label: 'YSQL (PostgreSQL)', color: '#60a5fa' },
+    { port: ':9042', label: 'YCQL (Cassandra)', color: '#34d399' },
+    { port: ':7000', label: 'YB-Master Admin UI', color: '#a78bfa' },
+    { port: ':9000', label: 'TServer Admin UI', color: '#f59e0b' },
+    { port: ':7100', label: 'yb-admin (Master RPC)', color: '#a78bfa' },
+    { port: ':9100', label: 'yb-ts-cli (TServer RPC)', color: '#f59e0b' },
+  ];
+  clientPorts.forEach(p => {
+    h += `<div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">`;
+    h += `<span style="font-size:13px;font-family:var(--mono);color:${p.color};font-weight:700;min-width:52px;">${p.port}</span>`;
+    h += `<span style="font-size:12px;color:var(--txt2);">${p.label}</span>`;
+    h += `<span style="margin-left:auto;font-size:11px;background:rgba(96,165,250,0.1);color:#60a5fa;border:1px solid rgba(96,165,250,0.2);border-radius:4px;padding:2px 7px;">TLS 1.2+</span>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+  h += `<div style="margin-top:14px;font-size:12px;color:var(--txt3);line-height:1.5;">Configure via: <code style="font-size:11px;">--use_client_to_server_encryption</code></div>`;
+  h += `</div>`;
+
+  // Node-to-Node
+  h += `<div class="sec-node-node" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div style="font-size:13px;font-weight:700;color:#f43f5e;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Node ↔ Node Traffic (mTLS)</div>`;
+  h += `<div style="font-size:13px;color:var(--txt2);line-height:1.6;margin-bottom:16px;">All intra-cluster RPC traffic is always mutual TLS — both nodes present and verify certificates. This covers Raft replication, tablet load balancing, and master-tserver coordination.</div>`;
+  h += `<div style="display:flex;flex-direction:column;gap:10px;">`;
+  const nodePorts = [
+    { ports: ':9100 ↔ :9100', label: 'TServer ↔ TServer (Raft RPC)', color: '#f43f5e' },
+    { ports: ':7100 ↔ :9100', label: 'YB-Master ↔ TServer', color: '#f43f5e' },
+    { ports: ':7100 ↔ :7100', label: 'YB-Master ↔ YB-Master (Raft)', color: '#f43f5e' },
+  ];
+  nodePorts.forEach(p => {
+    h += `<div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">`;
+    h += `<span style="font-size:12px;font-family:var(--mono);color:${p.color};font-weight:700;min-width:108px;">${p.ports}</span>`;
+    h += `<span style="font-size:12px;color:var(--txt2);">${p.label}</span>`;
+    h += `<span style="margin-left:auto;font-size:11px;background:rgba(244,63,94,0.08);color:#f43f5e;border:1px solid rgba(244,63,94,0.2);border-radius:4px;padding:2px 7px;">mTLS</span>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+  h += `<div style="margin-top:14px;font-size:12px;color:var(--txt3);line-height:1.5;">Configure via: <code style="font-size:11px;">--use_node_to_node_encryption</code></div>`;
+  h += `</div>`;
+
+  h += `</div>`;
+
+  // Certificate hierarchy
+  h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">Certificate Hierarchy</div>`;
+  h += `<div style="display:flex;gap:16px;flex-wrap:wrap;">`;
+  const certs = [
+    { title: 'Root CA', desc: 'Self-signed root certificate authority. Signs all node and client certificates. Rotated infrequently.', color: '#a78bfa' },
+    { title: 'Node Certificates', desc: 'Each YB-Master and TServer gets a unique certificate signed by the Root CA. Used for mTLS on all RPC ports.', color: '#60a5fa' },
+    { title: 'Client Certificates', desc: 'Issued to application clients for mutual TLS on YSQL/YCQL connections. Identifies the client to the server.', color: '#34d399' },
+  ];
+  certs.forEach(c => {
+    h += `<div style="flex:1;min-width:160px;background:var(--bg);border:1px solid rgba(${c.color === '#a78bfa' ? '167,139,250' : c.color === '#60a5fa' ? '96,165,250' : '52,211,153'},0.2);border-radius:8px;padding:14px;">`;
+    h += `<div style="font-size:13px;font-weight:700;color:${c.color};margin-bottom:6px;">${c.title}</div>`;
+    h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">${c.desc}</div>`;
+    h += `</div>`;
+  });
+  h += `</div></div>`;
+
+  container.innerHTML = h;
+}
+
+function _renderArchSecurityRest(container) {
+  let h = '';
+  h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+  h += `<div class="av-xcl-title">Encryption at Rest</div>`;
+  h += `<div class="av-xcl-sub" style="margin-bottom:16px">YugabyteDB protects stored data using envelope encryption: each flushed SST file (and WAL segment) gets a unique Data Key (DEK) embedded in its header. The DEK is encrypted by a Universe Key (UK) maintained by YB-Masters and distributed via heartbeat — never stored on TServers in plaintext.</div>`;
+  const stats = [
+    { val: 'AES-256', lbl: 'Algorithm' }, { val: 'Per-file', lbl: 'DEK Scope' },
+    { val: 'Universe Key', lbl: 'Key Hierarchy' }, { val: 'Zero re-enc', lbl: 'On Rotation' }
+  ];
+  h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+  h += `</div>`;
+
+  // Envelope diagram
+  h += `<div class="sec-dek-layer" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:22px;margin-bottom:16px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">Envelope Encryption Model</div>`;
+  h += `<div style="display:flex;align-items:stretch;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;">`;
+
+  // Layer 1 — Data
+  h += `<div style="flex:1;padding:16px 18px;background:rgba(96,165,250,0.05);border-right:1px solid var(--border);">`;
+  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#60a5fa;margin-bottom:8px;">Layer 1 · Data</div>`;
+  h += `<div style="font-size:22px;margin-bottom:6px;">📄</div>`;
+  h += `<div style="font-size:13px;font-weight:600;color:var(--txt1);margin-bottom:4px;">SST Files (Tablets)</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">Plaintext rows on write → encrypted to disk with DEK (AES-256-CTR). Decrypted on read by the TServer in memory only.</div>`;
+  h += `</div>`;
+
+  // Arrow
+  h += `<div style="display:flex;align-items:center;padding:0 8px;font-size:18px;color:var(--txt3);">🔒</div>`;
+
+  // Layer 2 — DEK
+  h += `<div style="flex:1;padding:16px 18px;background:rgba(167,139,250,0.05);border-right:1px solid var(--border);">`;
+  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a78bfa;margin-bottom:8px;">Layer 2 · DEK</div>`;
+  h += `<div style="font-size:22px;margin-bottom:6px;">🗝️</div>`;
+  h += `<div style="font-size:13px;font-weight:600;color:var(--txt1);margin-bottom:4px;">Data Encryption Key</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">Unique per flushed SST file. Encrypted with the Universe Key and <b>embedded in the SST file header</b> (EncryptionHeaderPB). Never stored in plaintext on disk.</div>`;
+  h += `</div>`;
+
+  // Arrow
+  h += `<div style="display:flex;align-items:center;padding:0 8px;font-size:18px;color:var(--txt3);">🔒</div>`;
+
+  // Layer 3 — KMS
+  h += `<div class="sec-kms-layer" style="flex:1;padding:16px 18px;background:rgba(244,63,94,0.05);">`;
+  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#f43f5e;margin-bottom:8px;">Layer 3 · KMS</div>`;
+  h += `<div style="font-size:22px;margin-bottom:6px;">🏛️</div>`;
+  h += `<div style="font-size:13px;font-weight:600;color:var(--txt1);margin-bottom:4px;">Universe Key (UK)</div>`;
+  h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">Symmetric key managed by YB-Masters. Stored encrypted in the master system catalog. Distributed to TServers via heartbeat — never persisted in plaintext on any node.</div>`;
+  h += `</div>`;
+
+  h += `</div>`;
+  h += `</div>`;
+
+  // Key rotation + KMS providers
+  h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
+
+  h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div style="font-size:13px;font-weight:700;color:#34d399;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Key Rotation (Zero Downtime)</div>`;
+  h += `<div style="font-size:13px;color:var(--txt2);line-height:1.6;margin-bottom:12px;">Universe Key rotation is a two-phase cluster operation. Only newly flushed SST files use the new key — existing files are re-encrypted lazily during compaction.</div>`;
+  h += `<div style="display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--txt2);">`;
+  [
+    'New Universe Key received in-memory by all YB-Masters',
+    'Cluster config change: Masters decrypt the existing key registry, append the new Universe Key with a new version ID, re-encrypt the registry with the new key, and persist to system catalog',
+    'New version ID broadcast to TServers via heartbeat',
+    'Newly flushed SST files embed the new uk_version in their EncryptionHeaderPB',
+    'Older SST files retain their original uk_version — re-encrypted transparently during compaction',
+    'Old Universe Key remains "in-use" (can decrypt old files) until all files are compacted'
+  ].forEach((s, i) => {
+    h += `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:#34d399;font-weight:700;min-width:14px;">${i+1}.</span><span>${s}</span></div>`;
+  });
+  h += `</div></div>`;
+
+  h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div style="font-size:13px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Supported KMS Providers</div>`;
+  const kms = [
+    { name: 'AWS KMS', desc: 'Managed keys in AWS Key Management Service' },
+    { name: 'HashiCorp Vault', desc: 'Self-managed secrets engine (Transit backend)' },
+    { name: 'Google Cloud KMS', desc: 'GCP-managed keys via Cloud KMS API' },
+    { name: 'Azure Key Vault', desc: 'Azure-managed key storage and HSM' },
+    { name: 'Thales CipherTrust', desc: 'Enterprise key management via CipherTrust Manager' },
+  ];
+  kms.forEach(k => {
+    h += `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;">`;
+    h += `<span style="color:#f59e0b;font-size:14px;margin-top:1px;">◈</span>`;
+    h += `<div><div style="font-size:13px;font-weight:600;color:var(--txt1);">${k.name}</div><div style="font-size:12px;color:var(--txt2);">${k.desc}</div></div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  h += `</div>`;
+
+  container.innerHTML = h;
+}
+
+function _renderArchSecurityRLS(container) {
+  let h = '';
+  h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+  h += `<div class="av-xcl-title">Row Level Security (RLS)</div>`;
+  h += `<div class="av-xcl-sub" style="margin-bottom:16px">YSQL supports PostgreSQL-compatible RLS policies. A policy attaches a predicate to a table that is automatically applied to every query — users see only the rows their policy allows. Zero application code changes required.</div>`;
+  const stats = [
+    { val: 'Per-table', lbl: 'Policy Scope' }, { val: 'Per-role', lbl: 'Granularity' },
+    { val: 'Auto', lbl: 'Enforcement' }, { val: '0', lbl: 'App changes' }
+  ];
+  h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+  h += `</div>`;
+
+  // Policy definition
+  h += `<div class="sec-rls-policy" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">Defining a Policy</div>`;
+  h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
+
+  h += `<div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Step 1 — Enable RLS on the table</div>`;
+  h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
+  h += `<span style="color:#a78bfa;">ALTER TABLE</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ENABLE ROW LEVEL SECURITY</span>;`;
+  h += `</div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-top:14px;margin-bottom:8px;">Step 2 — Create an isolation policy</div>`;
+  h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
+  h += `<span style="color:#a78bfa;">CREATE POLICY</span> tenant_isolation<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ON</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">USING</span> (owner_id = <span style="color:#34d399;">current_user</span>());`;
+  h += `</div>`;
+  h += `</div>`;
+
+  h += `<div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Optional — command-specific policy</div>`;
+  h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
+  h += `<span style="color:#a78bfa;">CREATE POLICY</span> active_read<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ON</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">FOR SELECT</span><br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">USING</span> (status = <span style="color:#f59e0b;">'active'</span>);`;
+  h += `</div>`;
+  h += `<div style="margin-top:14px;font-size:12px;color:var(--txt2);line-height:1.6;">The policy predicate is <b>transparently appended</b> as a WHERE clause by the query planner. The application issues a plain <code>SELECT * FROM accounts</code> and sees only its permitted rows.</div>`;
+  h += `</div>`;
+
+  h += `</div></div>`;
+
+  // Table visualization
+  h += `<div class="sec-rls-table" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">Enforcement — What Each Role Sees</div>`;
+  h += `<div style="overflow-x:auto;">`;
+  h += `<table style="width:100%;border-collapse:collapse;font-size:13px;">`;
+  h += `<thead><tr>`;
+  ['id', 'owner_id', 'balance', 'status', 'alice sees', 'bob sees', 'reader role sees'].forEach((col, i) => {
+    const isLabel = i < 4;
+    h += `<th style="padding:8px 12px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${i >= 4 ? (i === 4 ? '#60a5fa' : i === 5 ? '#34d399' : '#f59e0b') : 'var(--txt3)'};border-bottom:1px solid var(--border);white-space:nowrap;">${col}</th>`;
+  });
+  h += `</tr></thead><tbody>`;
+
+  const rows = [
+    { id: 1, owner: 'alice', balance: '$1,000', status: 'active',  alice: true,  bob: false, reader: true },
+    { id: 2, owner: 'bob',   balance: '$2,000', status: 'active',  alice: false, bob: true,  reader: true },
+    { id: 3, owner: 'alice', balance: '$500',   status: 'inactive',alice: true,  bob: false, reader: false },
+    { id: 4, owner: 'bob',   balance: '$3,500', status: 'inactive',alice: false, bob: true,  reader: false },
+  ];
+  rows.forEach(r => {
+    h += `<tr style="border-bottom:1px solid var(--border);">`;
+    h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt2);">${r.id}</td>`;
+    h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt);">${r.owner}</td>`;
+    h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt2);">${r.balance}</td>`;
+    h += `<td style="padding:8px 12px;"><span style="font-size:11px;padding:2px 8px;border-radius:4px;${r.status === 'active' ? 'background:rgba(52,211,153,0.1);color:#34d399;border:1px solid rgba(52,211,153,0.2);' : 'background:rgba(148,163,184,0.1);color:var(--txt3);border:1px solid var(--border);'}">${r.status}</span></td>`;
+    [r.alice, r.bob, r.reader].forEach(v => {
+      h += `<td style="padding:8px 12px;text-align:center;"><span style="font-size:15px;">${v ? '✓' : '–'}</span></td>`;
+    });
+    h += `</tr>`;
+  });
+  h += `</tbody></table></div></div>`;
+
+  container.innerHTML = h;
+}
+
+function _renderArchSecurityColumn(container) {
+  let h = '';
+  h += `<div class="av-xcl-block" style="margin-bottom:16px">`;
+  h += `<div class="av-xcl-title">Column Level Encryption</div>`;
+  h += `<div class="av-xcl-sub" style="margin-bottom:16px">YugabyteDB supports column-level encryption via the pgcrypto extension in YSQL. Sensitive fields (PII, PCI data) are encrypted at the SQL layer using pgp_sym_encrypt(). Only callers with the correct key can decrypt — the rest of the row remains fully queryable.</div>`;
+  const stats = [
+    { val: 'pgcrypto', lbl: 'Extension' }, { val: 'AES / PGP', lbl: 'Algorithm' },
+    { val: 'Per-column', lbl: 'Granularity' }, { val: 'Queryable', lbl: 'Other cols' }
+  ];
+  h += `<div class="av-stats-bar">${stats.map(s => `<div class="av-stat"><span class="av-sv">${s.val}</span><span class="av-sl">${s.lbl}</span></div>`).join('')}</div>`;
+  h += `</div>`;
+
+  // SQL examples
+  h += `<div class="sec-col-encrypt" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">pgcrypto Usage</div>`;
+  h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
+
+  h += `<div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Enable extension &amp; write encrypted data</div>`;
+  h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.8;color:var(--txt);">`;
+  h += `<span style="color:#a78bfa;">CREATE EXTENSION</span> pgcrypto;<br/><br/>`;
+  h += `<span style="color:#a78bfa;">INSERT INTO</span> customers (name, ssn, email)<br/>`;
+  h += `<span style="color:#a78bfa;">VALUES</span> (<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#f59e0b;">'Alice'</span>,<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_encrypt</span>(<span style="color:#f59e0b;">'123-45-6789'</span>, <span style="color:#f59e0b;">'$KEY'</span>),<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_encrypt</span>(<span style="color:#f59e0b;">'alice@co.com'</span>, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
+  h += `);`;
+  h += `</div>`;
+  h += `</div>`;
+
+  h += `<div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Read — decrypt only when key is supplied</div>`;
+  h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.8;color:var(--txt);">`;
+  h += `<span style="color:#a78bfa;">SELECT</span><br/>`;
+  h += `&nbsp;&nbsp;name,<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_decrypt</span>(ssn::bytea, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
+  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a78bfa;">AS</span> ssn_plain,<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_decrypt</span>(email::bytea, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
+  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a78bfa;">AS</span> email_plain<br/>`;
+  h += `<span style="color:#a78bfa;">FROM</span> customers <span style="color:#a78bfa;">WHERE</span> id = <span style="color:#60a5fa;">1</span>;`;
+  h += `</div>`;
+  h += `</div>`;
+
+  h += `</div></div>`;
+
+  // Table visualization
+  h += `<div class="sec-col-table" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
+  h += `<div class="av-section-title" style="margin-top:0">Storage Layout — Encrypted vs Plaintext Columns</div>`;
+  h += `<div style="overflow-x:auto;">`;
+  h += `<table style="width:100%;border-collapse:collapse;font-size:13px;">`;
+  h += `<thead><tr>`;
+  [
+    { label: 'id', enc: false }, { label: 'name', enc: false }, { label: 'created_at', enc: false },
+    { label: 'ssn', enc: true }, { label: 'email', enc: true }, { label: 'card_no', enc: true }
+  ].forEach(col => {
+    h += `<th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap;">`;
+    h += `<div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:${col.enc ? '#f43f5e' : 'var(--txt3)'};">${col.label}</div>`;
+    if (col.enc) h += `<div style="font-size:10px;color:#f43f5e;margin-top:2px;">🔒 encrypted</div>`;
+    else h += `<div style="font-size:10px;color:var(--txt3);margin-top:2px;">plaintext</div>`;
+    h += `</th>`;
+  });
+  h += `</tr></thead><tbody>`;
+
+  const custRows = [
+    { id: 1, name: 'Alice', date: '2024-01-15', ssn: '\\xc3057a...', email: '\\xa1f823...', card: '\\xb9e21c...' },
+    { id: 2, name: 'Bob',   date: '2024-02-20', ssn: '\\xd4128b...', email: '\\x9c347f...', card: '\\xe8f12a...' },
+  ];
+  custRows.forEach(r => {
+    h += `<tr style="border-bottom:1px solid var(--border);">`;
+    h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt2);">${r.id}</td>`;
+    h += `<td style="padding:8px 12px;color:var(--txt);">${r.name}</td>`;
+    h += `<td style="padding:8px 12px;font-family:var(--mono);font-size:12px;color:var(--txt2);">${r.date}</td>`;
+    [r.ssn, r.email, r.card].forEach(v => {
+      h += `<td style="padding:8px 12px;font-family:var(--mono);font-size:11px;color:#f43f5e;">${v}</td>`;
+    });
+    h += `</tr>`;
+  });
+  h += `</tbody></table></div>`;
+  h += `<div style="margin-top:12px;font-size:12px;color:var(--txt3);line-height:1.5;">Non-sensitive columns (<code>id</code>, <code>name</code>, <code>created_at</code>) are indexed and queryable normally. Encrypted columns store PGP-encrypted bytea — unreadable without the decryption key.</div>`;
+  h += `</div>`;
+
+  container.innerHTML = h;
+}
+
+function _renderArchSecurityAuth(container) {
+  const methods = [
+    {
+      icon: '🔐', name: 'SCRAM-SHA-256', tag: 'Recommended',
+      tagColor: '#22c55e',
+      desc: 'Challenge-response password authentication. Credentials never travel in plaintext. Default for new YSQL clusters.',
+      hba: 'host all all 0.0.0.0/0 scram-sha-256',
+    },
+    {
+      icon: '🏢', name: 'LDAP / Active Directory', tag: 'Enterprise',
+      tagColor: '#3b82f6',
+      desc: 'Delegates credential verification to an LDAP directory (OpenLDAP, Microsoft AD). YugabyteDB performs a bind operation — passwords never stored locally.',
+      hba: 'host all all 0.0.0.0/0 ldap ldapserver=ldap.corp.com ldapbasedn="dc=corp,dc=com"',
+    },
+    {
+      icon: '🪙', name: 'OIDC / JWT', tag: 'Enterprise',
+      tagColor: '#3b82f6',
+      desc: 'OAuth 2.0 / OpenID Connect token-based auth. Integrates with Okta, Azure AD, Keycloak, and any JWKS-endpoint provider. Token validated server-side.',
+      hba: 'host all all 0.0.0.0/0 jwt jwt_jwks_uri="https://auth.corp.com/.well-known/jwks.json"',
+    },
+    {
+      icon: '🎟️', name: 'Kerberos (GSSAPI)', tag: 'Enterprise',
+      tagColor: '#3b82f6',
+      desc: 'Mutual authentication via Kerberos tickets. Zero-password SSO in Kerberos-enabled environments (MIT KDC, Active Directory KDC).',
+      hba: 'host all all 0.0.0.0/0 gss include_realm=0 krb_realm=CORP.COM',
+    },
+    {
+      icon: '📜', name: 'Certificate-based (mTLS)', tag: 'Zero-trust',
+      tagColor: '#a855f7',
+      desc: 'Client authenticates with an X.509 certificate. Works alongside TLS encryption — the same cert that encrypts the channel also proves identity.',
+      hba: 'hostssl all all 0.0.0.0/0 cert clientcert=verify-full',
+    },
+  ];
+
+  let h = `<div style="display:flex;flex-direction:column;gap:20px;padding:4px 0;">`;
+
+  // Header
+  h += `<div style="display:flex;align-items:center;gap:12px;">`;
+  h += `<div style="font-size:28px;">🪪</div>`;
+  h += `<div>`;
+  h += `<div style="font-size:16px;font-weight:700;color:var(--txt);">Authentication Methods</div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-top:2px;">Method selection is per-connection via HBA rules in <code>pg_hba.conf</code>. YSQL and YCQL each have their own HBA configuration.</div>`;
+  h += `</div></div>`;
+
+  // Stats row
+  h += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">`;
+  const stats = [
+    { label: 'Auth Methods', value: '5', sub: 'YSQL supported' },
+    { label: 'HBA Rules', value: 'Per-conn', sub: 'Fine-grained control' },
+    { label: 'Standard', value: 'RFC 5802', sub: 'SCRAM-SHA-256' },
+  ];
+  stats.forEach(s => {
+    h += `<div style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;">`;
+    h += `<div style="font-size:18px;font-weight:700;color:var(--accent);">${s.value}</div>`;
+    h += `<div style="font-size:11px;font-weight:600;color:var(--txt2);margin-top:2px;">${s.label}</div>`;
+    h += `<div style="font-size:10px;color:var(--txt3);margin-top:1px;">${s.sub}</div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  // Method cards
+  h += `<div class="sec-auth-methods" style="display:flex;flex-direction:column;gap:10px;">`;
+  methods.forEach(m => {
+    h += `<div style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:12px 14px;">`;
+    h += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">`;
+    h += `<span style="font-size:18px;">${m.icon}</span>`;
+    h += `<span style="font-size:13px;font-weight:700;color:var(--txt);">${m.name}</span>`;
+    h += `<span style="margin-left:auto;font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;background:${m.tagColor}22;color:${m.tagColor};">${m.tag}</span>`;
+    h += `</div>`;
+    h += `<div style="font-size:12px;color:var(--txt2);margin-bottom:8px;line-height:1.5;">${m.desc}</div>`;
+    h += `<div style="background:var(--canvas-bg);border:1px solid var(--border);border-radius:5px;padding:6px 10px;font-family:var(--mono);font-size:10px;color:var(--txt3);white-space:nowrap;overflow:auto;">${m.hba}</div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  // Connection flow
+  h += `<div class="sec-auth-enterprise" style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">`;
+  h += `<div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:10px;">Connection Authentication Flow</div>`;
+  const flow = [
+    { icon: '🖥️', label: 'Client connects', detail: 'TLS handshake (optional but recommended)' },
+    { icon: '📋', label: 'HBA lookup', detail: 'Match on host, user, db, IP range → select method' },
+    { icon: '🔑', label: 'Authenticate', detail: 'Method-specific exchange (SCRAM / LDAP bind / JWT verify / Kerberos / cert CN)' },
+    { icon: '✅', label: 'Session granted', detail: 'Role privileges applied; audit log entry written' },
+  ];
+  flow.forEach((f, i) => {
+    h += `<div style="display:flex;align-items:flex-start;gap:10px;${i < flow.length - 1 ? 'margin-bottom:8px;' : ''}">`;
+    h += `<div style="width:28px;height:28px;border-radius:50%;background:var(--accent-dim,#1e3a5f);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;">${f.icon}</div>`;
+    h += `<div>`;
+    h += `<div style="font-size:12px;font-weight:600;color:var(--txt);">${f.label}</div>`;
+    h += `<div style="font-size:11px;color:var(--txt3);margin-top:1px;">${f.detail}</div>`;
+    h += `</div></div>`;
+    if (i < flow.length - 1) {
+      h += `<div style="margin-left:14px;width:1px;height:8px;background:var(--border);margin-bottom:0;"></div>`;
+    }
+  });
+  h += `</div>`;
+
+  h += `</div>`;
+  container.innerHTML = h;
+}
+
+function _renderArchSecurityAudit(container) {
+  const stmtClasses = [
+    { cls: 'READ',  color: '#3b82f6', desc: 'SELECT, COPY TO',                        example: 'SELECT * FROM payments' },
+    { cls: 'WRITE', color: '#f59e0b', desc: 'INSERT, UPDATE, DELETE, TRUNCATE, COPY FROM', example: 'UPDATE accounts SET balance=...' },
+    { cls: 'DDL',   color: '#a855f7', desc: 'CREATE, ALTER, DROP (tables, indexes, schemas, sequences)', example: 'ALTER TABLE orders ADD COLUMN...' },
+    { cls: 'ROLE',  color: '#ec4899', desc: 'GRANT, REVOKE, CREATE ROLE, DROP ROLE',   example: 'GRANT SELECT ON payments TO analyst' },
+    { cls: 'MISC',  color: '#6b7280', desc: 'FETCH, MOVE, VACUUM, SET',                example: 'SET search_path TO finance' },
+  ];
+
+  const complianceMap = [
+    { std: 'SOC 2 Type II', reqs: 'CC6.1 · CC6.3', classes: ['DDL', 'ROLE', 'WRITE'] },
+    { std: 'PCI-DSS v4',    reqs: 'Req 10.2.x',     classes: ['READ', 'WRITE', 'DDL', 'ROLE'] },
+    { std: 'HIPAA',         reqs: '§ 164.312(b)',    classes: ['READ', 'WRITE', 'DDL'] },
+    { std: 'ISO 27001',     reqs: 'A.12.4.1',        classes: ['DDL', 'ROLE', 'MISC'] },
+  ];
+
+  const clsColor = cls => stmtClasses.find(s => s.cls === cls)?.color || '#6b7280';
+
+  let h = `<div style="display:flex;flex-direction:column;gap:20px;padding:4px 0;">`;
+
+  // Header
+  h += `<div style="display:flex;align-items:center;gap:12px;">`;
+  h += `<div style="font-size:28px;">📋</div>`;
+  h += `<div>`;
+  h += `<div style="font-size:16px;font-weight:700;color:var(--txt);">Audit Logging</div>`;
+  h += `<div style="font-size:12px;color:var(--txt3);margin-top:2px;">Powered by the <code>pgaudit</code> extension. Configurable at session and object level. Logs flow through PostgreSQL's standard logging infrastructure.</div>`;
+  h += `</div></div>`;
+
+  // Stats row
+  h += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">`;
+  [
+    { label: 'Extension', value: 'pgaudit', sub: 'PostgreSQL-standard' },
+    { label: 'Log levels', value: 'Session + Object', sub: 'Fine-grained targeting' },
+    { label: 'Stmt classes', value: '5', sub: 'READ · WRITE · DDL · ROLE · MISC' },
+  ].forEach(s => {
+    h += `<div style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center;">`;
+    h += `<div style="font-size:15px;font-weight:700;color:var(--accent);">${s.value}</div>`;
+    h += `<div style="font-size:11px;font-weight:600;color:var(--txt2);margin-top:2px;">${s.label}</div>`;
+    h += `<div style="font-size:10px;color:var(--txt3);margin-top:1px;">${s.sub}</div>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+
+  // Setup
+  h += `<div style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">`;
+  h += `<div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:8px;">Setup</div>`;
+  const setupLines = [
+    '-- 1. Enable via YB flag (shared_preload_libraries)',
+    '--    --ysql_pg_conf_csv="shared_preload_libraries=pgaudit"',
+    '',
+    '-- 2. Session-level: log write + DDL + role changes',
+    "SET pgaudit.log = 'write, ddl, role';",
+    '',
+    '-- 3. Object-level: create an audit role, grant the',
+    '--    objects you want to audit, then point pgaudit at it',
+    "CREATE ROLE pgaudit_role NOINHERIT;",
+    "GRANT SELECT ON public.payments TO pgaudit_role;",
+    "SET pgaudit.role = 'pgaudit_role';",
+  ];
+  h += `<div style="background:var(--canvas-bg);border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--txt2);line-height:1.7;">`;
+  setupLines.forEach(l => {
+    if (l.startsWith('--')) h += `<div style="color:var(--txt3);">${l}</div>`;
+    else if (l === '') h += `<div style="height:6px;"></div>`;
+    else h += `<div>${l}</div>`;
+  });
+  h += `</div></div>`;
+
+  // Statement classes
+  h += `<div class="sec-audit-classes" style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">`;
+  h += `<div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:10px;">Statement Classes</div>`;
+  h += `<div style="display:flex;flex-direction:column;gap:6px;">`;
+  stmtClasses.forEach(s => {
+    h += `<div style="display:flex;align-items:baseline;gap:10px;">`;
+    h += `<span style="width:48px;flex-shrink:0;font-size:11px;font-weight:700;font-family:var(--mono);padding:2px 6px;border-radius:4px;background:${s.color}22;color:${s.color};">${s.cls}</span>`;
+    h += `<span style="font-size:11px;color:var(--txt2);flex:1;">${s.desc}</span>`;
+    h += `<span style="font-size:10px;color:var(--txt3);font-family:var(--mono);white-space:nowrap;">${s.example}</span>`;
+    h += `</div>`;
+  });
+  h += `</div></div>`;
+
+  // Audit record format
+  h += `<div class="sec-audit-format" style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">`;
+  h += `<div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:8px;">Audit Record Format</div>`;
+  h += `<div style="background:var(--canvas-bg);border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-family:var(--mono);font-size:10px;color:var(--txt3);line-height:1.7;overflow:auto;">`;
+  h += `<div style="color:var(--txt3);">-- Example pgaudit log line</div>`;
+  h += `<div style="color:var(--txt2);margin-top:4px;">AUDIT: SESSION,1,1,WRITE,UPDATE,TABLE,public.accounts,</div>`;
+  h += `<div style="color:var(--txt2);">&nbsp;&nbsp;"UPDATE accounts SET balance = balance - 500</div>`;
+  h += `<div style="color:var(--txt2);">&nbsp;&nbsp; WHERE account_id = 42"</div>`;
+  h += `</div>`;
+  const fields = [
+    { f: 'AUDIT_TYPE', v: 'SESSION or OBJECT' },
+    { f: 'STATEMENT_ID', v: 'Monotonic counter per session' },
+    { f: 'SUBSTATEMENT_ID', v: 'For nested statements' },
+    { f: 'CLASS', v: 'WRITE / READ / DDL / ROLE / MISC' },
+    { f: 'COMMAND', v: 'UPDATE / SELECT / ALTER TABLE …' },
+    { f: 'OBJECT_TYPE', v: 'TABLE / INDEX / FUNCTION …' },
+    { f: 'OBJECT_NAME', v: 'Fully-qualified name' },
+    { f: 'STATEMENT', v: 'Full SQL text' },
+  ];
+  h += `<div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;margin-top:10px;">`;
+  fields.forEach(f => {
+    h += `<div style="font-size:10px;font-family:var(--mono);color:var(--accent);white-space:nowrap;">${f.f}</div>`;
+    h += `<div style="font-size:10px;color:var(--txt3);">${f.v}</div>`;
+  });
+  h += `</div></div>`;
+
+  // Compliance mapping
+  h += `<div style="background:var(--node-bg);border:1px solid var(--border);border-radius:8px;padding:14px;">`;
+  h += `<div style="font-size:12px;font-weight:700;color:var(--txt);margin-bottom:10px;">Compliance Framework Mapping</div>`;
+  h += `<div style="display:flex;flex-direction:column;gap:6px;">`;
+  complianceMap.forEach(c => {
+    h += `<div style="display:flex;align-items:center;gap:8px;">`;
+    h += `<div style="width:120px;flex-shrink:0;">`;
+    h += `<div style="font-size:11px;font-weight:600;color:var(--txt);">${c.std}</div>`;
+    h += `<div style="font-size:10px;color:var(--txt3);margin-top:1px;">${c.reqs}</div>`;
+    h += `</div>`;
+    h += `<div style="display:flex;gap:4px;flex-wrap:wrap;">`;
+    c.classes.forEach(cls => {
+      h += `<span style="font-size:10px;font-weight:700;font-family:var(--mono);padding:2px 6px;border-radius:4px;background:${clsColor(cls)}22;color:${clsColor(cls)};">${cls}</span>`;
+    });
+    h += `</div></div>`;
+  });
+  h += `</div></div>`;
+
+  h += `</div>`;
+  container.innerHTML = h;
+}
+
 function initInfoPanelResize() {
   const handle = document.getElementById('info-resize-handle');
   const panel = document.querySelector('.info-panel');
@@ -3790,7 +4509,7 @@ function initInfoPanelResize() {
 
 function _getSidebarScenarioOrder() {
   const order = ['home'];
-  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "System Internals"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;

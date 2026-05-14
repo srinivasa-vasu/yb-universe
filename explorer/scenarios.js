@@ -567,7 +567,7 @@ const SCENARIOS = {
   },
   // Architecture: Cluster Overview
   "cluster-overview": {
-    group: "Foundations", icon: "🗺️", sortOrder: 5,
+    group: "Foundations", icon: "🗺️", sortOrder: 6,
     name: 'Cluster Overview', title: 'Cluster Overview', subtitle: 'Node & tablet layout',
     steps: [], latencies: [],
     desc: 'YugabyteDB distributes data across TServers using tablet-based sharding. Each table is split into multiple tablets, each of which is a Raft group replicated across nodes. This architecture ensures high availability, scalability, and strong consistency.',
@@ -1474,6 +1474,460 @@ const SCENARIOS = {
           addLog('tg3 → LEADER: TServer-3 restored ✓', 'ls');
           addLog('tg6 → LEADER: TServer-3 restored ✓', 'ls');
           document.getElementById('health-txt').textContent = `Healthy · RF=3 · 3 TServers · ${S.groups.length} Raft Groups`;
+        }
+      }
+    ]
+  },
+
+  "22": {
+    group: "Foundations", icon: "⚡", sortOrder: 3.3, shardingPanel: true,
+    name: 'Sharding = Scalability', title: 'Sharding = Scalability', subtitle: 'Why horizontal scale works',
+    desc: 'Start with one tablet, add rows, watch it split — then scale across six nodes. Every shard added is a new lane of write capacity.',
+    guidedTour: [
+      { text: "A single tablet holds all rows. As data grows, one node handles every write — it becomes the bottleneck.", element: ".canvas-wrap" },
+      { text: "Click <b>Step Forward</b> to fill the tablet, then watch it split in two. Each shard gets its own leader on a different node.", element: "#btn-step" },
+      { text: "The final step shows six nodes, six shards — <b>6× the original write throughput</b> with no schema changes and no downtime.", element: ".sharding-perf-panel" }
+    ],
+    init: (ctx) => {
+      ctx.setCanvasGeoMode(false);
+      ctx.setCanvasRegionMode(false);
+      for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, n === 1);
+
+      S.groups = [
+        {
+          id: 'sh1', table: 'users', tnum: 1, range: '0x0000–0xFFFF',
+          leaderNode: 1, term: 4, replicas: [1], maxRows: 20,
+          data: [
+            [1,  'Alice', 'NY',  87, 1713289000.01],
+            [2,  'Bob',   'CHI', 92, 1713289000.02],
+            [3,  'Carol', 'HOU', 78, 1713289000.03],
+            [4,  'Diana', 'PHX', 95, 1713289000.04],
+            [5,  'Eva',   'SEA', 83, 1713289000.05],
+            [6,  'Frank', 'BOS', 91, 1713289000.06],
+            [7,  'Grace', 'AUS', 88, 1713289000.07],
+            [8,  'Henry', 'DEN', 76, 1713289000.08],
+            [9,  'Iris',  'MIA', 94, 1713289000.09],
+            [10, 'Jake',  'POR', 80, 1713289000.10],
+            [11, 'Kate',  'LA',  86, 1713289000.11],
+            [12, 'Lena',  'SF',  89, 1713289000.12],
+            [13, 'Maya',  'DAL', 82, 1713289000.13],
+            [14, 'Noah',  'VEG', 77, 1713289000.14],
+            [15, 'Omar',  'ATL', 90, 1713289000.15]
+          ]
+        }
+      ];
+      S.replicaState = buildRS(S.groups);
+      renderAllTablets();
+      setTimeout(renderConnections, 80);
+      renderShardingPerfPanel({
+        nodes: 1, shards: 1, throughput: 8000, maxThroughput: 60000, latency: 12, maxLatency: 28,
+        nodeLoads: [{ node: 1, pct: 35 }]
+      });
+    },
+    steps: [
+      {
+        label: '1. One Tablet, One Node — Bottleneck',
+        desc: '15 rows so far — but writes keep coming. Every new row lands on the same single tablet on TS-1. There is no other place for data to go.',
+        action: async (ctx) => {
+          ctx.activateClient(true);
+          const g = S.groups.find(x => x.id === 'sh1');
+          const incoming = [
+            [16, 'Pam',   'NAS', 74, 1713289001.1],
+            [17, 'Quinn', 'TAM', 85, 1713289001.2],
+            [18, 'Rosa',  'BAL', 93, 1713289001.3]
+          ];
+          for (const row of incoming) {
+            ctx.pktClientToTablet('sh1', 1, 'pk-write', 480);
+            await ctx.delay(320);
+            g.data.push([...row]);
+            ctx.reRenderTablet('sh1', 1, true);
+            await ctx.delay(80);
+          }
+          ctx.activateClient(false);
+          ctx.hlTablet('sh1', 1, 't-hl');
+          addLog('18 rows · 1 tablet · 1 node — all writes serialised through TS-1', 'lw');
+          renderShardingPerfPanel({
+            nodes: 1, shards: 1, throughput: 10000, maxThroughput: 60000, latency: 28, maxLatency: 28,
+            nodeLoads: [{ node: 1, pct: 100 }]
+          });
+          addLog('TS-1 at 100% — split threshold reached', 'lw');
+        }
+      },
+      {
+        label: '2. Split → 2 Nodes — First Division',
+        desc: 'The tablet crosses the split threshold. YB-Master picks a midpoint and migrates half the rows to TS-2. Two parallel write lanes — instant 2× throughput with zero downtime.',
+        action: async (ctx) => {
+          addLog('YB-Master: split threshold reached — dividing tablet across 2 nodes', 'li');
+          const g = S.groups.find(x => x.id === 'sh1');
+          const d = [...g.data]; // all 18 rows
+
+          const srcEl = document.getElementById('tablet-sh1-1');
+          if (srcEl) srcEl.classList.add('t-splitting');
+          await ctx.delay(480);
+
+          ctx.setNodeVisibility(2, true);
+          await ctx.delay(280);
+
+          S.groups = [
+            { id: 'sha', table: 'users', tnum: '1a', range: '0x0000–0x7FFF', leaderNode: 1, term: 5, replicas: [1], maxRows: 9, data: d.slice(0, 9) },
+            { id: 'shb', table: 'users', tnum: '1b', range: '0x8000–0xFFFF', leaderNode: 2, term: 5, replicas: [2], maxRows: 9, data: d.slice(9)    }
+          ];
+          S.replicaState = buildRS(S.groups);
+          for (const sg of S.groups) {
+            const rs = S.replicaState[sg.id]?.[sg.leaderNode];
+            if (rs) rs.newRows = sg.data.map((_, i) => i);
+          }
+          renderAllTablets(); renderConnections();
+          const post2 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
+          setTimeout(() => post2.forEach(({ id, node }) => {
+            const rs = S.replicaState[id]?.[node]; if (rs) rs.newRows = [];
+            reRenderTabletInternal(id, node);
+          }), 2000);
+
+          ctx.hlTablet('sha', 1, 't-new');
+          ctx.hlTablet('shb', 2, 't-new');
+          addLog('sha: rows 1–9 · TS-1  |  shb: rows 10–18 · TS-2', 'ls');
+          await ctx.delay(400);
+
+          ctx.activateClient(true);
+          for (let i = 0; i < 3; i++) {
+            ctx.pktClientToTablet('sha', 1, 'pk-write', 500);
+            ctx.pktClientToTablet('shb', 2, 'pk-write', 500);
+            await ctx.delay(650);
+          }
+          ctx.activateClient(false);
+
+          renderShardingPerfPanel({
+            nodes: 2, shards: 2, throughput: 20000, maxThroughput: 60000, latency: 16, maxLatency: 28,
+            nodeLoads: [{ node: 1, pct: 50 }, { node: 2, pct: 50 }]
+          });
+          addLog('2 shards × 2 nodes = 20,000 writes/sec  |  2× throughput', 'ls');
+        }
+      },
+      {
+        label: '3. Split → 3 Nodes — Rebalanced',
+        desc: 'TS-3 joins. YB-Master rebalances all rows evenly across three nodes — six rows per shard. Three parallel write lanes, 3× the original throughput.',
+        action: async (ctx) => {
+          addLog('TS-3 joined — rebalancing rows across 3 nodes', 'li');
+          const dAll = [...S.groups.find(x => x.id === 'sha').data, ...S.groups.find(x => x.id === 'shb').data];
+
+          [{ id: 'sha', n: 1 }, { id: 'shb', n: 2 }].forEach(({ id, n }) => {
+            const el = document.getElementById(`tablet-${id}-${n}`);
+            if (el) el.classList.add('t-splitting');
+          });
+          await ctx.delay(480);
+
+          ctx.setNodeVisibility(3, true);
+          await ctx.delay(280);
+
+          S.groups = [
+            { id: 'sha', table: 'users', tnum: '1a', range: '0x0000–0x54FF', leaderNode: 1, term: 6, replicas: [1], maxRows: 6, data: dAll.slice(0, 6)  },
+            { id: 'shb', table: 'users', tnum: '1b', range: '0x5500–0xA9FF', leaderNode: 2, term: 6, replicas: [2], maxRows: 6, data: dAll.slice(6, 12) },
+            { id: 'shc', table: 'users', tnum: '1c', range: '0xAA00–0xFFFF', leaderNode: 3, term: 6, replicas: [3], maxRows: 6, data: dAll.slice(12)    }
+          ];
+          S.replicaState = buildRS(S.groups);
+          for (const sg of S.groups) {
+            const rs = S.replicaState[sg.id]?.[sg.leaderNode];
+            if (rs) rs.newRows = sg.data.map((_, i) => i);
+          }
+          renderAllTablets(); renderConnections();
+          const post3 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
+          setTimeout(() => post3.forEach(({ id, node }) => {
+            const rs = S.replicaState[id]?.[node]; if (rs) rs.newRows = [];
+            reRenderTabletInternal(id, node);
+          }), 2000);
+
+          ctx.hlTablet('sha', 1, 't-new');
+          ctx.hlTablet('shb', 2, 't-new');
+          ctx.hlTablet('shc', 3, 't-new');
+          addLog('sha: rows 1–6 · TS-1  |  shb: rows 7–12 · TS-2  |  shc: rows 13–18 · TS-3', 'ls');
+          await ctx.delay(400);
+
+          ctx.activateClient(true);
+          for (let i = 0; i < 3; i++) {
+            ctx.pktClientToTablet('sha', 1, 'pk-write', 500);
+            ctx.pktClientToTablet('shb', 2, 'pk-write', 500);
+            ctx.pktClientToTablet('shc', 3, 'pk-write', 500);
+            await ctx.delay(650);
+          }
+          ctx.activateClient(false);
+
+          renderShardingPerfPanel({
+            nodes: 3, shards: 3, throughput: 30000, maxThroughput: 60000, latency: 10, maxLatency: 28,
+            nodeLoads: [{ node: 1, pct: 33 }, { node: 2, pct: 33 }, { node: 3, pct: 33 }]
+          });
+          addLog('3 shards × 3 nodes = 30,000 writes/sec  |  3× throughput', 'ls');
+        }
+      },
+      {
+        label: '4. Split → 6 Nodes — Each Shard Splits Once More',
+        desc: 'Each of the 3 shards splits in two. TS-4, TS-5, and TS-6 absorb the second half of each. Six nodes, six lanes — 6× the original throughput, same 18 rows.',
+        action: async (ctx) => {
+          for (const n of [4, 5, 6]) {
+            ctx.setNodeVisibility(n, true);
+            addLog(`TS-${n} joined`, 'ls');
+            await ctx.delay(180);
+          }
+
+          const dA = [...S.groups.find(x => x.id === 'sha').data]; // 6 rows
+          const dB = [...S.groups.find(x => x.id === 'shb').data]; // 6 rows
+          const dC = [...S.groups.find(x => x.id === 'shc').data]; // 6 rows
+
+          // Animate all 3 source shards dissolving simultaneously
+          [{ id: 'sha', n: 1 }, { id: 'shb', n: 2 }, { id: 'shc', n: 3 }].forEach(({ id, n }) => {
+            const el = document.getElementById(`tablet-${id}-${n}`);
+            if (el) el.classList.add('t-splitting');
+          });
+          await ctx.delay(480);
+
+          S.groups = [
+            { id: 'sg1', table: 'users', tnum: 1, range: '0x0000–0x2AAA', leaderNode: 1, term: 6, replicas: [1], maxRows: 3, data: dA.slice(0, 3) },
+            { id: 'sg2', table: 'users', tnum: 2, range: '0x2AAB–0x54FF', leaderNode: 4, term: 6, replicas: [4], maxRows: 3, data: dA.slice(3)    },
+            { id: 'sg3', table: 'users', tnum: 3, range: '0x5500–0x7FFF', leaderNode: 2, term: 6, replicas: [2], maxRows: 3, data: dB.slice(0, 3) },
+            { id: 'sg4', table: 'users', tnum: 4, range: '0x8000–0xAAAA', leaderNode: 5, term: 6, replicas: [5], maxRows: 3, data: dB.slice(3)    },
+            { id: 'sg5', table: 'users', tnum: 5, range: '0xAAAB–0xD4FF', leaderNode: 3, term: 6, replicas: [3], maxRows: 3, data: dC.slice(0, 3) },
+            { id: 'sg6', table: 'users', tnum: 6, range: '0xD500–0xFFFF', leaderNode: 6, term: 6, replicas: [6], maxRows: 3, data: dC.slice(3)    }
+          ];
+          S.replicaState = buildRS(S.groups);
+          // Flash all migrated rows as newly arrived
+          for (const sg of S.groups) {
+            const rs = S.replicaState[sg.id]?.[sg.leaderNode];
+            if (rs) rs.newRows = sg.data.map((_, i) => i);
+          }
+          renderAllTablets(); renderConnections();
+          const post3 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
+          setTimeout(() => post3.forEach(({ id, node }) => {
+            const rs = S.replicaState[id]?.[node]; if (rs) rs.newRows = [];
+            reRenderTabletInternal(id, node);
+          }), 2000);
+
+          for (const g of S.groups) ctx.hlTablet(g.id, g.leaderNode, 't-new');
+          addLog('Each shard split once → 6 shards × 3 rows each', 'ls');
+          await ctx.delay(400);
+
+          ctx.activateClient(true);
+          for (let i = 0; i < 3; i++) {
+            for (const g of S.groups) ctx.pktClientToTablet(g.id, g.leaderNode, 'pk-write', 550);
+            await ctx.delay(700);
+          }
+          ctx.activateClient(false);
+
+          renderShardingPerfPanel({
+            nodes: 6, shards: 6, throughput: 60000, maxThroughput: 60000, latency: 5, maxLatency: 28,
+            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 17 }))
+          });
+          addLog('6 shards × 6 nodes = 60,000 writes/sec  |  5 ms latency  ✓', 'ls');
+          addLog('6× throughput — same 18 rows, no schema change, no downtime', 'ls');
+          document.getElementById('health-txt').textContent = 'Healthy · 6 TServers · 6 Shards · 6× Scale';
+        }
+      },
+      {
+        label: '5. Real World — Many Tables, Many Shards',
+        desc: 'In production each table is independently sharded across all nodes. YugabyteDB routes writes to the correct shard automatically. Every new node adds capacity for every table simultaneously.',
+        action: async (ctx) => {
+          S.compactMode = true;
+          S.groups = [
+            { id: 'rw1', table: 'users',      tnum: 1, range: '0x0000–0x3FFF', leaderNode: 1, term: 5, replicas: [1], data: [] },
+            { id: 'rw2', table: 'users',      tnum: 2, range: '0x4000–0x7FFF', leaderNode: 2, term: 5, replicas: [2], data: [] },
+            { id: 'rw3', table: 'users',      tnum: 3, range: '0x8000–0xBFFF', leaderNode: 3, term: 5, replicas: [3], data: [] },
+            { id: 'rw4', table: 'users',      tnum: 4, range: '0xC000–0xFFFF', leaderNode: 4, term: 5, replicas: [4], data: [] },
+            { id: 'rw5', table: 'categories', tnum: 1, range: '0x0000–0x7FFF', leaderNode: 5, term: 5, replicas: [5], data: [] },
+            { id: 'rw6', table: 'categories', tnum: 2, range: '0x8000–0xFFFF', leaderNode: 6, term: 5, replicas: [6], data: [] },
+            { id: 'rw7', table: 'products',   tnum: 1, range: '0x0000–0x7FFF', leaderNode: 1, term: 5, replicas: [1], data: [] },
+            { id: 'rw8', table: 'products',   tnum: 2, range: '0x8000–0xFFFF', leaderNode: 2, term: 5, replicas: [2], data: [] },
+            { id: 'rw9', table: 'orders',     tnum: 1, range: '0x0000–0x7FFF', leaderNode: 3, term: 5, replicas: [3], data: [] },
+            { id: 'rwa', table: 'orders',     tnum: 2, range: '0x8000–0xFFFF', leaderNode: 4, term: 5, replicas: [4], data: [] },
+            { id: 'rwb', table: 'customers',  tnum: 1, range: '0x0000–0x7FFF', leaderNode: 5, term: 5, replicas: [5], data: [] },
+            { id: 'rwc', table: 'customers',  tnum: 2, range: '0x8000–0xFFFF', leaderNode: 6, term: 5, replicas: [6], data: [] }
+          ];
+          S.replicaState = buildRS(S.groups);
+          renderAllTablets(); renderConnections();
+          addLog('Production view: 5 tables × multiple shards distributed across 6 nodes', 'li');
+          await ctx.delay(400);
+
+          ctx.activateClient(true);
+          for (let burst = 0; burst < 3; burst++) {
+            S.groups.forEach(g => ctx.pktClientToTablet(g.id, g.leaderNode, 'pk-write', 500));
+            await ctx.delay(600);
+          }
+          ctx.activateClient(false);
+
+          renderShardingPerfPanel({
+            nodes: 6, shards: 12, throughput: 60000, maxThroughput: 60000, latency: 5, maxLatency: 28,
+            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 33 }))
+          });
+          addLog('Every table sharded. Every write routed automatically. Every node contributes.', 'ls');
+          document.getElementById('health-txt').textContent = 'Healthy · RF=3 · 6 TServers · Fully Balanced · 6× Scale';
+        }
+      }
+    ]
+  },
+
+  "23": {
+    group: "Foundations", icon: "🛡️", sortOrder: 3.6, haPanel: true,
+    name: 'Replication = HA', title: 'Replication = HA', subtitle: 'Single node vs distributed — side by side',
+    desc: 'Two systems run in parallel. RF=1 stores one copy. RF=3 stores three. When the same node failure hits both, one survives and one disappears.',
+    guidedTour: [
+      { text: "TS-1 is a <b>single-node system (RF=1)</b>. TS-2, TS-3, TS-4 form a <b>distributed cluster (RF=3)</b>. Both start with the same rows.", element: ".canvas-wrap" },
+      { text: "Click <b>Step Forward</b> to hit both systems with a failure. Watch what the panel shows in real time.", element: "#btn-step" },
+      { text: "The <b>side-by-side panel</b> shows the contrast — RF=1 goes down for good, RF=3 degrades then self-heals.", element: ".ha-panel" }
+    ],
+    latencies: [
+      { lbl: 'Heartbeat Interval', cls: 'll', max: 500 },
+      { lbl: 'Failure Detection', cls: 'lm', max: 500 },
+      { lbl: 'Re-election (Raft)', cls: 'll', max: 50 },
+      { lbl: 'Re-replication',     cls: 'lm', max: 200 }
+    ],
+    init: (ctx) => {
+      ctx.setCanvasGeoMode(false);
+      ctx.setCanvasRegionMode(false);
+      for (let n = 1; n <= 9; n++) ctx.setNodeVisibility(n, n <= 4);
+      [1, 2, 3, 4].forEach(id => { S.nodes.find(n => n.id === id).alive = true; renderNodeAlive(id, true); });
+      S.partitioned = [];
+      const rf1Label = document.querySelector('#node-1 .n-name');
+      if (rf1Label) rf1Label.textContent = 'Single Node';
+      ['TServer-1', 'TServer-2', 'TServer-3'].forEach((name, i) => {
+        const el = document.querySelector(`#node-${i + 2} .n-name`);
+        if (el) el.textContent = name;
+      });
+
+      // Vertical divider between the RF=1 node and the RF=3 cluster
+      const divider = document.createElement('div');
+      divider.id = 'canvas-vs-divider';
+      divider.className = 'canvas-vs-divider';
+      const node1El = document.getElementById('node-1');
+      if (node1El && node1El.nextSibling) node1El.parentNode.insertBefore(divider, node1El.nextSibling);
+
+      const rows = [
+        [1, 'Alice', 'NY',  87, 1713289000.1],
+        [2, 'Bob',   'CHI', 92, 1713289000.2],
+        [3, 'Carol', 'HOU', 78, 1713289000.3],
+        [4, 'Diana', 'PHX', 95, 1713289000.4],
+        [5, 'Eva',   'SEA', 83, 1713289000.5]
+      ];
+      S.groups = [
+        { id: 'rf1', table: 'users', tnum: 1, range: '0x0000–0xFFFF', leaderNode: 1, term: 4, replicas: [1],       maxRows: 6, hideStorage: true, simpleTable: true, data: rows.map(r => [...r]) },
+        { id: 'rf3', table: 'users', tnum: 1, range: '0x0000–0xFFFF', leaderNode: 2, term: 4, replicas: [2, 3, 4], maxRows: 6, data: rows.map(r => [...r]) }
+      ];
+      S.replicaState = buildRS(S.groups);
+      renderAllTablets();
+      setTimeout(renderConnections, 80);
+      renderHaPanel({ systems: [
+        { label: 'Single Node  RF=1', nodes: [{id:1,alive:true,name:'Single Node'}],          available: true,  detail: '1 copy · no replication' },
+        { label: 'Distributed  RF=3', nodes: [{id:2,alive:true,name:'TS-1'},{id:3,alive:true,name:'TS-2'},{id:4,alive:true,name:'TS-3'}], available: true,  detail: '3 copies · Raft quorum' }
+      ]});
+    },
+    steps: [
+      {
+        label: '1. RF=3 Replicates — RF=1 Doesn\'t',
+        desc: 'A new row is written to both systems. On the RF=1 side: one write, one node, done. On the RF=3 side: the leader replicates to both followers before ACKing — all 3 nodes get the row.',
+        action: async (ctx) => {
+          ctx.activateClient(true);
+          addLog('Writing row 6 (Frank) to both systems', 'li');
+          const newRow = [6, 'Frank', 'BOS', 91, 1713289002.1];
+
+          // RF=1: write → node 1, no replication
+          ctx.pktClientToTablet('rf1', 1, 'pk-write', 500);
+          await ctx.delay(350);
+          S.groups.find(x => x.id === 'rf1').data.push([...newRow]);
+          ctx.reRenderTablet('rf1', 1, true);
+          addLog('RF=1: row appended to TS-1 — no replication follows', 'lw');
+
+          // RF=3: write → node 2, Raft to 3 and 4
+          ctx.pktClientToTablet('rf3', 2, 'pk-write', 500);
+          await ctx.delay(200);
+          S.groups.find(x => x.id === 'rf3').data.push([...newRow]);
+          for (const n of [2, 3, 4]) ctx.reRenderTablet('rf3', n, true);
+          const r1 = ctx.pktTabletToTablet('rf3', 2, 'rf3', 3, 'pk-raft', 400);
+          const r2 = ctx.pktTabletToTablet('rf3', 2, 'rf3', 4, 'pk-raft', 450);
+          await Promise.all([r1, r2]);
+          const a1 = ctx.pktTabletToTablet('rf3', 3, 'rf3', 2, 'pk-ack', 350);
+          const a2 = ctx.pktTabletToTablet('rf3', 4, 'rf3', 2, 'pk-ack', 350);
+          await Promise.all([a1, a2]);
+          addLog('RF=3: row replicated to TS-3 and TS-4 before ACK ✓', 'ls');
+          ctx.activateClient(false);
+          ctx.setLat(0, 200);
+
+          renderHaPanel({ systems: [
+            { label: 'Single Node  RF=1', nodes: [{id:1,alive:true,name:'Single Node'}],          available: true,  detail: '1 copy · TS-1 only' },
+            { label: 'Distributed  RF=3', nodes: [{id:2,alive:true,name:'TS-1'},{id:3,alive:true,name:'TS-2'},{id:4,alive:true,name:'TS-3'}], available: true,  detail: '3 identical copies · quorum' }
+          ]});
+        }
+      },
+      {
+        label: '2. Same Failure Hits Both Systems',
+        desc: 'TS-1 (the entire RF=1 system) fails. TS-3 (one node in the RF=3 cluster) also fails at the same time. RF=1: total outage — data gone. RF=3: quorum still held on TS-2 and TS-4, writes keep serving.',
+        action: async (ctx) => {
+          addLog('FAILURE: TS-1 down (RF=1 system) + TS-3 down (RF=3 cluster)', 'le');
+
+          // Kill TS-1 and TS-3 simultaneously
+          S.nodes.find(n => n.id === 1).alive = false; renderNodeAlive(1, false);
+          S.nodes.find(n => n.id === 3).alive = false; renderNodeAlive(3, false);
+          // RF=1: data gone — clear rows to show the loss visually
+          S.groups.find(x => x.id === 'rf1').data = [];
+          renderAllTablets();
+          ctx.setLat(1, 300);
+          await ctx.delay(600);
+
+          // RF=3: TS-2 still leads, TS-4 still has follower — quorum held
+          [2, 4].forEach(n => ctx.hlTablet('rf3', n, 't-hl'));
+          addLog('RF=1 · TS-1: DEAD — data unreachable, system down ✗', 'le');
+          addLog('RF=3 · TS-3: DEAD — but TS-2+TS-4 hold quorum ✓', 'ls');
+          ctx.setLat(2, 15);
+
+          renderHaPanel({ systems: [
+            { label: 'Single Node  RF=1', nodes: [{id:1,alive:false,name:'Single Node'}],                   available: false, detail: 'Data unreachable · system down' },
+            { label: 'Distributed  RF=3', nodes: [{id:2,alive:true,name:'TS-1'},{id:3,alive:false,name:'TS-2'},{id:4,alive:true,name:'TS-3'}],  available: true,  degraded: true, detail: '2/3 alive · quorum held' }
+          ]});
+          document.getElementById('health-txt').textContent = '⚠️ RF=1: OUTAGE · RF=3: Degraded but serving';
+        }
+      },
+      {
+        label: '3. RF=3 Keeps Serving — RF=1 Is Gone',
+        desc: 'Writes continue flowing to the RF=3 cluster. TS-2 leads, TS-4 replicates. Every write is acknowledged. The RF=1 system is dark — no writes, no reads, data lost until a DBA manually restores from backup.',
+        action: async (ctx) => {
+          ctx.activateClient(true);
+          addLog('Sending writes — RF=3 accepts, RF=1 unreachable', 'li');
+          for (let i = 0; i < 3; i++) {
+            ctx.pktClientToTablet('rf3', 2, 'pk-write', 500);
+            await ctx.delay(250);
+            ctx.pktTabletToTablet('rf3', 2, 'rf3', 4, 'pk-raft', 400);
+            await ctx.delay(450);
+          }
+          ctx.activateClient(false);
+          addLog('RF=3: all writes succeed — 0 ms downtime ✓', 'ls');
+          addLog('RF=1: all writes rejected — node dead, no failover possible', 'le');
+
+          renderHaPanel({ systems: [
+            { label: 'Single Node  RF=1', nodes: [{id:1,alive:false,name:'Single Node'}],                   available: false, detail: 'Writes rejected · restore from backup' },
+            { label: 'Distributed  RF=3', nodes: [{id:2,alive:true,name:'TS-1'},{id:3,alive:false,name:'TS-2'},{id:4,alive:true,name:'TS-3'}],  available: true,  degraded: true, detail: 'Serving normally · 2/3 quorum' }
+          ]});
+        }
+      },
+      {
+        label: '4. RF=3 Self-Heals — RF=1 Cannot',
+        desc: 'TS-3 rejoins the RF=3 cluster, catches up via Raft, and RF=3 is fully restored. TS-1 (RF=1) remains down — there is no replica to recover from. Zero-touch recovery on one side; manual intervention required on the other.',
+        action: async (ctx) => {
+          S.nodes.find(n => n.id === 3).alive = true;
+          renderNodeAlive(3, true);
+          renderAllTablets(); setTimeout(renderConnections, 50);
+          addLog('TS-3: ONLINE — Raft catch-up starting', 'ls');
+          ctx.setLat(3, 150);
+
+          for (let i = 0; i < 3; i++) {
+            ctx.pktTabletToTablet('rf3', 2, 'rf3', 3, 'pk-raft', 400);
+            await ctx.delay(450);
+          }
+          addLog('TS-3 caught up — RF=3 fully restored ✓', 'ls');
+          [2, 3, 4].forEach(n => ctx.hlTablet('rf3', n, 't-hl'));
+
+          renderHaPanel({ systems: [
+            { label: 'Single Node  RF=1', nodes: [{id:1,alive:false,name:'Single Node'}],                           available: false, detail: 'Still down · data lost · manual restore needed' },
+            { label: 'Distributed  RF=3', nodes: [{id:2,alive:true,name:'TS-1'},{id:3,alive:true,name:'TS-2'},{id:4,alive:true,name:'TS-3'}],  available: true,  detail: '3 copies restored · fully healthy' }
+          ]});
+          document.getElementById('health-txt').textContent = 'RF=3: Healthy · RF=1: Outage · Zero-touch self-healing vs manual restore';
+          addLog('RF=3: self-healed with zero operator intervention ✓', 'ls');
+          addLog('RF=1: TS-1 still dead — DBA required to restore from backup', 'le');
         }
       }
     ]
@@ -3101,6 +3555,80 @@ const SCENARIOS = {
           }
         }
       ])
+    ]
+  },
+
+  // Security: Encryption in Transit
+  "security-tls": {
+    group: "Security", icon: "🔒", sortOrder: 1,
+    name: 'Encryption in Transit', title: 'Encryption in Transit', subtitle: 'TLS for client-node & node-node traffic',
+    isArch: true,
+    desc: 'YugabyteDB encrypts all network traffic using TLS 1.2/1.3. Client-to-node connections (YSQL port 5433, YCQL port 9042) support one-way TLS or mutual TLS (mTLS). All intra-cluster node-to-node RPC traffic — TServer ↔ TServer and TServer ↔ YB-Master — is always protected with mutual TLS and certificate-based authentication.',
+    guidedTour: [
+      { text: "YugabyteDB secures <b>two distinct traffic paths</b>: client-to-node (app traffic) and node-to-node (internal RPC). Both use TLS 1.2/1.3.", element: ".arch-view" },
+      { text: "Client connections to YSQL (:5433) and YCQL (:9042) support <b>one-way TLS or full mutual TLS</b>. Applications use standard PostgreSQL/Cassandra TLS drivers — no custom code.", element: ".sec-client-node" },
+      { text: "All intra-cluster traffic uses <b>mutual TLS (mTLS)</b> — every node presents a certificate and verifies its peer. Zero plaintext bytes on the wire between nodes.", element: ".sec-node-node" }
+    ],
+  },
+
+  // Security: Encryption at Rest
+  "security-rest": {
+    group: "Security", icon: "🔐", sortOrder: 2,
+    name: 'Encryption at Rest', title: 'Encryption at Rest', subtitle: 'Per-file DEK · Universe Key · AES-256-CTR',
+    isArch: true,
+    desc: 'YugabyteDB uses a two-tier key hierarchy for encryption at rest. Each flushed SST file and WAL segment gets a unique Data Key (DEK, AES-256-CTR) embedded in its header. The DEK is encrypted by a Universe Key (UK) maintained by YB-Masters in an encrypted registry and distributed to TServers via heartbeat. Key rotation re-encrypts only the small DEK — existing data files are untouched until compaction. Supported KMS: AWS KMS, HashiCorp Vault, GCP KMS, Azure Key Vault, Thales CipherTrust.',
+    guidedTour: [
+      { text: "<b>Envelope encryption</b>: each SST file has a unique DEK; the DEK is encrypted by a Universe Key held by YB-Masters. Two layers — data and key — are always separate.", element: ".arch-view" },
+      { text: "The DEK is <b>embedded in the SST file header</b> (EncryptionHeaderPB) alongside the Universe Key version ID. The Universe Key itself is never stored in the file.", element: ".sec-dek-layer" },
+      { text: "<b>Key rotation</b> only re-encrypts the small DEK using the new Universe Key — existing data blocks are untouched until compaction.", element: ".sec-kms-layer" }
+    ]
+  },
+  // Security: Row Level Security
+  "security-rls": {
+    group: "Security", icon: "🔑", sortOrder: 3,
+    name: 'Row Level Security', title: 'Row Level Security (RLS)', subtitle: 'PostgreSQL-compatible fine-grained access control',
+    isArch: true,
+    desc: 'YugabyteDB supports PostgreSQL Row Level Security (RLS) natively through YSQL. RLS policies attach a predicate to a table that is transparently applied to every query — users only see or modify rows permitted by their policy. No application code changes are required; enforcement happens entirely in the database.',
+    guidedTour: [
+      { text: "<b>Row Level Security</b> works by attaching a WHERE-like predicate to a table. Every query — SELECT, UPDATE, DELETE — automatically filters through the policy.", element: ".arch-view" },
+      { text: "Policies can be <b>role-specific</b>: a tenant isolation policy ensures user A never sees user B\'s rows, even if both query the same table.", element: ".sec-rls-policy" },
+      { text: "RLS is <b>transparent to applications</b>: the driver, ORM, or query tool sees normal query results. Enforcement is entirely server-side in YSQL.", element: ".sec-rls-table" }
+    ]
+  },
+  // Security: Authentication
+  "security-auth": {
+    group: "Security", icon: "🪪", sortOrder: 5,
+    name: 'Authentication', title: 'Authentication Methods', subtitle: 'LDAP · OIDC · SCRAM · Kerberos · Cert-based',
+    isArch: true,
+    desc: 'YugabyteDB supports multiple authentication mechanisms for YSQL and YCQL connections. Methods are configured per-connection via HBA rules (host-based authentication). Supported: password (SCRAM-SHA-256, MD5), certificate-based mTLS, LDAP, OIDC/JWT, and Kerberos (GSSAPI).',
+    guidedTour: [
+      { text: "YugabyteDB supports <b>five authentication methods</b> — from simple password auth to enterprise SSO via OIDC. All are configured in the HBA rules file.", element: ".arch-view" },
+      { text: "<b>SCRAM-SHA-256</b> is the recommended password method — it never sends the plaintext password over the wire, even without TLS.", element: ".sec-auth-methods" },
+      { text: "<b>OIDC and LDAP</b> integrate with enterprise identity providers (Okta, Azure AD, etc.), enabling centralised credential management and SSO across all database connections.", element: ".sec-auth-enterprise" }
+    ]
+  },
+  // Security: Audit Logging
+  "security-audit": {
+    group: "Security", icon: "📋", sortOrder: 6,
+    name: 'Audit Logging', title: 'Audit Logging', subtitle: 'pgaudit · DDL / DML / DCL · Compliance',
+    isArch: true,
+    desc: 'YugabyteDB supports session and object-level audit logging through the pgaudit extension in YSQL. Audit logs capture DDL, DML, DCL, and role changes — enabling compliance with SOC 2, PCI-DSS, HIPAA, and similar frameworks. Logs can be directed to server log files or syslog.',
+    guidedTour: [
+      { text: "<b>pgaudit</b> provides statement-level and object-level audit logging. Enable it globally or per-role for fine-grained compliance coverage.", element: ".arch-view" },
+      { text: "<b>Statement classes</b> (READ, WRITE, DDL, ROLE, MISC) let you capture exactly the operations your compliance framework requires — without logging noise.", element: ".sec-audit-classes" },
+      { text: "Each audit record includes: <b>timestamp, user, database, statement class, object, and full SQL text</b>. Structured for SIEM ingestion.", element: ".sec-audit-format" }
+    ]
+  },
+  // Security: Column Level Encryption
+  "security-column": {
+    group: "Security", icon: "🛡️", sortOrder: 4,
+    name: 'Column Level Encryption', title: 'Column Level Encryption', subtitle: 'pgcrypto · field-level PII / PCI protection',
+    isArch: true,
+    desc: 'YugabyteDB supports column-level encryption via the pgcrypto extension (supported through YSQL). Sensitive columns — SSNs, card numbers, PII fields — are encrypted before storage using pgp_sym_encrypt() or pgp_pub_encrypt(). Only queries that supply the correct decryption key can retrieve plaintext values. The rest of the row remains fully queryable.',
+    guidedTour: [
+      { text: "<b>Column level encryption</b> uses the pgcrypto extension. Individual column values are encrypted at the SQL layer — the ciphertext bytes are what get stored in the tablet.", element: ".arch-view" },
+      { text: "Use <code>pgp_sym_encrypt(value, key)</code> on INSERT and <code>pgp_sym_decrypt(col::bytea, key)</code> on SELECT. Only the caller with the key sees plaintext.", element: ".sec-col-encrypt" },
+      { text: "Non-sensitive columns remain <b>fully queryable</b> with indexes and joins. Encryption applies only to the designated sensitive fields — no whole-row overhead.", element: ".sec-col-table" }
     ]
   }
 };
