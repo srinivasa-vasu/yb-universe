@@ -248,29 +248,54 @@ async function fdCatchUp(nodeId) {
   return fdCatchingUp[nodeId];
 }
 
-function renderShardingPerfPanel({ nodes = 1, shards = 6, throughput = 10000, maxThroughput = 60000, latency = 28, maxLatency = 28, nodeLoads = [] }) {
+function _shardingNodeHTML(state, loadPct, cpuPct, latencyMs) {
+  const stateMap = {
+    idle:      { icon: '🖥️', status: 'Standing by',       statusColor: 'var(--txt3)' },
+    normal:    { icon: '🖥️', status: 'Processing writes', statusColor: '#22c55e' },
+    saturated: { icon: '⚠️', status: 'Overloaded',         statusColor: '#ef4444' },
+  };
+  const s = stateMap[state] || stateMap.idle;
+  const barColor = loadPct >= 80 ? '#ef4444' : loadPct >= 50 ? '#f97316' : loadPct >= 25 ? '#eab308' : '#22c55e';
+  let h = `<div style="padding:14px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;box-sizing:border-box;min-height:80px;">`;
+  h += `<div style="font-size:26px;">${s.icon}</div>`;
+  h += `<div style="font-size:10px;font-weight:700;color:var(--txt3);text-transform:uppercase;letter-spacing:0.08em;">Single Node</div>`;
+  h += `<div style="font-size:11px;color:${s.statusColor};font-weight:600;">${s.status}</div>`;
+  if (loadPct > 0) {
+    h += `<div style="width:100%;"><div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-size:10px;color:var(--txt3);">Write Load</span><span style="font-size:10px;color:${barColor};font-weight:700;">${loadPct}%</span></div><div style="width:100%;height:5px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${loadPct}%;background:${barColor};border-radius:3px;transition:width 0.8s ease,background 0.8s ease;"></div></div></div>`;
+    h += `<div style="width:100%;"><div style="display:flex;justify-content:space-between;margin-bottom:3px;"><span style="font-size:10px;color:var(--txt3);">CPU</span><span style="font-size:10px;color:#22d3ee;font-weight:700;">${cpuPct}%</span></div><div style="width:100%;height:5px;background:rgba(255,255,255,0.07);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${cpuPct}%;background:#22d3ee;border-radius:3px;transition:width 0.8s ease;"></div></div></div>`;
+    if (latencyMs > 0) h += `<div style="font-size:11px;margin-top:2px;"><span style="color:var(--txt3);">latency: </span><span style="font-weight:700;color:${loadPct >= 80 ? '#ef4444' : 'var(--txt2)'};">${latencyMs} ms</span></div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+function renderShardingPerfPanel({ nodes = 1, shards = 6, throughput = 10000, maxThroughput = 60000, latency = 28, maxLatency = 100, nodeLoads = [], cpuLoads = [], insight = '' }) {
   const container = document.getElementById('shp-content');
   if (!container) return;
 
   const allNodes = [1, 2, 3, 4, 5, 6];
   const nodeGridHtml = allNodes.map(n => {
-    const info = nodeLoads.find(x => x.node === n);
-    const isActive = !!info;
-    const pct = info ? info.pct : 0;
-    const loadClass = pct >= 80 ? 'load-critical' : pct >= 50 ? 'load-high' : pct >= 25 ? 'load-medium' : 'load-low';
+    const wInfo = nodeLoads.find(x => x.node === n);
+    const cInfo = cpuLoads.find(x => x.node === n);
+    const isActive = !!wInfo;
+    const wPct = wInfo ? wInfo.pct : 0;
+    const cPct = cInfo ? cInfo.pct : 0;
+    const loadClass = wPct >= 80 ? 'load-critical' : wPct >= 50 ? 'load-high' : wPct >= 25 ? 'load-medium' : 'load-low';
     return `<div class="shp-node-box ${isActive ? 'active ' + loadClass : 'inactive'}">
       <div class="shp-node-lbl">TS-${n}</div>
-      <div class="shp-node-load-bar"><div class="shp-node-load-fill" style="width:${isActive ? pct : 0}%"></div></div>
-      <div class="shp-node-load-pct">${isActive ? pct + '%' : '—'}</div>
+      <div class="shp-node-load-bar"><div class="shp-node-load-fill" style="width:${isActive ? wPct : 0}%"></div></div>
+      <div class="shp-node-load-pct">${isActive ? wPct + '%' : '—'} WR</div>
+      ${isActive ? `<div class="shp-cpu-bar"><div class="shp-cpu-fill" style="width:${cPct}%"></div></div><div class="shp-cpu-pct">${cPct}% CPU</div>` : ''}
     </div>`;
   }).join('');
 
   const tpFill = Math.min(100, (throughput / maxThroughput) * 100);
   const latFill = Math.min(100, (latency / maxLatency) * 100);
   const ndFill = Math.min(100, (nodes / 6) * 100);
+  const avgCpu = cpuLoads.length ? Math.round(cpuLoads.reduce((s, x) => s + x.pct, 0) / cpuLoads.length) : 0;
 
   container.innerHTML = `
-    <div class="shp-section-lbl">Node Write Load</div>
+    <div class="shp-section-lbl">Node Write Load &amp; CPU</div>
     <div class="shp-node-grid">${nodeGridHtml}</div>
     <div class="shp-divider"></div>
     <div class="shp-metric-row">
@@ -284,10 +309,16 @@ function renderShardingPerfPanel({ nodes = 1, shards = 6, throughput = 10000, ma
       <div class="shp-metric-val">${latency} ms avg</div>
     </div>
     <div class="shp-metric-row">
+      <div class="shp-metric-lbl">Avg CPU</div>
+      <div class="shp-metric-track"><div class="shp-metric-fill cpu" style="width:${avgCpu}%"></div></div>
+      <div class="shp-metric-val">${avgCpu}%</div>
+    </div>
+    <div class="shp-metric-row">
       <div class="shp-metric-lbl">Active Nodes</div>
       <div class="shp-metric-track"><div class="shp-metric-fill nd" style="width:${ndFill}%"></div></div>
       <div class="shp-metric-val">${nodes} of 6 nodes</div>
-    </div>`;
+    </div>
+    ${insight ? `<div class="shp-insight">${insight}</div>` : ''}`;
 }
 
 function renderHaPanel({ nodes = [], rf = 3, quorum = true, availability = 100, phase = 'healthy', systems = null }) {
@@ -1036,6 +1067,16 @@ function makeCtx() {
       const to = getTC(tgId, nId, cr); if (!to) { res(); return; }
       animPkt(from, { x: to.x + cw.scrollLeft, y: to.y + cw.scrollTop }, cls, dur / speedVal, res);
     }),
+    pktClientToNode: (nId, cls, dur) => new Promise(res => {
+      const cw = document.getElementById('canvas-wrap');
+      const cr = cw.getBoundingClientRect();
+      const cb = document.getElementById('client-box').getBoundingClientRect();
+      const from = { x: cb.left - cr.left + cb.width / 2 + cw.scrollLeft, y: cb.top - cr.top + cb.height / 2 + cw.scrollTop };
+      const nd = document.getElementById(`node-${nId}`); if (!nd) { res(); return; }
+      const nr = nd.getBoundingClientRect();
+      const to = { x: nr.left - cr.left + nr.width / 2 + cw.scrollLeft, y: nr.top - cr.top + nr.height / 2 + cw.scrollTop };
+      animPkt(from, to, cls, dur / speedVal, res);
+    }),
     pktTabletToClient: (tgId, nId, cls, dur) => new Promise(res => {
       const cw = document.getElementById('canvas-wrap');
       const cr = cw.getBoundingClientRect();
@@ -1654,7 +1695,7 @@ function selectScenario(id) {
   document.getElementById('health-txt').textContent = `Healthy · RF=3 · ${visibleNodes} TServers · ${S.groups.length} Raft Groups`;
   document.getElementById('health-dot').style.background = 'var(--ok)';
   document.getElementById('client-box').classList.remove('active');
-  document.getElementById('client-box').textContent = '⬡ YB-TServer Gateway';
+  document.getElementById('client-box').textContent = '⬡ App Client';
   document.getElementById('ddl-sec').style.display = 'none';
   showDataPanel(false);
   showSplitPanel(false);
@@ -2572,6 +2613,13 @@ function selectArch(tab) {
   scrollSidebarToActive();
   _exitArchMode(false);
   showDataPanel(false); showSplitPanel(false); showDocdbPanel(false);
+  // Hide simulation-only panels that may have been left visible
+  const _shpA = document.getElementById('sharding-perf-panel');
+  if (_shpA) _shpA.classList.remove('visible');
+  const _hapA = document.getElementById('ha-panel');
+  if (_hapA) _hapA.classList.remove('visible');
+  const _mrpA = document.getElementById('mr-lat-panel');
+  if (_mrpA) _mrpA.classList.remove('visible');
   const av = document.getElementById('arch-view');
   if (!av) return;
   av.style.display = 'flex';

@@ -1484,9 +1484,9 @@ const SCENARIOS = {
     name: 'Sharding = Scalability', title: 'Sharding = Scalability', subtitle: 'Why horizontal scale works',
     desc: 'Start with one tablet, add rows, watch it split — then scale across six nodes. Every shard added is a new lane of write capacity.',
     guidedTour: [
-      { text: "A single tablet holds all rows. As data grows, one node handles every write — it becomes the bottleneck.", element: ".canvas-wrap" },
-      { text: "Click <b>Step Forward</b> to fill the tablet, then watch it split in two. Each shard gets its own leader on a different node.", element: "#btn-step" },
-      { text: "The final step shows six nodes, six shards — <b>6× the original write throughput</b> with no schema changes and no downtime.", element: ".sharding-perf-panel" }
+      { text: "Start with one node handling all writes. Watch what happens to <b>CPU and latency</b> as traffic grows past the break-even point.", element: ".canvas-wrap" },
+      { text: "Steps 1–2 show a single node going from healthy to saturated. When CPU hits ~90%, <b>latency spikes 8×</b> — that is the ceiling.", element: ".sharding-perf-panel" },
+      { text: "Steps 3–4 add nodes. <b>Throughput multiplies. Latency stays flat.</b> Each node handles a smaller share — that is horizontal scaling.", element: ".sharding-perf-panel" }
     ],
     init: (ctx) => {
       ctx.setCanvasGeoMode(false);
@@ -1497,6 +1497,7 @@ const SCENARIOS = {
         {
           id: 'sh1', table: 'users', tnum: 1, range: '0x0000–0xFFFF',
           leaderNode: 1, term: 4, replicas: [1], maxRows: 20,
+          simpleTable: true, hideStorage: true,
           data: [
             [1,  'Alice', 'NY',  87, 1713289000.01],
             [2,  'Bob',   'CHI', 92, 1713289000.02],
@@ -1519,15 +1520,21 @@ const SCENARIOS = {
       S.replicaState = buildRS(S.groups);
       renderAllTablets();
       setTimeout(renderConnections, 80);
-      renderShardingPerfPanel({
-        nodes: 1, shards: 1, throughput: 8000, maxThroughput: 60000, latency: 12, maxLatency: 28,
-        nodeLoads: [{ node: 1, pct: 35 }]
-      });
+
+      // Label this as a plain "Node" — no distributed-system terminology yet
+      const nameEl = document.querySelector('#node-1 .n-name');
+      if (nameEl) nameEl.textContent = 'Node';
+      const zoneEl = document.querySelector('#node-1 .n-zone');
+      if (zoneEl) zoneEl.style.display = 'none';
+
+      // Panel starts empty — values populate only as the user steps through
+      const shpC = document.getElementById('shp-content');
+      if (shpC) shpC.innerHTML = '';
     },
     steps: [
       {
-        label: '1. One Tablet, One Node — Bottleneck',
-        desc: '15 rows so far — but writes keep coming. Every new row lands on the same single tablet on TS-1. There is no other place for data to go.',
+        label: '1. Single Node — Normal Load',
+        desc: 'Requests arrive at a steady pace. The single node receives all writes. Load and CPU stay moderate. Latency is low — this is the healthy operating range.',
         action: async (ctx) => {
           ctx.activateClient(true);
           const g = S.groups.find(x => x.id === 'sh1');
@@ -1538,85 +1545,61 @@ const SCENARIOS = {
           ];
           for (const row of incoming) {
             ctx.pktClientToTablet('sh1', 1, 'pk-write', 480);
-            await ctx.delay(320);
+            await ctx.delay(420);
             g.data.push([...row]);
             ctx.reRenderTablet('sh1', 1, true);
-            await ctx.delay(80);
+            await ctx.delay(100);
           }
           ctx.activateClient(false);
-          ctx.hlTablet('sh1', 1, 't-hl');
-          addLog('18 rows · 1 tablet · 1 node — all writes serialised through TS-1', 'lw');
           renderShardingPerfPanel({
-            nodes: 1, shards: 1, throughput: 10000, maxThroughput: 60000, latency: 28, maxLatency: 28,
-            nodeLoads: [{ node: 1, pct: 100 }]
+            nodes: 1, shards: 1, throughput: 8000, maxThroughput: 60000, latency: 10, maxLatency: 100,
+            nodeLoads: [{ node: 1, pct: 40 }],
+            cpuLoads:  [{ node: 1, pct: 38 }],
+            insight: 'Healthy zone: CPU 38%, write load 40%. Latency 10 ms — the single-node comfort range.'
           });
-          addLog('TS-1 at 100% — split threshold reached', 'lw');
+          addLog('18 rows · Node at 40% load · CPU 38% · latency 10 ms', 'ls');
         }
       },
       {
-        label: '2. Split → 2 Nodes — First Division',
-        desc: 'The tablet crosses the split threshold. YB-Master picks a midpoint and migrates half the rows to TS-2. Two parallel write lanes — instant 2× throughput with zero downtime.',
+        label: '2. Single Node — Approaching Saturation',
+        desc: 'Traffic spikes. Every write still funnels through the same single node — it has no relief valve. CPU and write load climb toward 90%. Latency spikes sharply. This is the break-even point.',
         action: async (ctx) => {
-          addLog('YB-Master: split threshold reached — dividing tablet across 2 nodes', 'li');
-          const g = S.groups.find(x => x.id === 'sh1');
-          const d = [...g.data]; // all 18 rows
+          addLog('Traffic burst — all writes funnelling through the single node', 'lw');
+          ctx.activateClient(true);
+          ctx.hlTablet('sh1', 1, 't-hl');
+          for (let i = 0; i < 8; i++) {
+            ctx.pktClientToTablet('sh1', 1, 'pk-write', 500);
+            await ctx.delay(190);
+          }
+          ctx.activateClient(false);
+          renderShardingPerfPanel({
+            nodes: 1, shards: 1, throughput: 11000, maxThroughput: 60000, latency: 82, maxLatency: 100,
+            nodeLoads: [{ node: 1, pct: 92 }],
+            cpuLoads:  [{ node: 1, pct: 89 }],
+            insight: '⚠ Break-even: CPU 89%, write load 92%. Latency spiked 8× to 82 ms. Single-node ceiling reached.'
+          });
+          addLog('Node at 92% load · CPU 89% · latency 82 ms — 8× worse than normal', 'lw');
+          addLog('Break-even point reached — time to scale out', 'lw');
+        }
+      },
+      {
+        label: '3. Scale Out → 3 Nodes',
+        desc: 'Now distributed systems kick in. The data is sharded across three nodes — each gets its own tablet. Load is shared equally. CPU per node drops back to healthy. Latency returns to normal.',
+        action: async (ctx) => {
+          addLog('YB-Master: provisioning TS-2 and TS-3 — sharding data across 3 nodes', 'li');
+          const dAll = [...S.groups.find(x => x.id === 'sh1').data];
+
+          // Restore TServer identity now that we're entering distributed mode
+          const nameEl = document.querySelector('#node-1 .n-name');
+          if (nameEl) nameEl.textContent = 'TServer-1';
+          const zoneEl = document.querySelector('#node-1 .n-zone');
+          if (zoneEl) zoneEl.style.display = '';
 
           const srcEl = document.getElementById('tablet-sh1-1');
           if (srcEl) srcEl.classList.add('t-splitting');
           await ctx.delay(480);
 
           ctx.setNodeVisibility(2, true);
-          await ctx.delay(280);
-
-          S.groups = [
-            { id: 'sha', table: 'users', tnum: '1a', range: '0x0000–0x7FFF', leaderNode: 1, term: 5, replicas: [1], maxRows: 9, data: d.slice(0, 9) },
-            { id: 'shb', table: 'users', tnum: '1b', range: '0x8000–0xFFFF', leaderNode: 2, term: 5, replicas: [2], maxRows: 9, data: d.slice(9)    }
-          ];
-          S.replicaState = buildRS(S.groups);
-          for (const sg of S.groups) {
-            const rs = S.replicaState[sg.id]?.[sg.leaderNode];
-            if (rs) rs.newRows = sg.data.map((_, i) => i);
-          }
-          renderAllTablets(); renderConnections();
-          const post2 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
-          setTimeout(() => post2.forEach(({ id, node }) => {
-            const rs = S.replicaState[id]?.[node]; if (rs) rs.newRows = [];
-            reRenderTabletInternal(id, node);
-          }), 2000);
-
-          ctx.hlTablet('sha', 1, 't-new');
-          ctx.hlTablet('shb', 2, 't-new');
-          addLog('sha: rows 1–9 · TS-1  |  shb: rows 10–18 · TS-2', 'ls');
-          await ctx.delay(400);
-
-          ctx.activateClient(true);
-          for (let i = 0; i < 3; i++) {
-            ctx.pktClientToTablet('sha', 1, 'pk-write', 500);
-            ctx.pktClientToTablet('shb', 2, 'pk-write', 500);
-            await ctx.delay(650);
-          }
-          ctx.activateClient(false);
-
-          renderShardingPerfPanel({
-            nodes: 2, shards: 2, throughput: 20000, maxThroughput: 60000, latency: 16, maxLatency: 28,
-            nodeLoads: [{ node: 1, pct: 50 }, { node: 2, pct: 50 }]
-          });
-          addLog('2 shards × 2 nodes = 20,000 writes/sec  |  2× throughput', 'ls');
-        }
-      },
-      {
-        label: '3. Split → 3 Nodes — Rebalanced',
-        desc: 'TS-3 joins. YB-Master rebalances all rows evenly across three nodes — six rows per shard. Three parallel write lanes, 3× the original throughput.',
-        action: async (ctx) => {
-          addLog('TS-3 joined — rebalancing rows across 3 nodes', 'li');
-          const dAll = [...S.groups.find(x => x.id === 'sha').data, ...S.groups.find(x => x.id === 'shb').data];
-
-          [{ id: 'sha', n: 1 }, { id: 'shb', n: 2 }].forEach(({ id, n }) => {
-            const el = document.getElementById(`tablet-${id}-${n}`);
-            if (el) el.classList.add('t-splitting');
-          });
-          await ctx.delay(480);
-
           ctx.setNodeVisibility(3, true);
           await ctx.delay(280);
 
@@ -1653,15 +1636,17 @@ const SCENARIOS = {
           ctx.activateClient(false);
 
           renderShardingPerfPanel({
-            nodes: 3, shards: 3, throughput: 30000, maxThroughput: 60000, latency: 10, maxLatency: 28,
-            nodeLoads: [{ node: 1, pct: 33 }, { node: 2, pct: 33 }, { node: 3, pct: 33 }]
+            nodes: 3, shards: 3, throughput: 30000, maxThroughput: 60000, latency: 11, maxLatency: 100,
+            nodeLoads: [{ node: 1, pct: 30 }, { node: 2, pct: 30 }, { node: 3, pct: 30 }],
+            cpuLoads:  [{ node: 1, pct: 29 }, { node: 2, pct: 29 }, { node: 3, pct: 29 }],
+            insight: '3× throughput. Per-node load back to 30% CPU. Latency: 11 ms — same as healthy single-node.'
           });
-          addLog('3 shards × 3 nodes = 30,000 writes/sec  |  3× throughput', 'ls');
+          addLog('3 shards · 3 nodes · 30,000 writes/sec · CPU 29% each · latency 11 ms', 'ls');
         }
       },
       {
-        label: '4. Split → 6 Nodes — Each Shard Splits Once More',
-        desc: 'Each of the 3 shards splits in two. TS-4, TS-5, and TS-6 absorb the second half of each. Six nodes, six lanes — 6× the original throughput, same 18 rows.',
+        label: '4. Scale Out → 6 Nodes',
+        desc: 'Each shard splits once more. Six nodes, six parallel write lanes — throughput doubles again. But notice: latency stays at 11 ms. Each node handles a smaller share, so per-node pressure stays constant. This is how horizontal scaling works.',
         action: async (ctx) => {
           for (const n of [4, 5, 6]) {
             ctx.setNodeVisibility(n, true);
@@ -1669,11 +1654,10 @@ const SCENARIOS = {
             await ctx.delay(180);
           }
 
-          const dA = [...S.groups.find(x => x.id === 'sha').data]; // 6 rows
-          const dB = [...S.groups.find(x => x.id === 'shb').data]; // 6 rows
-          const dC = [...S.groups.find(x => x.id === 'shc').data]; // 6 rows
+          const dA = [...S.groups.find(x => x.id === 'sha').data];
+          const dB = [...S.groups.find(x => x.id === 'shb').data];
+          const dC = [...S.groups.find(x => x.id === 'shc').data];
 
-          // Animate all 3 source shards dissolving simultaneously
           [{ id: 'sha', n: 1 }, { id: 'shb', n: 2 }, { id: 'shc', n: 3 }].forEach(({ id, n }) => {
             const el = document.getElementById(`tablet-${id}-${n}`);
             if (el) el.classList.add('t-splitting');
@@ -1681,28 +1665,27 @@ const SCENARIOS = {
           await ctx.delay(480);
 
           S.groups = [
-            { id: 'sg1', table: 'users', tnum: 1, range: '0x0000–0x2AAA', leaderNode: 1, term: 6, replicas: [1], maxRows: 3, data: dA.slice(0, 3) },
-            { id: 'sg2', table: 'users', tnum: 2, range: '0x2AAB–0x54FF', leaderNode: 4, term: 6, replicas: [4], maxRows: 3, data: dA.slice(3)    },
-            { id: 'sg3', table: 'users', tnum: 3, range: '0x5500–0x7FFF', leaderNode: 2, term: 6, replicas: [2], maxRows: 3, data: dB.slice(0, 3) },
-            { id: 'sg4', table: 'users', tnum: 4, range: '0x8000–0xAAAA', leaderNode: 5, term: 6, replicas: [5], maxRows: 3, data: dB.slice(3)    },
-            { id: 'sg5', table: 'users', tnum: 5, range: '0xAAAB–0xD4FF', leaderNode: 3, term: 6, replicas: [3], maxRows: 3, data: dC.slice(0, 3) },
-            { id: 'sg6', table: 'users', tnum: 6, range: '0xD500–0xFFFF', leaderNode: 6, term: 6, replicas: [6], maxRows: 3, data: dC.slice(3)    }
+            { id: 'sg1', table: 'users', tnum: 1, range: '0x0000–0x2AAA', leaderNode: 1, term: 7, replicas: [1], maxRows: 3, data: dA.slice(0, 3) },
+            { id: 'sg2', table: 'users', tnum: 2, range: '0x2AAB–0x54FF', leaderNode: 4, term: 7, replicas: [4], maxRows: 3, data: dA.slice(3)    },
+            { id: 'sg3', table: 'users', tnum: 3, range: '0x5500–0x7FFF', leaderNode: 2, term: 7, replicas: [2], maxRows: 3, data: dB.slice(0, 3) },
+            { id: 'sg4', table: 'users', tnum: 4, range: '0x8000–0xAAAA', leaderNode: 5, term: 7, replicas: [5], maxRows: 3, data: dB.slice(3)    },
+            { id: 'sg5', table: 'users', tnum: 5, range: '0xAAAB–0xD4FF', leaderNode: 3, term: 7, replicas: [3], maxRows: 3, data: dC.slice(0, 3) },
+            { id: 'sg6', table: 'users', tnum: 6, range: '0xD500–0xFFFF', leaderNode: 6, term: 7, replicas: [6], maxRows: 3, data: dC.slice(3)    }
           ];
           S.replicaState = buildRS(S.groups);
-          // Flash all migrated rows as newly arrived
           for (const sg of S.groups) {
             const rs = S.replicaState[sg.id]?.[sg.leaderNode];
             if (rs) rs.newRows = sg.data.map((_, i) => i);
           }
           renderAllTablets(); renderConnections();
-          const post3 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
-          setTimeout(() => post3.forEach(({ id, node }) => {
+          const post6 = S.groups.map(sg => ({ id: sg.id, node: sg.leaderNode }));
+          setTimeout(() => post6.forEach(({ id, node }) => {
             const rs = S.replicaState[id]?.[node]; if (rs) rs.newRows = [];
             reRenderTabletInternal(id, node);
           }), 2000);
 
           for (const g of S.groups) ctx.hlTablet(g.id, g.leaderNode, 't-new');
-          addLog('Each shard split once → 6 shards × 3 rows each', 'ls');
+          addLog('Each shard split → 6 shards × 3 rows each · all 6 nodes active', 'ls');
           await ctx.delay(400);
 
           ctx.activateClient(true);
@@ -1713,12 +1696,14 @@ const SCENARIOS = {
           ctx.activateClient(false);
 
           renderShardingPerfPanel({
-            nodes: 6, shards: 6, throughput: 60000, maxThroughput: 60000, latency: 5, maxLatency: 28,
-            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 17 }))
+            nodes: 6, shards: 6, throughput: 60000, maxThroughput: 60000, latency: 11, maxLatency: 100,
+            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 15 })),
+            cpuLoads:  [1,2,3,4,5,6].map(n => ({ node: n, pct: 14 })),
+            insight: '✓ 6× throughput vs 1 node · 2× vs 3 nodes · latency unchanged at 11 ms · CPU 14% each — horizontal scaling works.'
           });
-          addLog('6 shards × 6 nodes = 60,000 writes/sec  |  5 ms latency  ✓', 'ls');
-          addLog('6× throughput — same 18 rows, no schema change, no downtime', 'ls');
-          document.getElementById('health-txt').textContent = 'Healthy · 6 TServers · 6 Shards · 6× Scale';
+          addLog('6 nodes · 60,000 writes/sec · CPU 14% each · latency 11 ms ← unchanged from 3-node ✓', 'ls');
+          addLog('Throughput doubled again. Latency did not increase. Resources balanced equally.', 'ls');
+          document.getElementById('health-txt').textContent = 'Healthy · 6 TServers · 6 Shards · 6× Scale · Latency Flat';
         }
       },
       {
@@ -1753,11 +1738,13 @@ const SCENARIOS = {
           ctx.activateClient(false);
 
           renderShardingPerfPanel({
-            nodes: 6, shards: 12, throughput: 60000, maxThroughput: 60000, latency: 5, maxLatency: 28,
-            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 33 }))
+            nodes: 6, shards: 12, throughput: 60000, maxThroughput: 60000, latency: 11, maxLatency: 100,
+            nodeLoads: [1,2,3,4,5,6].map(n => ({ node: n, pct: 14 })),
+            cpuLoads:  [1,2,3,4,5,6].map(n => ({ node: n, pct: 13 })),
+            insight: 'Every table sharded. Every node contributes equally. Latency stays flat regardless of cluster size.'
           });
           addLog('Every table sharded. Every write routed automatically. Every node contributes.', 'ls');
-          document.getElementById('health-txt').textContent = 'Healthy · RF=3 · 6 TServers · Fully Balanced · 6× Scale';
+          document.getElementById('health-txt').textContent = 'Healthy · RF=3 · 6 TServers · Fully Balanced · Latency Flat';
         }
       }
     ]
