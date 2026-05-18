@@ -403,6 +403,414 @@ function renderHaPanel({ nodes = [], rf = 3, quorum = true, availability = 100, 
     </div>`;
 }
 
+function renderSnapshotViz({ masterPhase = 'idle', masterOp = '', tablets = [], hlcNow = '', tSnap = '', waitPct = -1, phaseLabel = '', manifest = '' }) {
+  const panel = document.getElementById('snap-viz-panel');
+  if (panel && panel.dataset.vizType !== 'snapshot') {
+    panel.dataset.vizType = 'snapshot';
+    panel.innerHTML = `
+      <div class="svp-left">
+        <div class="svp-master-row">
+          <div class="svp-master" id="svp-master">
+            <div class="svp-m-label">YB-Master</div>
+            <div class="svp-m-op" id="svp-m-op">—</div>
+          </div>
+        </div>
+        <div class="svp-arrows-row">
+          <div class="svp-arrow" id="svp-arrow-1"></div>
+          <div class="svp-arrow" id="svp-arrow-2"></div>
+          <div class="svp-arrow" id="svp-arrow-3"></div>
+        </div>
+        <div class="svp-tablets-row">
+          ${[1,2,3].map(i => `
+          <div class="svp-tablet" id="svp-tab-${i}">
+            <div class="svp-t-name">Tablet-${i}</div>
+            <div class="svp-t-range">${['0x0000–0x5554','0x5555–0xAAAA','0xAAAB–0xFFFF'][i-1]}</div>
+            <div class="svp-t-phase" id="svp-phase-${i}">— idle —</div>
+            <div class="svp-t-bar"><div class="svp-t-fill" id="svp-fill-${i}"></div></div>
+          </div>`).join('')}
+        </div>
+      </div>
+      <div class="svp-right">
+        <div id="svp-hlc-panel" class="svp-hlc-panel"></div>
+      </div>`;
+  }
+  const masterEl = document.getElementById('svp-master');
+  if (masterEl) {
+    masterEl.className = `svp-master${masterPhase !== 'idle' ? ' active' : ''}`;
+    const opEl = document.getElementById('svp-m-op');
+    if (opEl) opEl.textContent = masterOp || '—';
+  }
+  const phaseMap = {
+    idle:        { cls: '',            label: '— idle —',              fill: 0   },
+    rpc:         { cls: 'phase-rpc',   label: '⚡ RPC received',       fill: 33  },
+    flushing:    { cls: 'phase-flush', label: '⬇ Flushing MemTable…', fill: 66  },
+    hardlinking: { cls: 'phase-snap',  label: '🔗 Hardlinking SSTs…', fill: 88  },
+    done:        { cls: 'phase-done',  label: '✓ Snapshot complete',   fill: 100 },
+  };
+  tablets.forEach(t => {
+    const tabEl   = document.getElementById(`svp-tab-${t.id}`);
+    const phaseEl = document.getElementById(`svp-phase-${t.id}`);
+    const fillEl  = document.getElementById(`svp-fill-${t.id}`);
+    const pm = phaseMap[t.phase] || phaseMap.idle;
+    if (tabEl)   tabEl.className   = `svp-tablet ${pm.cls}`;
+    if (phaseEl) phaseEl.textContent = pm.label;
+    if (fillEl)  fillEl.style.width  = pm.fill + '%';
+  });
+  const broadcasting = tablets.some(t => t.phase === 'rpc');
+  [1, 2, 3].forEach(i => {
+    const arr = document.getElementById(`svp-arrow-${i}`);
+    if (!arr) return;
+    if (broadcasting) {
+      arr.classList.add('broadcasting');
+    } else {
+      arr.classList.remove('broadcasting');
+    }
+  });
+  const hlcPanel = document.getElementById('svp-hlc-panel');
+  if (!hlcPanel) return;
+  const waitRow = waitPct >= 0
+    ? `<div class="svp-hlc-row">
+        <span class="svp-lbl">Safe-time wait</span>
+        <div class="svp-wait-wrap">
+          <div class="svp-wait-track"><div class="svp-wait-fill ${waitPct >= 100 ? 'done' : ''}" style="width:${Math.min(100, waitPct)}%"></div></div>
+          <span class="svp-wait-pct">${Math.min(100, waitPct)}%</span>
+        </div>
+       </div>` : '';
+  hlcPanel.innerHTML = `
+    <div class="svp-hlc-title">⏱ Hybrid Logical Clock</div>
+    <div class="svp-hlc-row"><span class="svp-lbl">HLC_now</span><span class="svp-val">${hlcNow || '—'}</span></div>
+    <div class="svp-hlc-row${tSnap ? ' hl' : ''}">
+      <span class="svp-lbl">T_snap</span>
+      <span class="svp-val${tSnap ? ' tsnap' : ''}">${tSnap || '—'}</span>
+    </div>
+    <div class="svp-hlc-row"><span class="svp-lbl">max_clock_skew</span><span class="svp-val">500 μs</span></div>
+    ${waitRow}
+    <div class="svp-hlc-row"><span class="svp-lbl">Phase</span><span class="svp-phase-val">${phaseLabel || '—'}</span></div>
+    ${manifest ? `<div class="svp-manifest">${manifest}</div>` : ''}`;
+}
+
+function renderBackupViz({ nodes = [], totalPct = 0, status = 'Idle', elapsed = 0, target = '—' }) {
+  const panel = document.getElementById('snap-viz-panel');
+  if (!panel) return;
+  if (panel.dataset.vizType !== 'backup') {
+    panel.dataset.vizType = 'backup';
+    panel.innerHTML = `
+      <div class="bkv-left">
+        ${[1,2,3].map(n => `
+          <div class="bkv-row">
+            <span class="bkv-lbl">TServer-${n}</span>
+            <div class="bkv-track"><div class="bkv-fill" id="bkv-fill-${n}"></div></div>
+            <span class="bkv-pct" id="bkv-pct-${n}">0%</span>
+            <span class="bkv-cloud" id="bkv-cloud-${n}">☁</span>
+          </div>`).join('')}
+      </div>
+      <div class="bkv-right">
+        <div class="bkv-rtitle">Upload Status</div>
+        <div class="bkv-stat"><span class="bkv-sl">Target</span><span id="bkv-target">—</span></div>
+        <div class="bkv-stat"><span class="bkv-sl">Total</span><span id="bkv-total">0%</span></div>
+        <div class="bkv-stat"><span class="bkv-sl">Elapsed</span><span id="bkv-elapsed">0s</span></div>
+        <div class="bkv-status" id="bkv-status">Idle</div>
+      </div>`;
+  }
+  nodes.forEach(info => {
+    const pct = info.pct || 0;
+    const fillEl = document.getElementById(`bkv-fill-${info.node}`);
+    const pctEl  = document.getElementById(`bkv-pct-${info.node}`);
+    const cloudEl = document.getElementById(`bkv-cloud-${info.node}`);
+    if (fillEl)  { fillEl.style.width = pct + '%'; fillEl.classList.toggle('done', pct >= 100); }
+    if (pctEl)   pctEl.textContent = pct + '%';
+    if (cloudEl) cloudEl.classList.toggle('active', pct > 0);
+  });
+  const tEl   = document.getElementById('bkv-target');  if (tEl)   tEl.textContent   = target;
+  const totEl = document.getElementById('bkv-total');   if (totEl) totEl.textContent  = totalPct + '%';
+  const eEl   = document.getElementById('bkv-elapsed'); if (eEl)   eEl.textContent   = elapsed + 's';
+  const stEl  = document.getElementById('bkv-status');
+  if (stEl) { stEl.textContent = status; stEl.className = `bkv-status${totalPct >= 100 ? ' done' : ''}`; }
+}
+
+function renderPitrViz({ snapshots = [], walPct = 0, cursor = null, anomaly = null, deltaZone = null, phase = 'idle', retentionHours = 24, customPhaseLabels = null, fullRecovery = false }) {
+  const panel = document.getElementById('snap-viz-panel');
+  if (!panel) return;
+  panel.style.height = '116px';
+  if (panel.dataset.vizType !== 'pitr') {
+    panel.dataset.vizType = 'pitr';
+    panel.innerHTML = `
+      <div class="pitv-wrap">
+        <div class="pitv-header">
+          <span class="pitv-title">PITR Retention Window: <span id="pitv-retention">${retentionHours}h</span></span>
+          <span class="pitv-phase-val" id="pitv-phase"></span>
+        </div>
+        <div class="pitv-timeline-wrap">
+          <span class="pitv-axis-lbl">T−<span id="pitv-axis-h">${retentionHours}</span>h</span>
+          <div class="pitv-timeline">
+            <div class="pitv-wal-fill" id="pitv-wal-fill"></div>
+            <div class="pitv-flashback-zone" id="pitv-flashback-zone" style="display:none"><span class="pitv-flashback-lbl">← recovered</span></div>
+            <div class="pitv-flashback-sweep" id="pitv-flashback-sweep" style="display:none"></div>
+            <div class="pitv-delta-zone" id="pitv-delta-zone" style="display:none"></div>
+            <div id="pitv-snaps"></div>
+            <div class="pitv-anomaly" id="pitv-anomaly" style="display:none">
+              <div class="pitv-anomaly-line"></div>
+              <div class="pitv-anomaly-lbl" id="pitv-anomaly-lbl"></div>
+            </div>
+            <div class="pitv-cursor" id="pitv-cursor" style="display:none">
+              <div class="pitv-cursor-line"></div>
+              <div class="pitv-cursor-lbl" id="pitv-cursor-lbl"></div>
+            </div>
+          </div>
+          <span class="pitv-axis-lbl">Now</span>
+        </div>
+        <div class="pitv-legend">
+          <span class="pitv-leg-snap" id="pitv-leg-snap">● Scheduled snapshot</span>
+          <span class="pitv-leg-ondemand" id="pitv-leg-ondemand" style="display:none">◆ On-demand snapshot</span>
+          <span class="pitv-leg-wal">▬ MVCC history retained</span>
+          <span class="pitv-leg-delta" id="pitv-leg-delta" style="display:none">▨ Delta loss window</span>
+        </div>
+      </div>`;
+  }
+  const walFill = document.getElementById('pitv-wal-fill');
+  if (walFill) walFill.style.width = walPct + '%';
+  const deltaEl = document.getElementById('pitv-delta-zone');
+  if (deltaEl) {
+    if (deltaZone) {
+      deltaEl.style.display = '';
+      deltaEl.style.left = deltaZone.from + '%';
+      deltaEl.style.width = (deltaZone.to - deltaZone.from) + '%';
+    } else {
+      deltaEl.style.display = 'none';
+    }
+  }
+  const deltaLegEl = document.getElementById('pitv-leg-delta');
+  if (deltaLegEl) deltaLegEl.style.display = deltaZone ? '' : 'none';
+  const flashbackEl = document.getElementById('pitv-flashback-zone');
+  if (flashbackEl) {
+    if (phase === 'complete' && (cursor || fullRecovery)) {
+      flashbackEl.style.display = '';
+      flashbackEl.style.width = (fullRecovery ? walPct : cursor.pct) + '%';
+    } else {
+      flashbackEl.style.display = 'none';
+    }
+  }
+  const sweepEl = document.getElementById('pitv-flashback-sweep');
+  if (sweepEl) {
+    if (cursor && deltaZone && (phase === 'restoring' || phase === 'complete')) {
+      sweepEl.style.left = cursor.pct + '%';
+      sweepEl.style.width = (deltaZone.to - cursor.pct) + '%';
+      sweepEl.style.display = '';
+      if (phase === 'restoring') {
+        sweepEl.classList.remove('active');
+        void sweepEl.offsetWidth;
+        sweepEl.classList.add('active');
+      } else {
+        sweepEl.classList.add('active');
+      }
+    } else {
+      sweepEl.style.display = 'none';
+      sweepEl.classList.remove('active');
+    }
+  }
+  const snapsEl = document.getElementById('pitv-snaps');
+  if (snapsEl) {
+    snapsEl.innerHTML = snapshots.map(s => `
+      <div class="pitv-snap${s.onDemand ? ' pitv-snap-ondemand' : ''}" style="left:${s.pct}%">
+        <div class="pitv-snap-pin"></div>
+        <div class="pitv-snap-lbl">${s.label}${s.onDemand ? '<br><span class="pitv-ondemand-badge">on-demand</span>' : ''}<br>${s.time}</div>
+      </div>`).join('');
+  }
+  const snapLegEl = document.getElementById('pitv-leg-snap');
+  if (snapLegEl) snapLegEl.style.display = snapshots.some(s => !s.onDemand) ? '' : 'none';
+  const onDemandLegEl = document.getElementById('pitv-leg-ondemand');
+  if (onDemandLegEl) onDemandLegEl.style.display = snapshots.some(s => s.onDemand) ? '' : 'none';
+  const anomalyEl = document.getElementById('pitv-anomaly');
+  if (anomalyEl) {
+    if (anomaly) {
+      anomalyEl.style.display = '';
+      anomalyEl.style.left = anomaly.pct + '%';
+      const anomalyLblEl = document.getElementById('pitv-anomaly-lbl');
+      if (anomalyLblEl) anomalyLblEl.textContent = '⚡ ' + anomaly.time;
+    } else {
+      anomalyEl.style.display = 'none';
+    }
+  }
+  const cursorEl = document.getElementById('pitv-cursor');
+  if (cursorEl) {
+    if (cursor) {
+      cursorEl.style.display = '';
+      cursorEl.style.left = cursor.pct + '%';
+      cursorEl.classList.toggle('restoring', phase === 'restoring');
+      cursorEl.classList.toggle('complete', phase === 'complete');
+      const lblEl = document.getElementById('pitv-cursor-lbl');
+      if (lblEl) lblEl.textContent = '⏱ ' + cursor.time;
+    } else {
+      cursorEl.style.display = 'none';
+    }
+  }
+  const defaultPhaseLabels = { idle: '', running: '🔄 MVCC Retention Active', restoring: '🔁 On-demand snapshot + HLC flashback…', complete: '✓ Flashback complete — HLC filter set' };
+  const phaseLabels = customPhaseLabels ? { ...defaultPhaseLabels, ...customPhaseLabels } : defaultPhaseLabels;
+  const phaseEl = document.getElementById('pitv-phase');
+  if (phaseEl) { phaseEl.textContent = phaseLabels[phase] || ''; phaseEl.className = `pitv-phase-val${phase === 'complete' ? ' ok' : phase === 'restoring' ? ' warn' : ''}`; }
+  const retEl = document.getElementById('pitv-retention');
+  if (retEl) retEl.textContent = retentionHours + 'h';
+  const axhEl = document.getElementById('pitv-axis-h');
+  if (axhEl) axhEl.textContent = retentionHours;
+}
+
+function renderCloneViz({ sourcePhase = 'idle', clonePhase = 'idle', snapLabel = '—', forkDone = false }) {
+  const panel = document.getElementById('snap-viz-panel');
+  if (!panel) return;
+  if (panel.dataset.vizType !== 'clone') {
+    panel.dataset.vizType = 'clone';
+    panel.innerHTML = `
+      <div class="clv-source">
+        <div class="clv-cluster-title">SOURCE</div>
+        ${[1,2,3].map(i => `<div class="clv-tab" id="clv-src-${i}">T${i}</div>`).join('')}
+      </div>
+      <div class="clv-fork-col">
+        <div class="clv-snap-lbl" id="clv-snap-lbl">—</div>
+        <div class="clv-fork-arrows" id="clv-fork-arrows">
+          ${[1,2,3].map(() => '<div class="clv-arrow">→</div>').join('')}
+        </div>
+        <div class="clv-fork-label">Fork point</div>
+      </div>
+      <div class="clv-clone-col">
+        <div class="clv-cluster-title">CLONE</div>
+        ${[1,2,3].map(i => `<div class="clv-tab clv-clone-tab" id="clv-cln-${i}">C${i}</div>`).join('')}
+      </div>`;
+  }
+  const phaseCls = { idle: '', active: 'clv-active', done: 'clv-done' };
+  [1,2,3].forEach(i => {
+    const srcEl = document.getElementById(`clv-src-${i}`);
+    if (srcEl) srcEl.className = `clv-tab ${phaseCls[sourcePhase] || ''}`;
+    const clnEl = document.getElementById(`clv-cln-${i}`);
+    if (clnEl) clnEl.className = `clv-tab clv-clone-tab ${phaseCls[clonePhase] || ''} ${!forkDone && clonePhase === 'idle' ? 'clv-ghost' : ''}`;
+  });
+  const snapLblEl = document.getElementById('clv-snap-lbl');
+  if (snapLblEl) snapLblEl.textContent = snapLabel;
+  const arrowsEl = document.getElementById('clv-fork-arrows');
+  if (arrowsEl) arrowsEl.classList.toggle('active', forkDone);
+}
+
+function renderTTViz({ versions = [], asCursor = null, phase = 'live' }) {
+  const panel = document.getElementById('snap-viz-panel');
+  if (!panel) return;
+  panel.style.height = '185px';
+  if (panel.dataset.vizType !== 'timetravel') {
+    panel.dataset.vizType = 'timetravel';
+    panel.innerHTML = `
+      <div class="ttv-wrap">
+        <div class="ttv-header">
+          <span class="ttv-title">MVCC Version Chain · DocDB Key Space</span>
+          <span class="ttv-phase" id="ttv-phase">Live read</span>
+        </div>
+        <div class="ttv-versions" id="ttv-versions"></div>
+        <div class="ttv-cursor-row">
+          <span class="ttv-lbl">AS OF</span>
+          <span class="ttv-ts" id="ttv-ts">current</span>
+        </div>
+      </div>`;
+  }
+  const versionsEl = document.getElementById('ttv-versions');
+  if (versionsEl) {
+    versionsEl.innerHTML = versions.map(v => `
+      <div class="ttv-ver${v.active ? ' ttv-active' : ''}${v.deleted ? ' ttv-deleted' : ''}">
+        <span class="ttv-ver-ts">${v.hlc}</span>
+        <span class="ttv-ver-key">${v.key}</span>
+        <span class="ttv-ver-val">${v.value || v.val || ''}</span>
+        <span class="ttv-ver-status${v.deleted ? ' del' : v.active ? '' : ' filtered'}">${v.deleted ? '✕ DEL' : v.active ? '▶ READ' : '⊘ AS OF'}</span>
+      </div>`).join('');
+  }
+  const phaseMap = { live: 'Live read', asof: 'AS OF read', concurrent: 'Live + AS OF concurrent' };
+  const phaseEl = document.getElementById('ttv-phase');
+  if (phaseEl) phaseEl.textContent = phaseMap[phase] || phase;
+  const tsEl = document.getElementById('ttv-ts');
+  if (tsEl) tsEl.textContent = asCursor || 'current';
+}
+
+function renderBackupPanel({ nodes = [], totalPct = 0, status = 'In Progress', elapsed = 0, target = 'S3 (us-east-1)', manifest = '' }) {
+  const cont = document.getElementById('bkp-content');
+  if (!cont) return;
+  const nodeRows = [1,2,3,4,5,6].map(n => {
+    const info = nodes.find(x => x.node === n);
+    if (!info) return '';
+    const pct = info.pct || 0;
+    const done = pct >= 100;
+    return `<div class="bkp-node-row">
+      <div class="bkp-node-lbl">TServer-${n}</div>
+      <div class="bkp-progress-track"><div class="bkp-progress-fill ${done ? 'done' : ''}" style="width:${pct}%"></div></div>
+      <div class="bkp-node-pct">${pct}%</div>
+    </div>`;
+  }).join('');
+  const etaStr = totalPct > 0 && totalPct < 100 ? ` · ETA ${Math.round(elapsed * (100 - totalPct) / totalPct)}s` : '';
+  cont.innerHTML = `
+    <div class="bkp-header-row">
+      <div class="bkp-target">Target: <span>${target}</span></div>
+      <div class="bkp-status ${totalPct >= 100 ? 'done' : ''}">${status}</div>
+      <div>${elapsed}s elapsed${etaStr}</div>
+    </div>
+    <div class="bkp-node-grid">${nodeRows}</div>
+    <div class="bkp-total-row">
+      <div class="bkp-total-lbl">Total Progress</div>
+      <div class="bkp-total-track"><div class="bkp-total-fill" style="width:${totalPct}%"></div></div>
+      <div class="bkp-total-pct">${totalPct}%</div>
+    </div>
+    ${manifest ? `<div class="bkp-manifest">${manifest}</div>` : ''}`;
+}
+
+function renderPitrPanel({ snapshots = [], walPct = 0, cursor = null, phase = 'idle', retentionHours = 24 }) {
+  const cont = document.getElementById('pitr-content');
+  if (!cont) return;
+  const snapHtml = snapshots.map(s =>
+    `<div class="pitr-snap" style="left:${s.pct}%">
+      <div class="pitr-snap-pin"></div>
+      <div class="pitr-snap-lbl">${s.label}<br>${s.time}</div>
+    </div>`).join('');
+  const cursorHtml = cursor
+    ? `<div class="pitr-cursor ${phase === 'restoring' ? 'restoring' : ''}" style="left:${cursor.pct}%">
+        <div class="pitr-cursor-line"></div>
+        <div class="pitr-cursor-lbl">⏱ ${cursor.time}</div>
+       </div>` : '';
+  const phaseLabel = { idle: '', running: '🔄 WAL Archiving Active', restoring: '🔁 Restoring to target...', complete: '✓ Restore Complete' }[phase] || '';
+  const phaseClass = phase === 'complete' ? 'ok' : '';
+  cont.innerHTML = `
+    <div class="pitr-header">
+      <span class="pitr-retention">Retention Window: ${retentionHours}h</span>
+      <span class="pitr-phase ${phaseClass}">${phaseLabel}</span>
+    </div>
+    <div class="pitr-timeline-wrap">
+      <div class="pitr-axis-lbl">T−${retentionHours}h</div>
+      <div class="pitr-timeline">
+        <div class="pitr-wal-fill" style="width:${walPct}%"></div>
+        ${snapHtml}${cursorHtml}
+      </div>
+      <div class="pitr-axis-lbl">Now</div>
+    </div>
+    <div class="pitr-legend">
+      <span class="pitr-legend-snap">● Snapshot checkpoint</span>
+      <span class="pitr-legend-wal">▬ WAL archive</span>
+      ${cursor ? `<span class="pitr-legend-cursor">│ Recovery point: ${cursor.time}</span>` : ''}
+    </div>`;
+}
+
+function renderTTPanel({ query = '', timestamp = '', hlc = '', rows = [] }) {
+  const cont = document.getElementById('tt-content');
+  if (!cont) return;
+  const tsPct = rows._tsPct || 0;
+  const rowHtml = rows.map(r =>
+    `<div class="tt-row ${r.cls || ''}">${r.cells.map(c => `<span>${c}</span>`).join('')}</div>`
+  ).join('');
+  cont.innerHTML = `
+    <div class="tt-timestamp-bar">
+      <div class="tt-ts-lbl">Query time</div>
+      <div class="tt-ts-track"><div class="tt-ts-fill" style="width:${tsPct}%"></div></div>
+      <div class="tt-ts-val">${timestamp || 'current'}</div>
+    </div>
+    <div class="tt-query-box">${query || '— no query yet —'}</div>
+    ${rows.length ? `<div class="tt-rows">
+      <div class="tt-row-head"><span>id</span><span>customer</span><span>product</span><span>amount</span><span>created_at</span></div>
+      ${rowHtml}
+      <div style="font-size:10px;color:var(--txt2);margin-top:6px;">${rows.filter(r => r.cls !== 'ghost').length} row(s) returned</div>
+    </div>` : ''}`;
+}
+
 function renderScalingStats() {
   const container = document.getElementById('sd-stats-grid');
   if (!container) return;
@@ -899,6 +1307,15 @@ function renderStepIndicator(steps, cur) {
   }
   h += `<span class="scount">${cur < 0 ? 0 : cur + 1}/${steps.length}</span>`;
   sec.innerHTML = h;
+  const tracker = document.getElementById('steps-tracker');
+  if (tracker && tracker.style.display !== 'none') {
+    tracker.innerHTML = steps.map((s, i) => {
+      const lbl = typeof s.label === 'function' ? s.label() : s.label;
+      const state = i < cur ? 'done' : i === cur ? 'current' : 'pending';
+      const icon = i < cur ? '✓' : i === cur ? '▶' : `${i + 1}`;
+      return `<div class="stk-step stk-${state}"><span class="stk-icon">${icon}</span><span class="stk-lbl">${lbl}</span></div>`;
+    }).join('');
+  }
 }
 function renderNodeAlive(id, alive) {
   const card = document.getElementById(`node-${id}`);
@@ -1123,6 +1540,14 @@ function makeCtx() {
     },
     shardingPanel: (data) => renderShardingPerfPanel(data),
     haPanel: (data) => renderHaPanel(data),
+    snapshotViz: (data) => renderSnapshotViz(data),
+    backupViz: (data) => renderBackupViz(data),
+    pitrViz: (data) => renderPitrViz(data),
+    cloneViz: (data) => renderCloneViz(data),
+    ttViz: (data) => renderTTViz(data),
+    backupPanel: (data) => renderBackupPanel(data),
+    pitrPanel: (data) => renderPitrPanel(data),
+    ttPanel: (data) => renderTTPanel(data),
     setNodeRegion: (nId, region, label) => {
       const card = document.getElementById(`node-${nId}`);
       if (!card) return;
@@ -1294,7 +1719,7 @@ function buildSidebar() {
       `;
   sb.appendChild(homeBtn);
 
-  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "System Internals"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "Data Management", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;
@@ -1354,7 +1779,7 @@ function renderHome() {
   const groupOrder = [
     "Foundations", "Deployment Architectures", "Global Universe", "xCluster",
     "Data Distribution", "Consistency & High Availability", "Read & Write Paths",
-    "Scalability", "Security", "System Internals"
+    "Scalability", "Security", "Data Management", "System Internals"
   ];
   const groupMeta = {
     "Foundations":                     { chapter: "CHAPTER 1", icon: "🏗️", desc: "Core concepts: cluster structure, fault domains, and Raft consensus." },
@@ -1366,7 +1791,8 @@ function renderHome() {
     "Read & Write Paths":              { chapter: "CHAPTER 7", icon: "⚡", desc: "How reads and writes flow through the distributed Raft layers." },
     "Scalability":                     { chapter: "CHAPTER 8", icon: "📈", desc: "Elastic scale-out and automatic tablet splitting as the cluster grows." },
     "Security":                         { chapter: "CHAPTER 9",  icon: "🔒", desc: "Encryption in transit, encryption at rest, row-level security, column-level encryption, authentication, and audit logging." },
-    "System Internals":                { chapter: "CHAPTER 10", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." },
+    "Data Management":                 { chapter: "CHAPTER 10", icon: "💾", desc: "Consistent snapshots, distributed backup, point-in-time recovery, database cloning, and time travel queries." },
+    "System Internals":                { chapter: "CHAPTER 11", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." },
   };
 
   // ── Learning Path ──────────────────────────────────────────────────────────
@@ -1378,6 +1804,7 @@ function renderHome() {
     { label: 'Read & Write',      color: '#a78bfa', chapters: ['Read & Write Paths'] },
     { label: 'Scalability',       color: '#6366f1', chapters: ['Scalability'] },
     { label: 'Security',          color: '#f43f5e', chapters: ['Security'] },
+    { label: 'Data Management',   color: '#22d3ee', chapters: ['Data Management'] },
     { label: 'System Internals',  color: '#94a3b8', chapters: ['System Internals'] },
   ];
 
@@ -1387,11 +1814,11 @@ function renderHome() {
     { id: 'dev',  icon: '💻', label: 'App Developer',       desc: 'Build on YugabyteDB',         color: '#34d399',
       chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Consistency & High Availability', 'Security'] },
     { id: 'dba',  icon: '🛠️', label: 'DBA / SRE',           desc: 'Operate and tune clusters',   color: '#fb7185',
-      chapters: ['Foundations', 'Deployment Architectures', 'Consistency & High Availability', 'Scalability', 'Security', 'System Internals'] },
+      chapters: ['Foundations', 'Deployment Architectures', 'Consistency & High Availability', 'Scalability', 'Security', 'Data Management', 'System Internals'] },
     { id: 'arch', icon: '🏛️', label: 'Solutions Architect', desc: 'Design global topologies',    color: '#f59e0b',
       chapters: ['Foundations', 'Deployment Architectures', 'Data Distribution', 'Global Universe', 'xCluster'] },
     { id: 'de',   icon: '📊', label: 'Data Engineer',       desc: 'Manage and scale data',       color: '#a78bfa',
-      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Scalability', 'System Internals'] },
+      chapters: ['Foundations', 'Data Distribution', 'Read & Write Paths', 'Scalability', 'Data Management', 'System Internals'] },
   ];
 
   function lpFirstScenario(groupName) {
@@ -1629,6 +2056,18 @@ function selectScenario(id) {
     if (_shp2) _shp2.classList.remove('visible');
     const _hap2 = document.getElementById('ha-panel');
     if (_hap2) _hap2.classList.remove('visible');
+    const _bkp2 = document.getElementById('backup-panel');
+    if (_bkp2) _bkp2.classList.remove('visible');
+    const _pitrp2 = document.getElementById('pitr-panel');
+    if (_pitrp2) _pitrp2.classList.remove('visible');
+    const _ttp2 = document.getElementById('tt-panel');
+    if (_ttp2) _ttp2.classList.remove('visible');
+    const _svp2 = document.getElementById('snap-viz-panel');
+    if (_svp2) _svp2.classList.remove('visible');
+    const _cw2 = document.getElementById('canvas-wrap');
+    if (_cw2) { _cw2.classList.remove('snap-hidden'); }
+    const _dp2 = document.getElementById('docdb-panel');
+    if (_dp2) _dp2.classList.remove('snap-expanded');
     dp.style.display = 'none';
     sp.style.display = 'none';
     dbp.style.display = 'none';
@@ -1721,6 +2160,28 @@ function selectScenario(id) {
   const hap = document.getElementById('ha-panel');
   if (hap) hap.classList.toggle('visible', !!sc.haPanel);
 
+  const bkp = document.getElementById('backup-panel');
+  if (bkp) bkp.classList.toggle('visible', !!sc.backupPanel);
+  const pitrp = document.getElementById('pitr-panel');
+  if (pitrp) pitrp.classList.toggle('visible', !!sc.pitrPanel);
+  const ttp = document.getElementById('tt-panel');
+  if (ttp) ttp.classList.toggle('visible', !!sc.ttPanel);
+  const svp = document.getElementById('snap-viz-panel');
+  if (svp) {
+    svp.classList.toggle('visible', !!sc.snapshotVizPanel);
+    delete svp.dataset.vizType;
+    svp.style.height = '';
+  }
+  const cwEl = document.getElementById('canvas-wrap');
+  if (cwEl) cwEl.classList.toggle('snap-hidden', !!sc.snapshotVizPanel);
+  const dpEl = document.getElementById('docdb-panel');
+  if (dpEl) dpEl.classList.toggle('snap-expanded', !!sc.snapshotVizPanel);
+  const stkEl = document.getElementById('steps-tracker');
+  if (stkEl) stkEl.style.display = sc.snapshotVizPanel && sc.steps?.length ? '' : 'none';
+
+  const toolbar = document.querySelector('.toolbar');
+  if (toolbar) toolbar.style.display = sc.group === 'Data Management' ? 'none' : '';
+
   const mrp = document.getElementById('mr-lat-panel');
   if (mrp) { mrp.style.display = ''; mrp.classList.toggle('visible', sc.name === 'Multi-Region' || sc.name === 'Multi-Zone'); }
 
@@ -1771,7 +2232,7 @@ async function stepForward() {
   const step = sc.steps[currentStep];
   const lbl = typeof step.label === 'function' ? step.label() : step.label;
   const dsc = typeof step.desc === 'function' ? step.desc() : step.desc;
-  addLog(`▶ Step ${currentStep + 1}: ${lbl}`, 'li');
+  addLog(`▶ Step ${currentStep + 1}: ${lbl.replace(/^\d+\.\s*/, '')}`, 'li');
   if (dsc) document.getElementById('i-desc').innerHTML = dsc;
   const ctx = makeCtx();
   try {
@@ -1870,8 +2331,9 @@ function renderDocdbPanel() {
   if (db.memtable !== undefined) {
     allLayers.push({ name: 'MemTable', badge: 'in-memory · mutable', entries: db.memtable, cls: 'dl-mem' });
   }
-  for (const sst of (db.ssts || [])) {
-    allLayers.push({ name: sst.name, badge: 'on-disk · immutable', entries: sst.entries, cls: 'dl-sst' });
+  for (let i = 0; i < (db.ssts || []).length; i++) {
+    const sst = db.ssts[i];
+    allLayers.push({ name: sst.name || `SST-${i} (L${sst.layer ?? i})`, badge: 'on-disk · immutable', entries: sst.entries, cls: 'dl-sst' });
   }
   for (const layer of allLayers) {
     const div = document.createElement('div');
@@ -1892,15 +2354,71 @@ function renderDocdbPanel() {
         if (e.isNew) cls += ' de-new';
         if (e.type === 'TOMBSTONE') cls += ' de-tombstone';
         row.className = cls;
-        const typeCls = e.type === 'TOMBSTONE' ? 'dt-tombstone' : 'dt-write';
+        const typeCls = e.type === 'TOMBSTONE' ? 'dt-tombstone' : e.type === 'SNAPSHOT' ? 'dt-snapshot' : 'dt-write';
         const valHtml = e.type === 'TOMBSTONE'
           ? '<span class="de-val de-tomb">— deleted —</span>'
+          : e.type === 'SNAPSHOT'
+          ? `<span class="de-val de-snap">— raft snapshot record —</span>`
           : `<span class="de-val">${e.value || ''}</span>`;
         row.innerHTML = `<span class="de-key">${e.display}</span><span class="de-type-col ${typeCls}">${e.type}</span><span class="de-hlc">@${e.hlc}</span>${valHtml}`;
         div.appendChild(row);
       }
     }
     wrap.appendChild(div);
+  }
+  // Snapshot hardlink section
+  if (db.snapshotSsts && db.snapshotSsts.length > 0) {
+    const multiFolder = db.snapshotSsts.some(s => s.folder);
+    if (!multiFolder) {
+      const divEl = document.createElement('div');
+      divEl.className = 'docdb-snap-divider';
+      divEl.textContent = `snapshots/${db.snapshotId || 'snap-001'}/`;
+      wrap.appendChild(divEl);
+    }
+    for (let si = 0; si < db.snapshotSsts.length; si++) {
+      const sst = db.snapshotSsts[si];
+      if (sst.folder) {
+        // Multi-folder mode: each sst is a snapshot folder with hardlinked files as entries
+        const folderDiv = document.createElement('div');
+        folderDiv.className = 'docdb-snap-divider';
+        folderDiv.textContent = sst.folder;
+        wrap.appendChild(folderDiv);
+        const div = document.createElement('div');
+        div.className = 'docdb-layer';
+        for (const e of sst.entries) {
+          const row = document.createElement('div');
+          const typeCls = e.type === 'TOMBSTONE' ? 'dt-tombstone' : e.type === 'SNAPSHOT' ? 'dt-snapshot' : 'dt-write';
+          row.className = `docdb-entry${e.type === 'TOMBSTONE' ? ' de-tombstone' : ''}`;
+          const valHtml = e.type === 'TOMBSTONE'
+            ? `<span class="de-val de-tomb">${e.value || '— filtered out —'}</span>`
+            : `<span class="de-val">${e.value || ''}</span>`;
+          row.innerHTML = `<span class="de-key">${e.display}</span><span class="de-type-col ${typeCls}">${e.type}</span><span class="de-hlc">${e.hlc}</span>${valHtml}`;
+          div.appendChild(row);
+        }
+        wrap.appendChild(div);
+      } else {
+        // Legacy mode: single SST file with KV entries
+        const div = document.createElement('div');
+        div.className = 'docdb-layer';
+        const hdr = document.createElement('div');
+        hdr.className = 'docdb-lhdr dl-snap';
+        hdr.innerHTML = `<span class="dl-name">${sst.name || `SST-${si}`}</span><span class="dl-badge">hardlink · read-only · GC-pinned</span><span class="dl-count">${sst.entries.length} entries</span>`;
+        div.appendChild(hdr);
+        for (const e of sst.entries) {
+          const row = document.createElement('div');
+          row.className = 'docdb-entry';
+          const typeCls = e.type === 'TOMBSTONE' ? 'dt-tombstone' : e.type === 'SNAPSHOT' ? 'dt-snapshot' : 'dt-write';
+          const valHtml = e.type === 'TOMBSTONE'
+            ? '<span class="de-val de-tomb">— deleted —</span>'
+            : e.type === 'SNAPSHOT'
+            ? `<span class="de-val de-snap">${e.value || '— snapshot record —'}</span>`
+            : `<span class="de-val">${e.value || ''}</span>`;
+          row.innerHTML = `<span class="de-key">${e.display}</span><span class="de-type-col ${typeCls}">${e.type}</span><span class="de-hlc">@${e.hlc}</span>${valHtml}`;
+          div.appendChild(row);
+        }
+        wrap.appendChild(div);
+      }
+    }
   }
 }
 
@@ -2620,6 +3138,18 @@ function selectArch(tab) {
   if (_hapA) _hapA.classList.remove('visible');
   const _mrpA = document.getElementById('mr-lat-panel');
   if (_mrpA) _mrpA.classList.remove('visible');
+  const _bkpA = document.getElementById('backup-panel');
+  if (_bkpA) _bkpA.classList.remove('visible');
+  const _pitrA = document.getElementById('pitr-panel');
+  if (_pitrA) _pitrA.classList.remove('visible');
+  const _ttA = document.getElementById('tt-panel');
+  if (_ttA) _ttA.classList.remove('visible');
+  const _svpA = document.getElementById('snap-viz-panel');
+  if (_svpA) _svpA.classList.remove('visible');
+  const _cwA = document.getElementById('canvas-wrap');
+  if (_cwA) _cwA.classList.remove('snap-hidden');
+  const _dpA = document.getElementById('docdb-panel');
+  if (_dpA) _dpA.classList.remove('snap-expanded');
   const av = document.getElementById('arch-view');
   if (!av) return;
   av.style.display = 'flex';
@@ -4557,7 +5087,7 @@ function initInfoPanelResize() {
 
 function _getSidebarScenarioOrder() {
   const order = ['home'];
-  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "System Internals"];
+  const groupOrder = ["Foundations", "Deployment Architectures", "Global Universe", "xCluster", "Data Distribution", "Consistency & High Availability", "Read & Write Paths", "Scalability", "Security", "Data Management", "System Internals"];
   const groups = {};
   Object.keys(SCENARIOS).forEach(id => {
     if (id === 'home') return;

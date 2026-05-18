@@ -258,6 +258,30 @@
         <div class="hap-content" id="hap-content"></div>
       </div>
 
+      <!-- BACKUP PANEL -->
+      <div class="backup-panel" id="backup-panel">
+        <div class="fd-tabs">
+          <div class="fd-tab active">☁️ Distributed Backup</div>
+        </div>
+        <div class="bkp-content" id="bkp-content"></div>
+      </div>
+
+      <!-- PITR PANEL -->
+      <div class="pitr-panel" id="pitr-panel">
+        <div class="fd-tabs">
+          <div class="fd-tab active">⏱️ Point-in-Time Recovery</div>
+        </div>
+        <div class="pitr-content" id="pitr-content"></div>
+      </div>
+
+      <!-- TIME TRAVEL PANEL -->
+      <div class="tt-panel" id="tt-panel">
+        <div class="fd-tabs">
+          <div class="fd-tab active">⏮️ Time Travel Query</div>
+        </div>
+        <div class="tt-content" id="tt-content"></div>
+      </div>
+
       <!-- MULTI-REGION LATENCY PANEL -->
       <div class="mr-lat-panel" id="mr-lat-panel"></div>
 
@@ -277,6 +301,49 @@
         <div class="log-hdr" style="padding: 0; margin-bottom: 8px;">Tablet Split Analysis</div>
         <div class="split-viz" id="split-viz"></div>
       </div>
+      <!-- SNAPSHOT VIZ PANEL -->
+      <div class="snap-viz-panel" id="snap-viz-panel">
+        <div class="svp-left">
+          <div class="svp-master-row">
+            <div class="svp-master" id="svp-master">
+              <div class="svp-m-label">YB-Master</div>
+              <div class="svp-m-op" id="svp-m-op">—</div>
+            </div>
+          </div>
+          <div class="svp-arrows-row">
+            <div class="svp-arrow" id="svp-arrow-1"></div>
+            <div class="svp-arrow" id="svp-arrow-2"></div>
+            <div class="svp-arrow" id="svp-arrow-3"></div>
+          </div>
+          <div class="svp-tablets-row">
+            <div class="svp-tablet" id="svp-tab-1">
+              <div class="svp-t-name">Tablet-1</div>
+              <div class="svp-t-range">0x0000–0x5554</div>
+              <div class="svp-t-phase" id="svp-phase-1">— idle —</div>
+              <div class="svp-t-bar"><div class="svp-t-fill" id="svp-fill-1"></div></div>
+            </div>
+            <div class="svp-tablet" id="svp-tab-2">
+              <div class="svp-t-name">Tablet-2</div>
+              <div class="svp-t-range">0x5555–0xAAAA</div>
+              <div class="svp-t-phase" id="svp-phase-2">— idle —</div>
+              <div class="svp-t-bar"><div class="svp-t-fill" id="svp-fill-2"></div></div>
+            </div>
+            <div class="svp-tablet" id="svp-tab-3">
+              <div class="svp-t-name">Tablet-3</div>
+              <div class="svp-t-range">0xAAAB–0xFFFF</div>
+              <div class="svp-t-phase" id="svp-phase-3">— idle —</div>
+              <div class="svp-t-bar"><div class="svp-t-fill" id="svp-fill-3"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="svp-right">
+          <div id="svp-hlc-panel" class="svp-hlc-panel"></div>
+        </div>
+      </div>
+
+      <!-- STEPS TRACKER -->
+      <div class="steps-tracker" id="steps-tracker" style="display:none"></div>
+
       <!-- DOCDB PANEL -->
       <div class="docdb-panel" id="docdb-panel" style="display:none">
         <div class="docdb-pnl-hdr">

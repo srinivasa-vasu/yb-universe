@@ -3617,5 +3617,947 @@ const SCENARIOS = {
       { text: "Use <code>pgp_sym_encrypt(value, key)</code> on INSERT and <code>pgp_sym_decrypt(col::bytea, key)</code> on SELECT. Only the caller with the key sees plaintext.", element: ".sec-col-encrypt" },
       { text: "Non-sensitive columns remain <b>fully queryable</b> with indexes and joins. Encryption applies only to the designated sensitive fields — no whole-row overhead.", element: ".sec-col-table" }
     ]
+  },
+
+  // ── Data Management ────────────────────────────────────────────────────────
+
+  "dm-snapshot": {
+    group: "Data Management", icon: "📸", sortOrder: 1,
+    name: 'Distributed Consistent Snapshot', title: 'Distributed Consistent Snapshot',
+    subtitle: 'Safe-time · RPC broadcast · MemTable flush · SST hardlink',
+    snapshotVizPanel: true,
+    desc: 'A YugabyteDB snapshot is a 4-phase operation rooted in DocDB: (1) the master computes <code>T_snap = HLC_now + max_clock_skew</code> and waits until no in-flight write older than T_snap can still arrive; (2) it broadcasts <code>SnapshotTabletAtHybridTimestamp(T_snap)</code> to every tablet leader in parallel; (3) each tablet flushes its MemTable to an immutable SST file; (4) it hardlinks those SSTs into <code>snapshots/snap-xxx/</code>. No data is copied — hardlinks make this O(1) regardless of dataset size.',
+    guidedTour: [
+      { text: "The top pane shows all 3 tablet leaders and the YB-Master. Watch their phase badges update as the snapshot progresses. The <b>DocDB panel</b> below shows the storage layer of Tablet-1 in real time.", element: ".snap-viz-panel" },
+      { text: "The <b>HLC status</b> on the right shows the safe-time calculation: T_snap = HLC_now + max_clock_skew. The master waits until its own HLC advances past T_snap + skew before issuing any RPC.", element: ".svp-right" },
+      { text: "In the DocDB panel, watch the MemTable drain → SST-1 appear → the <b>green snapshot section</b> materialise. That green layer is the snapshot directory. Same bytes on disk, different directory pointer — zero bytes copied.", element: ".docdb-panel" }
+    ],
+    latencies: [
+      { lbl: 'Safe-time wait', cls: 'll', max: 2   },
+      { lbl: 'RPC broadcast',  cls: 'll', max: 5   },
+      { lbl: 'Flush + hardlink', cls: 'lm', max: 80 }
+    ],
+    init: (ctx) => {
+      showDocdbPanel(true);
+      S._docdb = { memtable: [], ssts: [], snapshotSsts: [], snapshotId: 'snap-20240518-001' };
+      setDocdbOp('Tablet-1 · accounts shard · 0x0000–0x5554 (leader on TServer-1)');
+      renderDocdbPanel();
+      renderSnapshotViz({
+        masterPhase: 'idle', masterOp: '— waiting for snapshot request —',
+        tablets: [{id:1,phase:'idle'},{id:2,phase:'idle'},{id:3,phase:'idle'}],
+        hlcNow: '1716003600.000000', phaseLabel: 'Cluster idle'
+      });
+    },
+    steps: [
+      {
+        label: '1. Writes Arrive → DocDB MemTable',
+        desc: 'Every write to YugabyteDB lands first in the tablet\'s MemTable — an in-memory, append-only buffer in DocDB\'s LSM engine. Each KV entry is stamped with an HLC timestamp. The DocDB panel tracks Tablet-1\'s live state in real time.',
+        action: async (ctx) => {
+          setDocdbOp('INSERT → accounts · KV entries landing in MemTable');
+          renderSnapshotViz({
+            masterPhase: 'idle', masterOp: 'Receiving writes — no snapshot in progress',
+            tablets: [{id:1,phase:'idle'},{id:2,phase:'idle'},{id:3,phase:'idle'}],
+            hlcNow: '1716003600.000001', phaseLabel: 'Normal write traffic'
+          });
+          const writes = [
+            { display: 'accounts:id=1:balance', hlc: '1716003600.000001', value: '12400' },
+            { display: 'accounts:id=2:balance', hlc: '1716003600.000002', value: '8750'  },
+            { display: 'accounts:id=3:balance', hlc: '1716003600.000003', value: '34100' },
+            { display: 'accounts:id=4:balance', hlc: '1716003600.000004', value: '5200'  },
+            { display: 'accounts:id=5:balance', hlc: '1716003600.000005', value: '19800' },
+          ];
+          for (const w of writes) {
+            await ctx.delay(340);
+            S._docdb.memtable.unshift({ display: w.display, hlc: w.hlc, type: 'WRITE', value: w.value, isNew: true });
+            renderDocdbPanel();
+            S._docdb.memtable.forEach(e => e.isNew = false);
+            renderSnapshotViz({
+              masterPhase: 'idle', masterOp: 'Receiving writes — no snapshot in progress',
+              tablets: [{id:1,phase:'idle'},{id:2,phase:'idle'},{id:3,phase:'idle'}],
+              hlcNow: w.hlc, phaseLabel: 'Normal write traffic'
+            });
+          }
+          addLog(`MemTable: ${S._docdb.memtable.length} entries · HLC 1716003600.000001–.000005`, 'ls');
+        }
+      },
+      {
+        label: '2. Master Computes Snapshot Safe Time',
+        desc: 'The YB-Master picks T_snap = HLC_now + max_clock_skew. It then waits until its own HLC advances past T_snap + max_clock_skew. This guarantees every write with commit HLC ≤ T_snap is already fully durable before any snapshot RPC is issued.',
+        action: async (ctx) => {
+          setDocdbOp('YB-Master: computing T_snap = HLC_now + max_clock_skew (500 μs)');
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'Computing T_snap = HLC_now + max_clock_skew',
+            tablets: [{id:1,phase:'idle'},{id:2,phase:'idle'},{id:3,phase:'idle'}],
+            hlcNow: '1716003600.000006', tSnap: '', waitPct: 0,
+            phaseLabel: 'Computing safe time…'
+          });
+          addLog('YB-Master: snapshot safe time computation', 'lh');
+          addLog('  HLC_now        = 1716003600.000006', 'ls');
+          addLog('  max_clock_skew =          0.000500  (500 μs)', 'ls');
+          addLog('  T_snap         = 1716003600.000506', 'lw');
+          await ctx.delay(600);
+          // Animate wait progress 0 → 100
+          for (let p = 0; p <= 100; p += 20) {
+            renderSnapshotViz({
+              masterPhase: 'active', masterOp: 'Waiting: own HLC must advance past T_snap + max_clock_skew',
+              tablets: [{id:1,phase:'idle'},{id:2,phase:'idle'},{id:3,phase:'idle'}],
+              hlcNow: `1716003600.00${String(6 + Math.round(p * 0.1)).padStart(4,'0')}`,
+              tSnap: '1716003600.000506', waitPct: p,
+              phaseLabel: p < 100 ? 'Waiting for HLC to advance…' : 'Safe time reached ✓'
+            });
+            await ctx.delay(200);
+          }
+          setDocdbOp('YB-Master: safe time confirmed → ready to broadcast snapshot RPCs');
+          addLog('  HLC advanced ✓ · all writes ≤ T_snap are fully committed · safe to snapshot', 'ls');
+        }
+      },
+      {
+        label: '3. Broadcast SnapshotTabletAtHybridTimestamp + Raft',
+        desc: 'The master broadcasts SnapshotTabletAtHybridTimestamp(T_snap) to all 3 tablet leaders simultaneously. Each leader appends a SNAPSHOT record to its Raft log and fans it out to its followers for quorum before proceeding.',
+        action: async (ctx) => {
+          setDocdbOp('RPC broadcast: SnapshotTabletAtHybridTimestamp(T_snap=1716003600.000506)');
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'SnapshotTabletAtHybridTimestamp(T_snap=1716003600.000506)',
+            tablets: [{id:1,phase:'rpc'},{id:2,phase:'rpc'},{id:3,phase:'rpc'}],
+            hlcNow: '1716003600.000510', tSnap: '1716003600.000506', waitPct: 100,
+            phaseLabel: 'RPC broadcast → all 3 tablets'
+          });
+          addLog('YB-Master → [Tablet-1, Tablet-2, Tablet-3]: SnapshotTabletAtHybridTimestamp', 'lh');
+          await ctx.delay(600);
+          // SNAPSHOT Raft record appears in MemTable
+          S._docdb.memtable.unshift({ display: 'SNAPSHOT record', hlc: '1716003600.000506', type: 'SNAPSHOT', value: 'snap-001', isNew: true });
+          renderDocdbPanel();
+          S._docdb.memtable.forEach(e => e.isNew = false);
+          addLog('SNAPSHOT record replicated via Raft · quorum on all 3 tablets · provisional writes resolved', 'ls');
+          await ctx.delay(400);
+        }
+      },
+      {
+        label: '4. MemTable Flush → SST · Hardlink into snapshot/',
+        desc: 'Each tablet flushes its MemTable to an immutable SST file on disk (rocksdb::Flush). Then it hardlinks every SST file into the snapshots/snap-001/ subdirectory. Hardlinks are filesystem pointer copies — zero bytes are written, regardless of how large the dataset is.',
+        action: async (ctx) => {
+          // Phase A: flush
+          setDocdbOp('rocksdb::Flush() → tablet-data/rocksdb/000010.sst');
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'Waiting for flush + hardlink acknowledgements',
+            tablets: [{id:1,phase:'flushing'},{id:2,phase:'flushing'},{id:3,phase:'flushing'}],
+            hlcNow: '1716003600.000520', tSnap: '1716003600.000506', waitPct: 100,
+            phaseLabel: 'Flushing MemTable → SST…'
+          });
+          addLog('All tablets: rocksdb::Flush() triggered…', 'lh');
+          await ctx.delay(700);
+          const flushed = S._docdb.memtable.filter(e => e.type !== 'SNAPSHOT').map(e => ({ ...e, isNew: false }));
+          S._docdb.ssts = [{ name: 'SST-1  (000010.sst)', entries: flushed }];
+          S._docdb.memtable = [];
+          renderDocdbPanel();
+          addLog(`SST-1 written · ${flushed.length} KV entries · MemTable cleared`, 'ls');
+          await ctx.delay(500);
+          // Phase B: hardlink
+          setDocdbOp('hardlink: rocksdb/000010.sst → snapshots/snap-20240518-001/tablet-xxx/000010.sst');
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'Creating hardlinks in snapshots/snap-20240518-001/',
+            tablets: [{id:1,phase:'hardlinking'},{id:2,phase:'hardlinking'},{id:3,phase:'hardlinking'}],
+            hlcNow: '1716003600.000540', tSnap: '1716003600.000506', waitPct: 100,
+            phaseLabel: 'Hardlinking SSTs → snapshot dir…'
+          });
+          addLog('Hardlinking SST files into snapshots/snap-20240518-001/…', 'lh');
+          await ctx.delay(500);
+          S._docdb.snapshotSsts = [{ name: 'SST-1  (000010.sst)', entries: flushed.map(e => ({ ...e })) }];
+          renderDocdbPanel();
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'Hardlinks complete — awaiting ACK from all tablets',
+            tablets: [{id:1,phase:'done'},{id:2,phase:'done'},{id:3,phase:'done'}],
+            hlcNow: '1716003600.000545', tSnap: '1716003600.000506', waitPct: 100,
+            phaseLabel: 'Hardlinks complete · 0 bytes copied'
+          });
+          addLog('Hardlinks created · 0 bytes copied · snapshot dir pinned against GC', 'ls');
+        }
+      },
+      {
+        label: '5. Master Marks COMPLETE · Writes Resume',
+        desc: 'All tablet leaders ACK the master. The master writes the snapshot manifest to its system catalog and marks the snapshot COMPLETE. New writes immediately land in a fresh MemTable — the hardlinked snapshot SSTs are untouched and GC-protected.',
+        action: async (ctx) => {
+          setDocdbOp('YB-Master: snapshot_id=snap-20240518-001 → status=COMPLETE (system catalog)');
+          renderSnapshotViz({
+            masterPhase: 'active', masterOp: 'All tablets ACK → writing manifest to system catalog',
+            tablets: [{id:1,phase:'done'},{id:2,phase:'done'},{id:3,phase:'done'}],
+            hlcNow: '1716003600.000600', tSnap: '1716003600.000506', waitPct: 100,
+            phaseLabel: 'COMPLETE ✓',
+            manifest: 'snap-20240518-001 · T_snap=1716003600.000506\n3 tablets · ~4.2 MB · GC-pinned'
+          });
+          addLog('All 3 tablets ACK → YB-Master: status=COMPLETE', 'ls');
+          addLog('Manifest: snap-20240518-001 · T_snap=1716003600.000506 · tablets=3 · ~4.2 MB', 'ls');
+          await ctx.delay(500);
+          // New writes resume into fresh MemTable
+          const resumeWrites = [
+            { display: 'accounts:id=6:balance', hlc: '1716003600.001200', value: '7300'  },
+            { display: 'accounts:id=7:balance', hlc: '1716003600.001350', value: '22000' },
+          ];
+          for (const w of resumeWrites) {
+            await ctx.delay(400);
+            S._docdb.memtable.unshift({ display: w.display, hlc: w.hlc, type: 'WRITE', value: w.value, isNew: true });
+            renderDocdbPanel();
+            S._docdb.memtable.forEach(e => e.isNew = false);
+          }
+          addLog('New writes in fresh MemTable · snapshot SSTs hardlinked and GC-protected · 0ms pause', 'ls');
+        }
+      }
+    ]
+  },
+
+  "dm-backup": {
+    group: "Data Management", icon: "☁️", sortOrder: 2,
+    name: 'Distributed Backup', title: 'Distributed Backup',
+    subtitle: 'Parallel tablet-level streams to cloud storage',
+    desc: 'YugabyteDB backups are fully distributed: after a consistent snapshot, every TServer streams its tablet SST files to the backup target (S3, GCS, or NFS) in parallel. No single node is a bottleneck. Backup throughput scales linearly with the number of nodes.',
+    snapshotVizPanel: true,
+    guidedTour: [
+      { text: "Backup starts with a <b>consistent snapshot</b> — all tablets freeze at the same HLC before any data moves.", element: ".snap-viz-panel" },
+      { text: "Each TServer streams its SST files independently. The <b>top panel</b> shows per-node upload progress — no single node serialises the backup.", element: ".snap-viz-panel" },
+      { text: "The <b>DocDB panel</b> shows SST files being hardlinked to the snapshot directory, then streamed to cloud storage. Zero bytes are duplicated within the node.", element: ".docdb-panel" }
+    ],
+    latencies: [
+      { lbl: 'Snapshot', cls: 'll', max: 50 },
+      { lbl: 'Stream / Node', cls: 'lm', max: 120 },
+      { lbl: 'Manifest Write', cls: 'll', max: 10 }
+    ],
+    init: (ctx) => {
+      showDocdbPanel(true);
+      S._docdb = { memtable: [], ssts: [], snapshotSsts: [], snapshotId: 'snap-20240518-002' };
+      setDocdbOp('Tablet-1 · accounts shard · 0x0000–0x5554 (leader on TServer-1)');
+      S._docdb.ssts = [
+        { name: 'SST (000010.sst)', entries: [
+          { display: 'accounts/id=1', type: 'WRITE', hlc: '1716001100.000001', value: 'Alice · Savings · $12,400' },
+          { display: 'accounts/id=2', type: 'WRITE', hlc: '1716001100.000002', value: 'Bob · Checking · $8,750' }
+        ]},
+        { name: 'SST (000011.sst)', entries: [
+          { display: 'accounts/id=3', type: 'WRITE', hlc: '1716001050.000001', value: 'Carol · Savings · $34,100' },
+          { display: 'accounts/id=4', type: 'WRITE', hlc: '1716001050.000002', value: 'Dan · Checking · $5,200' }
+        ]}
+      ];
+      renderDocdbPanel();
+      ctx.backupViz({ nodes: [], totalPct: 0, status: 'Idle', elapsed: 0, target: 's3://yb-backups/prod/' });
+    },
+    steps: [
+      {
+        label: '1. Consistent Snapshot',
+        desc: 'Before any data moves, the YB-Master triggers a distributed consistent snapshot. All tablet leaders flush their MemTable and record the snapshot HLC. Notice the SST filenames above the green divider (000010.sst, 000011.sst) — these exact same files are hardlinked below. Zero bytes copied.',
+        action: async (ctx) => {
+          addLog('Backup job started: backup-20240518-02 · target: s3://yb-backups/prod/', 'lh');
+          S._docdb.memtable = [
+            { display: 'SNAPSHOT', type: 'SNAPSHOT', hlc: '1716001200.000017', value: 'snap-20240518-002 · T_snap=1716001200.000017' }
+          ];
+          renderDocdbPanel();
+          await ctx.delay(500);
+          S._docdb.ssts = [
+            { name: 'SST (000010.sst)', entries: [
+              { display: 'accounts/id=1', type: 'WRITE', hlc: '1716001100.000001', value: 'Alice · Savings · $12,400' },
+              { display: 'accounts/id=2', type: 'WRITE', hlc: '1716001100.000002', value: 'Bob · Checking · $8,750' }
+            ]},
+            { name: 'SST (000011.sst)', entries: [
+              { display: 'accounts/id=3', type: 'WRITE', hlc: '1716001050.000001', value: 'Carol · Savings · $34,100' },
+              { display: 'accounts/id=4', type: 'WRITE', hlc: '1716001050.000002', value: 'Dan · Checking · $5,200' }
+            ]}
+          ];
+          S._docdb.memtable = [];
+          S._docdb.snapshotSsts = [
+            { name: 'hardlink: 000010.sst', entries: [
+              { display: '000010.sst', type: 'WRITE', hlc: '→ snapshots/snap-20240518-002/tablet-1/', value: 'same inode as SST above · 2.1 MB · 0 bytes copied' }
+            ]},
+            { name: 'hardlink: 000011.sst', entries: [
+              { display: '000011.sst', type: 'WRITE', hlc: '→ snapshots/snap-20240518-002/tablet-1/', value: 'same inode as SST above · 1.8 MB · 0 bytes copied' }
+            ]}
+          ];
+          renderDocdbPanel();
+          ctx.backupViz({ nodes: [{node:1,pct:0},{node:2,pct:0},{node:3,pct:0}], totalPct: 0, status: 'Snapshot ready', elapsed: 0, target: 's3://yb-backups/prod/' });
+          addLog('Consistent snapshot: snap-20240518-002 @ HLC 1716001200.000017', 'ls');
+          addLog('000010.sst + 000011.sst hardlinked → snapshots/ — same inodes, zero copy', 'ls');
+        }
+      },
+      {
+        label: '2. Backup Streams Begin',
+        desc: 'All TServers start streaming their snapshot SST files to S3 in parallel. The upload reads from the hardlinked snapshot directory — the live SSTs above the divider are untouched and continue serving reads and writes.',
+        action: async (ctx) => {
+          ctx.backupViz({ nodes: [{node:1,pct:8},{node:2,pct:5},{node:3,pct:3}], totalPct: 5, status: 'Streaming…', elapsed: 2, target: 's3://yb-backups/prod/' });
+          S._docdb.snapshotSsts = [
+            { name: 'hardlink: 000010.sst  ☁ uploading', entries: [
+              { display: '000010.sst', type: 'WRITE', hlc: '☁ → s3://yb-backups/prod/snap-20240518-002/', value: '8% · 168 KB/s' }
+            ]},
+            { name: 'hardlink: 000011.sst  ⏳ queued', entries: [
+              { display: '000011.sst', type: 'WRITE', hlc: '→ snapshots/snap-20240518-002/tablet-1/', value: 'waiting for 000010.sst to complete' }
+            ]}
+          ];
+          renderDocdbPanel();
+          await ctx.delay(400);
+          addLog('TServer-1, TServer-2, TServer-3 streaming in parallel', 'ls');
+        }
+      },
+      {
+        label: '3. Progress — Parallel Upload',
+        desc: 'Each TServer uploads at its own rate. The live SSTs (top section) keep serving traffic — the snapshot hardlinks (bottom) are read-only references to the same files. Throughput scales linearly with node count.',
+        action: async (ctx) => {
+          const steps = [
+            { n1:30, n2:22, n3:18, total:23, elapsed:8 },
+            { n1:55, n2:48, n3:40, total:48, elapsed:15 },
+            { n1:78, n2:70, n3:62, total:70, elapsed:22 },
+            { n1:100, n2:88, n3:80, total:89, elapsed:28 }
+          ];
+          for (const s of steps) {
+            ctx.backupViz({ nodes: [{node:1,pct:s.n1},{node:2,pct:s.n2},{node:3,pct:s.n3}], totalPct: s.total, status: 'Streaming…', elapsed: s.elapsed, target: 's3://yb-backups/prod/' });
+            const f10 = s.n1 >= 100 ? '✓ done' : `${s.n1}%`;
+            const f11 = s.n1 >= 50 ? `${s.n1 - 10}%` : 'queued';
+            S._docdb.snapshotSsts = [
+              { name: `hardlink: 000010.sst  ☁ ${f10}`, entries: [
+                { display: '000010.sst', type: 'WRITE', hlc: `☁ uploaded ${f10}`, value: s.n1 >= 100 ? '2.1 MB complete' : `${Math.round(s.n1*21)}KB / 2.1 MB` }
+              ]},
+              { name: `hardlink: 000011.sst  ☁ ${f11}`, entries: [
+                { display: '000011.sst', type: 'WRITE', hlc: `☁ uploaded ${f11}`, value: s.n1 >= 50 ? `${Math.round((s.n1-10)*18)}KB / 1.8 MB` : 'waiting' }
+              ]}
+            ];
+            renderDocdbPanel();
+            await ctx.delay(500);
+          }
+          addLog('TServer-1 complete · TServer-2 at 88% · TServer-3 at 80%', 'ls');
+        }
+      },
+      {
+        label: '4. Backup Complete + Manifest',
+        desc: 'All TServers finish. The coordinator writes a backup manifest listing the snapshot ID, HLC, tablet locations, and SHA-256 checksums. The hardlink reference count drops to 1 — the SSTs live on as normal live files, unchanged.',
+        action: async (ctx) => {
+          ctx.backupViz({ nodes: [{node:1,pct:100},{node:2,pct:100},{node:3,pct:100}], totalPct: 100, status: 'Complete ✓', elapsed: 34, target: 's3://yb-backups/prod/' });
+          S._docdb.snapshotSsts = [{ name: 'MANIFEST written', entries: [
+            { display: 'MANIFEST', type: 'SNAPSHOT', hlc: 's3://yb-backups/prod/backup-20240518-02/', value: 'snap-20240518-002 · 6.3 MB · 2 SSTs · SHA256 ✓' }
+          ]}];
+          renderDocdbPanel();
+          addLog('Backup manifest written to s3://yb-backups/prod/backup-20240518-02/', 'ls');
+          addLog('Backup complete · 6.3 MB · 3 TServers · 34s · live SSTs unchanged', 'ls');
+        }
+      }
+    ]
+  },
+
+  "dm-pitr": {
+    group: "Data Management", icon: "⏱️", sortOrder: 3,
+    name: 'PITR', title: 'Point-in-Time Recovery',
+    subtitle: 'On-demand snapshot + HLC read filter — delta writes in recovery window lost',
+    desc: 'DocDB is an <b>LSM-tree</b> — every write appends a new HLC-stamped version; nothing overwrites in place. With PITR enabled, the history retention window is extended so all MVCC versions are preserved. When restore is initiated, YugabyteDB takes an <b>on-demand snapshot</b> right at that moment (capturing all writes including post-anomaly deltas), then applies an <b>HLC read filter</b> at T_restore inside that snapshot — any version with HLC &gt; T_restore is filtered out of view. The delta writes between T_restore and restore initiation are permanently lost — this is the PITR trade-off. Use <b>DB Clone</b> when you need surgical recovery without losing those deltas.',
+    snapshotVizPanel: true,
+    guidedTour: [
+      { text: "The timeline shows <b>scheduled snapshots</b> (green) and — when restore is initiated — an <b>on-demand snapshot</b> (amber) taken at that exact moment. The red zone between the anomaly and the on-demand snapshot is the <b>delta loss window</b>.", element: ".snap-viz-panel" },
+      { text: "The <b>DocDB panel</b> shows multiple HLC-stamped MVCC versions per key retained by PITR's extended window. After recovery, the on-demand snapshot hardlinks are the restore base — the HLC filter hides everything with HLC &gt; T_restore.", element: ".docdb-panel" },
+      { text: "Step 5 shows the key trade-off: the delta write (id=105, placed <i>after</i> the accidental delete) is captured inside the on-demand snapshot but filtered out. <b>DB Clone</b> sidesteps this entirely via surgical row recovery.", element: ".docdb-panel" }
+    ],
+    latencies: [
+      { lbl: 'On-demand Snapshot', cls: 'lm', max: 15 },
+      { lbl: 'HLC Filter Apply', cls: 'll', max: 5 },
+      { lbl: 'Total RTO', cls: 'll', max: 20 }
+    ],
+    init: (ctx) => {
+      showDocdbPanel(true);
+      S._docdb = { memtable: [], ssts: [], snapshotSsts: [], snapshotId: 'pitr-snapshots' };
+      setDocdbOp('Tablet-1 · orders shard · 0x0000–0x5554 · PITR retention: 24h');
+      S._docdb.ssts = [
+        { layer: 0, entries: [
+          { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' },
+          { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449' }
+        ]}
+      ];
+      renderDocdbPanel();
+      ctx.pitrViz({ snapshots: [{label:'Snap-1',time:'09:00',pct:15}], walPct: 18, phase: 'running', retentionHours: 24 });
+    },
+    steps: [
+      {
+        label: '1. PITR Enabled — LSM History Window Extended',
+        desc: 'Enabling PITR sets <code>--timestamp_history_retention_interval_sec=86400</code>. DocDB\'s compaction is told to retain all MVCC versions younger than 24h — normally old versions are GC\'d to reclaim space. Because DocDB is an LSM-tree, every write is already a new append with an HLC timestamp; no in-place updates ever happen. Extending the retention window simply prevents compaction from discarding those old appended versions.',
+        action: async (ctx) => {
+          ctx.pitrViz({ snapshots: [{label:'Snap-1',time:'09:00',pct:15}], walPct: 30, phase: 'running', retentionHours: 24 });
+          S._docdb.ssts = [
+            { layer: 0, entries: [
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89 (latest)' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2 — price update)' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1 — original, retained by PITR)' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('PITR enabled · --timestamp_history_retention_interval_sec=86400', 'lh');
+          addLog('Compaction GC horizon pinned 24h back · all MVCC versions retained in SSTs', 'ls');
+        }
+      },
+      {
+        label: '2. MVCC Versions Accumulate — Scheduled Snapshots Taken',
+        desc: 'As writes flow in, DocDB appends a new HLC-stamped entry for every INSERT, UPDATE, and DELETE. With PITR enabled all versions co-exist in the SST files. <b>Scheduled distributed snapshots</b> (Snap-1 @ 09:00, Snap-2 @ 11:00) capture a consistent point-in-time state across all tablets by hard-linking SST files into a snapshot directory — zero data copy, immutable references. These scheduled snapshots are not the restore base themselves; the <b>on-demand snapshot taken at restore initiation</b> will be.',
+        action: async (ctx) => {
+          ctx.pitrViz({ snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}], walPct: 63, phase: 'running', retentionHours: 24 });
+          S._docdb.ssts = [
+            { name: 'SST (000010.sst)', entries: [
+              { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1)' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' }
+            ]},
+            { name: 'SST (000011.sst)', entries: [
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2 update)' }
+            ]}
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-001/tablet-1/  ← Snap-1 @ 09:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode as live SST', value: 'id=101, id=102(T1) · orders as of 09:00' }
+            ]},
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1) — unchanged' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode as live SST', value: 'id=102(T2), id=103, id=104 · 10:05–11:20 writes' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('000010.sst + 000011.sst · 5 HLC-stamped MVCC versions · GC suppressed for 24h', 'ls');
+          addLog('Snap-1 @ 09:00 hardlinks 000010.sst · Snap-2 @ 11:00 hardlinks 000010+000011', 'lh');
+        }
+      },
+      {
+        label: '3. Accidental DELETE at 11:23 — Delta Writes Continue',
+        desc: 'A developer accidentally runs <code>DELETE FROM orders</code> at 11:23, removing all rows. DocDB appends tombstones (HLC=11:23:07) to a new SST file — the data in 000010.sst and 000011.sst is untouched on disk. <b>Critically: no new scheduled snapshot is taken</b>. Meanwhile a new order (id=105) arrives at 11:24 — the system is still accepting writes because the outage is not yet detected. 3 minutes pass before the DBA realizes the issue and initiates PITR restore.',
+        action: async (ctx) => {
+          addLog('DELETE FROM orders at 11:23:07 → tombstones appended to 000012.sst', 'le');
+          S._docdb.ssts = [
+            { name: 'SST (000012.sst) ← anomaly', entries: [
+              { display: 'orders/id=101', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=102', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=103', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=104', type: 'TOMBSTONE', hlc: '11:23:07', value: '' }
+            ]},
+            { name: 'SST (000011.sst)', entries: [
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2)' }
+            ]},
+            { name: 'SST (000010.sst)', entries: [
+              { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1)' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' }
+            ]}
+          ];
+          S._docdb.memtable = [
+            { display: 'orders/id=105 ⚠ DELTA', type: 'WRITE', hlc: '11:24:30', value: 'Eve · Headphones · $79 · post-anomaly write · WILL BE LOST on restore' }
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-001/tablet-1/  ← Snap-1 @ 09:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' }
+            ]},
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104' }
+            ]}
+          ];
+          renderDocdbPanel();
+          await ctx.delay(400);
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83,
+            anomaly: { time:'11:23 DELETE', pct:70 },
+            phase: 'running',
+            retentionHours: 24
+          });
+          addLog('No scheduled snapshot exists at 11:26 — on-demand snapshot will be taken at restore initiation', 'lw');
+          addLog('id=105 (Eve · Headphones) placed at 11:24:30 · delta write in limbo', 'lw');
+        }
+      },
+      {
+        label: '4. PITR Restore — On-demand Snapshot + HLC Flashback',
+        desc: '<b>DBA initiates PITR restore at 11:26.</b> Because no scheduled snapshot exists at this time, YugabyteDB first takes an <b>on-demand snapshot (Snap-3 @ 11:26)</b> — this captures everything: 000010, 000011, 000012 (tombstones), and memtable flushed to 000013 (delta write id=105). <b>HLC flashback:</b> DocDB applies read filter = T_restore=11:22:59 inside Snap-3. The tombstones (HLC 11:23:07) and the delta write id=105 (HLC 11:24:30) both have HLC &gt; filter → filtered out. Orders id=101–104 (HLC ≤ 11:20) are visible again. <b>id=105 is permanently lost</b> — it was in the snapshot but beyond the filter.',
+        action: async (ctx) => {
+          addLog('PITR restore initiated at 11:26 · no scheduled snapshot found near T_restore', 'lw');
+          addLog('Taking on-demand snapshot Snap-3 @ 11:26 (flushes memtable → 000013.sst)…', 'lw');
+          // Phase 1: on-demand snapshot taken — show raw contents before HLC filter
+          S._docdb.memtable = [];
+          S._docdb.ssts = [
+            { name: 'SST (Snap-3 raw contents — pre-flashback)', entries: [
+              { display: 'orders/id=105 (delta write)', type: 'WRITE', hlc: '11:24:30', value: 'Eve · Headphones · $79 · captured in Snap-3' },
+              { display: 'orders/id=101', type: 'TOMBSTONE', hlc: '11:23:07', value: 'DELETE tombstone captured in Snap-3' },
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399' }
+            ]}
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-001/tablet-1/  ← Snap-1 @ 09:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' }
+            ]},
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104' }
+            ]},
+            { folder: 'snapshots/snap-20240518-003/tablet-1/  ← ON-DEMAND RESTORE BASE @ 11:26 ✓', entries: [
+              { display: 'hardlink: 000013.sst (delta write)', type: 'WRITE', hlc: 'HLC 11:24:30', value: 'id=105 Eve · Headphones · $79 · in snapshot, awaiting filter' },
+              { display: 'hardlink: 000012.sst (tombstones)', type: 'TOMBSTONE', hlc: 'HLC 11:23:07', value: 'DELETE tombstones · in snapshot, awaiting filter' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: 'HLC 11:20:00', value: 'id=102(T2), id=103, id=104' },
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: 'HLC 09:00:01', value: 'id=101, id=102(T1)' }
+            ]}
+          ];
+          renderDocdbPanel();
+          ctx.pitrViz({
+            snapshots: [
+              {label:'Snap-1',time:'09:00',pct:15},
+              {label:'Snap-2',time:'11:00',pct:60},
+              {label:'Snap-3',time:'11:26',pct:83, onDemand:true}
+            ],
+            walPct: 83,
+            anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_restore = 11:22:59', pct:69 },
+            phase: 'restoring',
+            retentionHours: 24
+          });
+          addLog('Snap-3 (on-demand) hardlinks 000010+000011+000012+000013 · all 4 SSTs captured', 'lh');
+          await ctx.delay(900);
+          // Phase 2: HLC flashback applied — filter removes tombstones and delta write
+          addLog('Applying HLC read filter = 11:22:59 inside Snap-3…', 'lw');
+          await ctx.delay(600);
+          S._docdb.ssts = [
+            { name: 'SST (post-HLC-filter view · HLC ≤ 11:22:59)', entries: [
+              { display: 'HLC read filter active: ≤ 11:22:59', type: 'WRITE', hlc: '← filter', value: 'DocDB reader skips any version with HLC > 11:22:59' },
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39 · HLC < filter → visible ✓' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89 · visible ✓' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 · visible ✓' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299 · visible ✓' }
+            ]}
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-001/tablet-1/  ← Snap-1 @ 09:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' }
+            ]},
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104' }
+            ]},
+            { folder: 'snapshots/snap-20240518-003/tablet-1/  ← ON-DEMAND RESTORE BASE @ 11:26 ✓', entries: [
+              { display: 'hardlink: 000013.sst (delta write)', type: 'TOMBSTONE', hlc: 'HLC 11:24:30 > filter', value: 'id=105 Eve · Headphones · $79 → FILTERED OUT ✕ (delta lost)' },
+              { display: 'hardlink: 000012.sst (tombstones)', type: 'TOMBSTONE', hlc: 'HLC 11:23:07 > filter', value: 'DELETE tombstones → FILTERED OUT ✕' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: 'HLC ≤ 11:22:59', value: 'id=102(T2), id=103, id=104 → visible ✓' },
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: 'HLC ≤ 11:22:59', value: 'id=101, id=102(T1) → visible ✓' }
+            ]}
+          ];
+          renderDocdbPanel();
+          ctx.pitrViz({
+            snapshots: [
+              {label:'Snap-1',time:'09:00',pct:15},
+              {label:'Snap-2',time:'11:00',pct:60},
+              {label:'Snap-3',time:'11:26',pct:83, onDemand:true}
+            ],
+            walPct: 83,
+            anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_restore = 11:22:59', pct:69 },
+            phase: 'complete',
+            retentionHours: 24
+          });
+          addLog('HLC filter = 11:22:59 · 000012 tombstones + 000013 delta → both filtered ✕', 'lw');
+          addLog('✓ 4 orders recovered · id=105 (delta) permanently lost · no WAL replay', 'ls');
+        }
+      },
+      {
+        label: '5. Delta Loss Window — Clone as Mitigation',
+        desc: '<b>PITR trade-off:</b> order id=105 (placed at 11:24 — after the accidental delete but before restore) is permanently lost. PITR rewinds the <i>entire</i> DB — any write inside the delta window (11:22:59 → 11:26) is gone. <b>Clone mitigation:</b> instead of PITR, fork a clone from Snap-2 (pre-anomaly), <code>SELECT</code> the deleted rows (id=101–104) from the clone, then <code>INSERT</code> them back into production. Production never rewound — id=105 is preserved. Zero delta loss.',
+        action: async (ctx) => {
+          ctx.pitrViz({
+            snapshots: [
+              {label:'Snap-1',time:'09:00',pct:15},
+              {label:'Snap-2',time:'11:00',pct:60},
+              {label:'Snap-3',time:'11:26',pct:83, onDemand:true}
+            ],
+            walPct: 83,
+            anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_restore = 11:22:59', pct:69 },
+            phase: 'complete',
+            retentionHours: 24
+          });
+          S._docdb.ssts = [
+            { name: 'SST (PITR result · HLC filter ≤ 11:22:59 · 4 orders visible)', entries: [
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39 · restored ✓' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89 · restored ✓' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 · restored ✓' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299 · restored ✓' }
+            ]}
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-001/tablet-1/  ← Snap-1 @ 09:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' }
+            ]},
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1)' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104' }
+            ]},
+            { folder: '✕ delta loss — id=105 (Eve · Headphones · $79) · HLC 11:24:30 → filtered by HLC read filter · permanently gone', entries: [
+              { display: 'orders/id=105 was in Snap-3 (000013.sst)', type: 'TOMBSTONE', hlc: 'HLC 11:24:30 > T_restore', value: 'PITR cannot recover delta writes · use Clone for zero-loss surgical recovery' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('⚠ PITR: id=105 delta write permanently lost — entire DB rewound to 11:22:59', 'lw');
+          addLog('Clone alternative: fork Snap-2 → SELECT id=101–104 → INSERT into production', 'lw');
+          addLog('Clone keeps id=105 intact · production never rewound · zero delta loss', 'ls');
+        }
+      }
+    ]
+  },
+
+  "dm-clone": {
+    group: "Data Management", icon: "🔀", sortOrder: 4,
+    name: 'DB Clone', title: 'Database Clone — Surgical Recovery',
+    subtitle: 'Same recovery target as PITR · isolated clone · zero delta loss',
+    desc: 'Same scenario as PITR: <code>DELETE FROM orders</code> at 11:23 wipes id=101–104; a delta write (id=105, Eve) arrives at 11:24. Both PITR and Clone target the <b>same recovery time: T = 11:22:59</b>. The difference is scope: <b>PITR</b> rewinds the entire production DB to 11:22:59 — id=105 permanently lost. <b>Clone</b> creates an <i>isolated</i> cluster at 11:22:59 (YB internally uses Snap-2 + MVCC history up to T_clone) — production keeps running and keeps id=105. A <code>SELECT</code> on the clone finds the deleted rows; an <code>INSERT</code> puts them back into production. All 5 orders intact. No rewind, no downtime, zero delta loss.',
+    snapshotVizPanel: true,
+    guidedTour: [
+      { text: "The timeline is identical to PITR — same snapshots, same anomaly at 11:23, same T_clone = 11:22:59. The key difference: <b>no red delta zone</b>. The clone is created in isolation; production is never rewound.", element: ".snap-viz-panel" },
+      { text: "The DocDB panel shows <b>production SSTs</b> (with tombstones + delta id=105) on top and the <b>clone SSTs</b> (green) below — the clone is at T_clone=11:22:59, sees id=101–104 cleanly with no tombstones.", element: ".docdb-panel" },
+      { text: "Step 5 shows the final state: new <b>SST 000013.sst</b> contains the restored rows. The tombstones in 000012.sst are shadowed by the newer HLC. id=105 (delta) is preserved — PITR would have lost it.", element: ".docdb-panel" }
+    ],
+    latencies: [
+      { lbl: 'Clone Bootstrap', cls: 'lm', max: 120 },
+      { lbl: 'SELECT from clone', cls: 'll', max: 5 },
+      { lbl: 'INSERT to prod', cls: 'll', max: 3 }
+    ],
+    init: (ctx) => {
+      showDocdbPanel(true);
+      S._docdb = { memtable: [], ssts: [], snapshotSsts: [] };
+      setDocdbOp('Tablet-1 · orders shard · 0x0000–0x5554 (SOURCE — production leader)');
+      S._docdb.ssts = [
+        { name: 'SST (000010.sst)', entries: [
+          { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1)' },
+          { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' }
+        ]},
+        { name: 'SST (000011.sst)', entries: [
+          { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+          { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+          { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2 update)' }
+        ]}
+      ];
+      renderDocdbPanel();
+      ctx.pitrViz({ snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}], walPct: 63, phase: 'running', retentionHours: 24,
+        customPhaseLabels: { running: '🔄 Production live · target T_clone = 11:22:59' } });
+    },
+    steps: [
+      {
+        label: '1. Production Live — Recovery Target T_clone = 11:22:59',
+        desc: 'The orders table has 4 rows (id=101–104). Scheduled snapshots are running — Snap-1 @ 09:00 and Snap-2 @ 11:00. The recovery target is <b>T_clone = 11:22:59</b> — the same timestamp PITR would restore to. YB will use Snap-2 + MVCC history up to that point to bootstrap the clone. The clone cluster does not exist yet.',
+        action: async (ctx) => {
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 63, phase: 'running', retentionHours: 24,
+            customPhaseLabels: { running: '🔄 Production live · target T_clone = 11:22:59' }
+          });
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00 (basis for T_clone = 11:22:59)', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1) · pre-anomaly ✓' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104 · pre-anomaly ✓' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('Snap-1 @ 09:00 · Snap-2 @ 11:00 · 4 orders in production · all healthy', 'ls');
+          addLog('Recovery target: T_clone = 11:22:59 · YB will use Snap-2 + MVCC to that point', 'lh');
+        }
+      },
+      {
+        label: '2. Anomaly — DELETE FROM orders at 11:23 + Delta Write Arrives',
+        desc: 'A developer accidentally runs <code>DELETE FROM orders</code> at 11:23 — tombstones appended to 000012.sst. Critically, order id=105 (Eve · Headphones) arrives at 11:24 as a <b>legitimate delta write</b>. <b>PITR</b> would take an on-demand snapshot at 11:26 and rewind to 11:22:59 — losing id=105. <b>Clone</b> avoids this entirely: production keeps running, id=105 stays, and we fork the clone from Snap-2 to recover the deleted rows.',
+        action: async (ctx) => {
+          addLog('DELETE FROM orders at 11:23:07 → tombstones in 000012.sst', 'le');
+          S._docdb.ssts = [
+            { name: 'SST (000012.sst) ← DELETE anomaly', entries: [
+              { display: 'orders/id=101', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=102', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=103', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=104', type: 'TOMBSTONE', hlc: '11:23:07', value: '' }
+            ]},
+            { name: 'SST (000011.sst)', entries: [
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2)' }
+            ]},
+            { name: 'SST (000010.sst)', entries: [
+              { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1)' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299' }
+            ]}
+          ];
+          S._docdb.memtable = [
+            { display: 'orders/id=105 ⚠ DELTA', type: 'WRITE', hlc: '11:24:30', value: 'Eve · Headphones · $79 · PITR loses this · Clone keeps this ✓' }
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: 'snapshots/snap-20240518-002/tablet-1/  ← Snap-2 @ 11:00 (basis for T_clone = 11:22:59)', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=101, id=102(T1) — NO tombstones ✓' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: '→ same inode', value: 'id=102(T2), id=103, id=104 — NO tombstones ✓' }
+            ]}
+          ];
+          renderDocdbPanel();
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83, anomaly: { time:'11:23 DELETE', pct:70 }, phase: 'running', retentionHours: 24,
+            customPhaseLabels: { running: '⚠ Anomaly detected at 11:23 · choosing Clone over PITR' }
+          });
+          addLog('id=105 (Eve · Headphones · $79) placed at 11:24 — delta write, must not be lost', 'lw');
+          addLog('Decision: Clone at T_clone = 11:22:59 — production never rewound, id=105 preserved', 'lh');
+        }
+      },
+      {
+        label: '3. Create Clone at T_clone = 11:22:59 — Production Keeps Running',
+        desc: '<code>yb-admin create_database_clone --restore-at=11:22:59</code> provisions a new cluster (C1/C2/C3). YB internally uses <b>Snap-2 + MVCC history up to T_clone = 11:22:59</b> — the same recovery timestamp PITR targets. <b>Zero data copied</b> — the clone shares immutable SST hardlinks. The HLC filter (≤ 11:22:59) is applied: tombstones written at 11:23:07 are invisible in the clone. Production (T1/T2/T3) keeps running with id=105 intact.',
+        action: async (ctx) => {
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83, anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_clone = 11:22:59', pct:69 },
+            phase: 'restoring', retentionHours: 24,
+            customPhaseLabels: { restoring: '🔁 Clone bootstrapping at T_clone = 11:22:59…' }
+          });
+          S._docdb.snapshotSsts = [
+            { folder: 'CLONE cluster · clone-env-001/tablet-1/  ← T_clone = 11:22:59 (Snap-2 + MVCC ≤ 11:22:59)', entries: [
+              { display: 'hardlink: 000010.sst', type: 'WRITE', hlc: 'HLC ≤ 11:22:59', value: 'id=101 Alice · id=102 Bob(T1) · pre-DELETE state ✓ · no tombstones' },
+              { display: 'hardlink: 000011.sst', type: 'WRITE', hlc: 'HLC ≤ 11:22:59', value: 'id=102 Bob(T2) · id=103 Carol · id=104 Dan · pre-DELETE state ✓ · no tombstones' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('Clone C1/C2/C3 created at T_clone = 11:22:59 · zero bytes copied · SSTs hardlinked', 'ls');
+          addLog('Production T1/T2/T3 still live · id=105 (Eve) written and safe in prod MemTable', 'ls');
+        }
+      },
+      {
+        label: '4. SELECT Deleted Rows from Clone',
+        desc: 'The clone is fully up. Query it: <code>SELECT * FROM orders WHERE id IN (101,102,103,104)</code>. Because the clone is at T_clone = 11:22:59 (before the DELETE at 11:23), it returns all 4 rows — tombstones written at 11:23:07 are past the HLC filter and invisible. Meanwhile, production is still running with id=105 safely in its MemTable — untouched throughout this process.',
+        action: async (ctx) => {
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83, anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_clone = 11:22:59', pct:69 },
+            phase: 'restoring', retentionHours: 24,
+            customPhaseLabels: { restoring: '🔎 Querying clone at T_clone = 11:22:59 · SELECT id=101–104…' }
+          });
+          S._docdb.snapshotSsts = [
+            { folder: 'CLONE · SELECT result — all 4 deleted rows found ✓', entries: [
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299 · found in clone ✓' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 · found in clone ✓' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89 · found in clone ✓' },
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39 · found in clone ✓' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('SELECT id IN (101,102,103,104) on clone → 4 rows returned · no tombstones', 'ls');
+          addLog('Production id=105 (Eve) still alive in prod MemTable — untouched', 'lh');
+        }
+      },
+      {
+        label: '5. Surgical INSERT → MemTable → Flush to SST 000013',
+        desc: '<code>INSERT INTO orders SELECT * FROM clone.orders WHERE id IN (101,102,103,104)</code> first lands in the <b>MemTable</b> (in-memory), then flushes to a new <b>SST (000013.sst)</b> with fresh HLC timestamps (11:27:xx). In DocDB\'s LSM-tree, the reader always returns the version with the <b>highest HLC per key</b> — so the new WRITEs in 000013.sst shadow the tombstones in 000012.sst (HLC 11:23:07). id=105 (Eve) was in the MemTable throughout — never touched. Clone ends with all 5 orders intact.',
+        action: async (ctx) => {
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83, anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_clone = 11:22:59', pct:69 },
+            phase: 'restoring', retentionHours: 24,
+            customPhaseLabels: { restoring: '🔁 INSERT recovered rows → landing in MemTable…' }
+          });
+          // Phase 1: INSERT lands in MemTable
+          S._docdb.memtable = [
+            { display: 'orders/id=104 [RECOVERING]', type: 'WRITE', hlc: '11:27:05', value: 'Dan · Mouse · $39 · from clone → MemTable' },
+            { display: 'orders/id=103 [RECOVERING]', type: 'WRITE', hlc: '11:27:04', value: 'Carol · Keyboard · $89 · from clone → MemTable' },
+            { display: 'orders/id=102 [RECOVERING]', type: 'WRITE', hlc: '11:27:03', value: 'Bob · Monitor · $399 · from clone → MemTable' },
+            { display: 'orders/id=101 [RECOVERING]', type: 'WRITE', hlc: '11:27:02', value: 'Alice · Laptop · $1,299 · from clone → MemTable' },
+            { display: 'orders/id=105 [DELTA ✓]', type: 'WRITE', hlc: '11:24:30', value: 'Eve · Headphones · $79 · in prod throughout · unaffected' }
+          ];
+          renderDocdbPanel();
+          addLog('INSERT id=101–104 → MemTable · HLC 11:27:xx stamped', 'lh');
+          await ctx.delay(1100);
+          // Phase 2: MemTable flushes to SST 000013
+          ctx.pitrViz({
+            snapshots: [{label:'Snap-1',time:'09:00',pct:15},{label:'Snap-2',time:'11:00',pct:60}],
+            walPct: 83, anomaly: { time:'11:23 DELETE', pct:70 },
+            deltaZone: { from:70, to:83 },
+            cursor: { time:'T_clone = 11:22:59', pct:69 },
+            phase: 'complete', retentionHours: 24, fullRecovery: true,
+            customPhaseLabels: { complete: '✓ MemTable flushed → SST 000013.sst · all 5 orders intact' }
+          });
+          S._docdb.memtable = [];
+          S._docdb.ssts = [
+            { name: 'SST (000013.sst) ← flushed from MemTable · newest HLC wins', entries: [
+              { display: 'orders/id=105 [DELTA ✓]', type: 'WRITE', hlc: '11:24:30', value: 'Eve · Headphones · $79 · flushed with batch · PITR loses this · Clone keeps ✓' },
+              { display: 'orders/id=104 [RESTORED]', type: 'WRITE', hlc: '11:27:05', value: 'Dan · Mouse · $39 · HLC 11:27 > tombstone 11:23 → live ✓' },
+              { display: 'orders/id=103 [RESTORED]', type: 'WRITE', hlc: '11:27:04', value: 'Carol · Keyboard · $89 · HLC 11:27 > tombstone 11:23 → live ✓' },
+              { display: 'orders/id=102 [RESTORED]', type: 'WRITE', hlc: '11:27:03', value: 'Bob · Monitor · $399 · HLC 11:27 > tombstone 11:23 → live ✓' },
+              { display: 'orders/id=101 [RESTORED]', type: 'WRITE', hlc: '11:27:02', value: 'Alice · Laptop · $1,299 · HLC 11:27 > tombstone 11:23 → live ✓' }
+            ]},
+            { name: 'SST (000012.sst) — tombstones shadowed by 000013.sst', entries: [
+              { display: 'orders/id=104 → shadowed', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=103 → shadowed', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=102 → shadowed', type: 'TOMBSTONE', hlc: '11:23:07', value: '' },
+              { display: 'orders/id=101 → shadowed', type: 'TOMBSTONE', hlc: '11:23:07', value: '' }
+            ]},
+            { name: 'SST (000011.sst)', entries: [
+              { display: 'orders/id=104', type: 'WRITE', hlc: '11:20:00', value: 'Dan · Mouse · $39' },
+              { display: 'orders/id=103', type: 'WRITE', hlc: '10:15:00', value: 'Carol · Keyboard · $89' },
+              { display: 'orders/id=102', type: 'WRITE', hlc: '10:05:00', value: 'Bob · Monitor · $399 (T2)' }
+            ]},
+            { name: 'SST (000010.sst)', entries: [
+              { display: 'orders/id=102', type: 'WRITE', hlc: '09:00:02', value: 'Bob · Monitor · $449 (T1)' },
+              { display: 'orders/id=101', type: 'WRITE', hlc: '09:00:01', value: 'Alice · Laptop · $1,299 (T1)' }
+            ]}
+          ];
+          S._docdb.snapshotSsts = [
+            { folder: '✓ Clone at T_clone = 11:22:59 — source of recovered rows', entries: [
+              { display: 'hardlink: 000010.sst + 000011.sst', type: 'WRITE', hlc: 'HLC ≤ 11:22:59', value: 'id=101–104 SELECTed from here · flushed to 000013.sst ✓' }
+            ]},
+            { folder: '✕ PITR delta loss window — Clone avoids this entirely', entries: [
+              { display: 'orders/id=105 Eve · Headphones · $79', type: 'WRITE', hlc: '11:24:30 · always in prod', value: 'PITR HLC filter would discard this · Clone never touches production SSTs ✓' }
+            ]}
+          ];
+          renderDocdbPanel();
+          addLog('MemTable flushed → SST (000013.sst) · HLC 11:27:xx > tombstone HLC 11:23:07', 'ls');
+          addLog('000012.sst tombstones still on disk · shadowed by 000013.sst · GC removes at compaction', 'lh');
+          addLog('✓ 5 orders in production · clone decommissioned · zero delta loss · zero downtime', 'ls');
+        }
+      }
+    ]
+  },
+
+  "dm-timetravel": {
+    group: "Data Management", icon: "⏮️", sortOrder: 5,
+    name: 'Time Travel Queries', title: 'Time Travel Queries',
+    subtitle: 'AS OF SYSTEM TIME — query any past snapshot',
+    desc: 'YugabyteDB supports AS OF SYSTEM TIME queries: read data exactly as it existed at any past HLC timestamp within the retention window. No restore needed — the historical view is served live from MVCC storage.',
+    snapshotVizPanel: true,
+    guidedTour: [
+      { text: "The <b>MVCC chain panel</b> shows multiple versions of the same key at different HLC timestamps. Older versions are never overwritten — new writes create new entries.", element: ".snap-viz-panel" },
+      { text: "The <b>DocDB panel</b> is an LSM+MVCC store. Each WRITE entry carries a key + HLC timestamp. An AS OF read simply ignores entries with HLC > query_time.", element: ".docdb-panel" },
+      { text: "Time travel is the lightest recovery tool: no restore, no restart — query the past, then <code>INSERT ... SELECT</code> back. RPO and RTO are both near-zero.", element: ".snap-viz-panel" }
+    ],
+    latencies: [
+      { lbl: 'Live Read', cls: 'll', max: 5 },
+      { lbl: 'AS OF Read', cls: 'll', max: 8 },
+      { lbl: 'MVCC GC Lag', cls: 'lm', max: 300 }
+    ],
+    init: (ctx) => {
+      showDocdbPanel(true);
+      S._docdb = { memtable: [], ssts: [], snapshotSsts: [] };
+      setDocdbOp('Tablet-1 · products shard · 0x0000–0xFFFF (leader on TServer-1)');
+      renderDocdbPanel();
+      ctx.ttViz({ versions: [], asCursor: 'current', phase: 'live' });
+    },
+    steps: [
+      {
+        label: '1. Initial Writes (T1 = 10:00)',
+        desc: 'Three products are inserted. Each write lands in the MemTable with an HLC timestamp. MVCC never overwrites existing data — new timestamps create new entries below older ones in the LSM tree.',
+        action: async (ctx) => {
+          S._docdb.memtable = [
+            { display: 'products/id=3', type: 'WRITE', hlc: '10:00:03', value: 'Widget C · Furniture · $199.99' },
+            { display: 'products/id=2', type: 'WRITE', hlc: '10:00:02', value: 'Widget B · Electronics · $49.99' },
+            { display: 'products/id=1', type: 'WRITE', hlc: '10:00:01', value: 'Widget A · Electronics · $29.99' }
+          ];
+          renderDocdbPanel();
+          ctx.ttViz({
+            versions: [
+              { hlc: '10:00:01', key: 'id=1', value: 'Widget A · $29.99', active: true },
+              { hlc: '10:00:02', key: 'id=2', value: 'Widget B · $49.99', active: true },
+              { hlc: '10:00:03', key: 'id=3', value: 'Widget C · $199.99', active: true }
+            ],
+            asCursor: 'current (T1)',
+            phase: 'live'
+          });
+          addLog('T1 = 10:00 · 3 rows inserted · HLC stamped per write', 'ls');
+        }
+      },
+      {
+        label: '2. Update + Delete at T2 (10:15)',
+        desc: 'Widget A is deleted and Widget B gets a price cut. DocDB adds new MVCC entries (higher HLC) — the T1 versions remain in the LSM tree until MVCC GC runs. Both timestamps co-exist in storage.',
+        action: async (ctx) => {
+          S._docdb.ssts = [
+            { layer: 0, entries: [
+              { display: 'products/id=3', type: 'WRITE', hlc: '10:00:03', value: 'Widget C · Furniture · $199.99' },
+              { display: 'products/id=2', type: 'WRITE', hlc: '10:00:02', value: 'Widget B · Electronics · $49.99 (T1)' },
+              { display: 'products/id=1', type: 'WRITE', hlc: '10:00:01', value: 'Widget A · Electronics · $29.99 (T1)' }
+            ]}
+          ];
+          S._docdb.memtable = [
+            { display: 'products/id=2', type: 'WRITE', hlc: '10:15:01', value: 'Widget B · Electronics · $39.99 (T2 update)' },
+            { display: 'products/id=1', type: 'WRITE', hlc: '10:15:00', value: 'DEL · Widget A discontinued (T2 delete)' }
+          ];
+          renderDocdbPanel();
+          ctx.ttViz({
+            versions: [
+              { hlc: '10:15:01', key: 'id=2', value: 'Widget B · $39.99', active: true },
+              { hlc: '10:15:00', key: 'id=1', value: 'Widget A', active: false, deleted: true },
+              { hlc: '10:00:03', key: 'id=3', value: 'Widget C · $199.99', active: true },
+              { hlc: '10:00:02', key: 'id=2', value: 'Widget B · $49.99 (T1)', active: false },
+              { hlc: '10:00:01', key: 'id=1', value: 'Widget A · $29.99 (T1)', active: false }
+            ],
+            asCursor: 'current (T2)',
+            phase: 'live'
+          });
+          addLog('T2 = 10:15 · Widget A deleted · Widget B: $49.99 → $39.99', 'ls');
+          addLog('MVCC: T1 versions still in SST — not yet GC\'d', 'ls');
+        }
+      },
+      {
+        label: '3. AS OF T1 — Recover Deleted Row',
+        desc: 'AS OF SYSTEM TIME \'10:00:03\' tells DocDB to read the version chain at HLC ≤ 10:00:03. Entries with higher HLC (T2 updates/deletes) are invisible. Widget A is alive again — no restore, no downtime.',
+        action: async (ctx) => {
+          ctx.ttViz({
+            versions: [
+              { hlc: '10:15:01', key: 'id=2', value: 'Widget B · $39.99', active: false },
+              { hlc: '10:15:00', key: 'id=1', value: 'Widget A DEL', active: false },
+              { hlc: '10:00:03', key: 'id=3', value: 'Widget C · $199.99', active: true },
+              { hlc: '10:00:02', key: 'id=2', value: 'Widget B · $49.99', active: true },
+              { hlc: '10:00:01', key: 'id=1', value: 'Widget A · $29.99', active: true }
+            ],
+            asCursor: "AS OF '10:00:03'",
+            phase: 'asof'
+          });
+          addLog("AS OF SYSTEM TIME '10:00:03' → reads T1 snapshot", 'lh');
+          addLog('3 rows returned · Widget A visible · T2 entries invisible to this query', 'ls');
+          addLog('No restore · no downtime · live queries run in parallel', 'ls');
+        }
+      },
+      {
+        label: '4. Point Recovery — INSERT … SELECT',
+        desc: 'Widget A is re-inserted into the live table using INSERT ... SELECT AS OF. This creates a new MVCC entry at the current HLC. DocDB now has Widget A at T1 (historical), deleted at T2, and re-inserted at T3.',
+        action: async (ctx) => {
+          S._docdb.memtable.unshift(
+            { display: 'products/id=1', type: 'WRITE', hlc: '10:20:05', value: 'Widget A · Electronics · $29.99 (T3 re-insert)' }
+          );
+          renderDocdbPanel();
+          ctx.ttViz({
+            versions: [
+              { hlc: '10:20:05', key: 'id=1', value: 'Widget A · $29.99 (re-inserted)', active: true },
+              { hlc: '10:15:01', key: 'id=2', value: 'Widget B · $39.99', active: true },
+              { hlc: '10:15:00', key: 'id=1', value: 'Widget A DEL (T2)', active: false, deleted: true },
+              { hlc: '10:00:02', key: 'id=2', value: 'Widget B · $49.99 (T1)', active: false },
+              { hlc: '10:00:01', key: 'id=1', value: 'Widget A · $29.99 (T1)', active: false }
+            ],
+            asCursor: 'current (T3)',
+            phase: 'live'
+          });
+          addLog('INSERT INTO products SELECT * FROM products AS OF …', 'lh');
+          addLog('Widget A re-inserted at T3=10:20:05 · 3 rows live · MVCC chain intact', 'ls');
+        }
+      },
+      {
+        label: '5. Concurrent Live + AS OF Reads',
+        desc: 'A live read and an AS OF read run simultaneously — no locking, no blocking. MVCC isolation means each query sees exactly the right snapshot. The MVCC chain in DocDB serves both from the same physical storage.',
+        action: async (ctx) => {
+          ctx.ttViz({
+            versions: [
+              { hlc: '10:20:05', key: 'id=1', value: 'Widget A · $29.99', active: true },
+              { hlc: '10:15:01', key: 'id=2', value: 'Widget B · $39.99', active: true },
+              { hlc: '10:00:03', key: 'id=3', value: 'Widget C · $199.99', active: true },
+              { hlc: '10:00:02', key: 'id=2', value: 'Widget B · $49.99 (T1, AS OF)', active: false },
+              { hlc: '10:00:01', key: 'id=1', value: 'Widget A · $29.99 (T1, AS OF)', active: false }
+            ],
+            asCursor: "'10:00:03' (T1) — concurrent with live",
+            phase: 'concurrent'
+          });
+          addLog('Live read (T3) + AS OF -5m read · concurrent · no locks', 'ls');
+          addLog('MVCC GC controlled by --timestamp_history_retention_interval_sec', 'ls');
+        }
+      }
+    ]
   }
 };
