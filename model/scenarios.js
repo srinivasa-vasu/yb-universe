@@ -2060,19 +2060,19 @@ Object.assign(SCENARIOS, {
 
   "qe-range-point": {
     group: "Query Execution", icon: "📍", title: "Range Point Lookup", subtitle: "Seek on sorted data",
-    description: "On a range-sharded table, the sort order lets DocDB binary-search to the correct tablet and Seek directly to the matching row. No hash function needed.",
+    description: "On a range-sharded table, the sort order lets DocDB binary-search to the correct tablet and Seek to the first matching row. Because the PK is <b>(price ASC, listing_id)</b>, querying on <code>price</code> alone is a <b>prefix seek</b> — it may return multiple rows sharing that price value. No hash function needed.",
     legend: [
       { type: "clustering", label: "price ASC", explain: "Range-sharded key — globally sorted across tablets" }
     ],
     visual: {
       type: "query-exec",
       columns: [
-        { label: "price", role: "cl", dir: "ASC" }, { label: "product_id", role: "" },
+        { label: "price", role: "cl", dir: "ASC" }, { label: "listing_id", role: "" },
         { label: "name", role: "" }, { label: "status", role: "" }
       ]
     },
     queryConfig: {
-      sql: "SELECT * FROM products WHERE price = 89.99",
+      sql: "SELECT * FROM listings WHERE price = 89.99",
       targetKey: "89.99",
       steps: [
         { op: "route", detail: "price=89.99 falls in Tablet 2 [50, 150)", tablets: [{ id: 1, state: "active" }], dimOthers: true, rows: [] },
@@ -2085,125 +2085,127 @@ Object.assign(SCENARIOS, {
     initialState: {
       tablets: [
         { id: "Tablet 1", range: "(-∞, 50)", rows: [
-          { fields: ["9.99", "prod-501", "Budget Widget", "In Stock"] },
-          { fields: ["19.99", "prod-220", "Basic Kit", "In Stock"] },
-          { fields: ["29.99", "prod-102", "Standard Kit", "In Stock"] }
+          { fields: ["9.99", "list-501", "Budget Widget", "In Stock"] },
+          { fields: ["19.99", "list-220", "Basic Kit", "In Stock"] },
+          { fields: ["29.99", "list-102", "Standard Kit", "In Stock"] }
         ]},
         { id: "Tablet 2", range: "[50, 150)", rows: [
-          { fields: ["59.99", "prod-441", "Pro Mouse", "In Stock"] },
-          { fields: ["89.99", "prod-330", "Pro Suite", "Low"] },
-          { fields: ["129.00", "prod-615", "Ultra Pack", "In Stock"] }
+          { fields: ["59.99", "list-441", "Pro Mouse", "In Stock"] },
+          { fields: ["89.99", "list-330", "Pro Suite", "Low"] },
+          { fields: ["129.00", "list-615", "Ultra Pack", "In Stock"] }
         ]},
         { id: "Tablet 3", range: "[150, ∞)", rows: [
-          { fields: ["149.99", "prod-210", "Premium Pack", "In Stock"] },
-          { fields: ["299.00", "prod-801", "Enterprise", "Pre-order"] }
+          { fields: ["149.99", "list-210", "Premium Pack", "In Stock"] },
+          { fields: ["299.00", "list-801", "Enterprise", "Pre-order"] }
         ]}
       ]
     },
     callout: { type: "info", icon: "📍", text: "<b>Range Seek + Packed Rows:</b> Because data is globally sorted by price, DocDB knows exactly which tablet contains 89.99. It Seeks directly. Thanks to the <b>Packed Row</b> format, this single Seek retrieves all columns at once without needing additional Next calls for each column." },
     guide: {
-      richSql: `<span class="sql-kw">CREATE TABLE</span> products (
+      richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
   price      <span class="sql-type">DECIMAL</span>,
-  product_id <span class="sql-type">TEXT</span>,
+  listing_id <span class="sql-type">TEXT</span>,
   name       <span class="sql-type">TEXT</span>,
   status     <span class="sql-type">TEXT</span>,
-  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, product_id)
+  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, listing_id)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
-<span class="sql-kw">INSERT INTO</span> products (price, product_id, name, status)
+<span class="sql-kw">INSERT INTO</span> listings (price, listing_id, name, status)
 <span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
-       <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'list-'</span> || i,
        <span class="sql-str">'Product '</span> || i,
        (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+<span class="sql-comment">-- The animation uses hand-crafted prices for clear tablet boundary illustration;</span>
+<span class="sql-comment">-- this INSERT produces different values (19.99, 29.98, 39.97 …).</span>
 
-<span class="sql-comment">-- Range point lookup:</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-comment">-- Prefix seek on first PK column (price ASC):</span>
+<span class="sql-comment">-- Returns all rows at this price (PK is price ASC, listing_id)</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> listings
 <span class="sql-kw">WHERE</span> price = <span class="sql-str">89.99</span>;` },
     guidedTour: [
       { text: "In range-sharded tables, data is globally sorted.", element: ".query-exec-container" },
       { text: "Click <b>Next Step</b> to see how DocDB routes directly to the correct tablet without hashing.", element: "#qe-next-btn" },
       { text: "Or click <b>Play All</b> to automate the Seek and scan check.", element: "#qe-play-btn" },
-      { text: "One Seek jumps to the matching price, and the next row is checked to confirm no more matches exist.", element: ".tablet-card" }
+      { text: "One Seek jumps to the first row at this price; Next continues until the price changes — a prefix seek on the composite PK (price ASC, listing_id).", element: ".tablet-card" }
     ]
   },
 
-  "qe-full-scan": {
-    group: "Query Execution", icon: "🔍", title: "Full Table Scan", subtitle: "Sequential scan — all tablets",
-    description: "When no index can satisfy the query, DocDB must scan every row in every tablet. All tablets are accessed in parallel, but every row is evaluated — the most expensive operation.",
+  "qe-in-list": {
+    group: "Query Execution", icon: "📋", title: "IN-List Lookup", subtitle: "Batch point lookups — parallel Seeks",
+    description: "WHERE pk IN (...) is not a scan — it is a batch of point lookups. DocDB hashes each value in the IN list, groups them by target tablet, and issues parallel RPCs. Each tablet performs one Seek per key assigned to it. For small lists this is highly efficient; for very large lists consider a JOIN to a temporary table.",
     legend: [
-      { type: "sharding", label: "user_id", explain: "Hash-sharded PK — no ordering, must check all tablets" }
+      { type: "sharding", label: "user_id (Hash)", explain: "Each IN value is hashed independently to determine its tablet" }
     ],
     visual: {
       type: "query-exec",
       columns: [
         { label: "[hash]", role: "sys" }, { label: "user_id", role: "sh" },
-        { label: "name", role: "" }, { label: "region", role: "" }, { label: "status", role: "" }
+        { label: "name", role: "" }, { label: "region", role: "" }
       ]
     },
     queryConfig: {
-      sql: "SELECT * FROM users WHERE name LIKE '%Park%'",
-      targetKey: "%Park%",
+      sql: "SELECT * FROM users WHERE user_id IN ('user-241', 'user-507', 'user-892')",
+      targetKey: "IN-list",
       steps: [
-        { op: "fanout", detail: "No index on 'name' — fan out to ALL tablets", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [] },
-        { op: "seek", detail: "Seek(MIN) → cursor at start of each tablet", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "cursor" }, { tablet: 1, row: 0, state: "cursor" }, { tablet: 2, row: 0, state: "cursor" }] },
-        { op: "next", detail: "Scan T1: 'Alice Chen' — no match", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }] },
-        { op: "next", detail: "Scan T1: 'Dan Park' — MATCH! Also scanning T2, T3...", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }, { tablet: 2, row: 1, state: "scanned" }] },
-        { op: "next", detail: "Continue scanning all remaining rows...", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }, { tablet: 2, row: 1, state: "scanned" }, { tablet: 2, row: 2, state: "scanned" }] },
-        { op: "done", detail: "Complete: 3 tablets, 3 Seeks, 8 Next, 1 match — O(N) 💀", tablets: [], rows: [], summary: { tablets: 3, seeks: 3, nexts: 8, rows: 1 } }
+        { op: "hash", detail: "Hash all 3 IN values: HASH('user-241')→0x21F3 (T1) · HASH('user-507')→0x4B12 (T1) · HASH('user-892')→0x7D3A (T2)", tablets: [], rows: [] },
+        { op: "route", detail: "Batch by tablet: T1←['user-241','user-507'] · T2←['user-892'] · T3: not targeted — 2 RPCs cover 3 keys", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }], dimOthers: true, rows: [] },
+        { op: "seek", detail: "Parallel RPCs — T1: Seek(0x21F3)→user-241, Seek(0x4B12)→user-507 | T2: Seek(0x7D3A)→user-892", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 0, state: "cursor" }, { tablet: 0, row: 1, state: "cursor" }, { tablet: 1, row: 0, state: "cursor" }] },
+        { op: "return", detail: "All 3 rows matched and returned in parallel — 0 Next calls (point lookup, not a range scan)", tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }], rows: [{ tablet: 0, row: 0, state: "returned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 1, row: 0, state: "returned" }] },
+        { op: "done", detail: "Complete: 2 RPCs, 3 Seeks, 0 Next — O(K) where K = list size. Tablet 3 never contacted.", tablets: [], rows: [], summary: { tablets: 2, seeks: 3, nexts: 0, rows: 3 } }
       ]
     },
     initialState: {
       tablets: [
         { id: "Tablet 1", range: "0x0000–0x5555", rows: [
-          { fields: ["0x21F3", "user-241", "Alice Chen", "US", "Active"] },
-          { fields: ["0x4B12", "user-507", "Dan Park", "EU", "Active"] },
-          { fields: ["0x5501", "user-610", "Fay Lee", "APAC", "Pending"] }
+          { fields: ["0x21F3", "user-241", "Alice Chen", "US"] },
+          { fields: ["0x4B12", "user-507", "Dan Park", "EU"] }
         ]},
         { id: "Tablet 2", range: "0x5556–0xAAAA", rows: [
-          { fields: ["0x7D3A", "user-892", "Bob Martinez", "EU", "Pending"] },
-          { fields: ["0x8F11", "user-333", "Grace Kim", "US", "Active"] }
+          { fields: ["0x7D3A", "user-892", "Bob Martinez", "EU"] },
+          { fields: ["0x8F11", "user-333", "Grace Kim", "US"] }
         ]},
         { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [
-          { fields: ["0xB321", "user-105", "Carol Singh", "APAC", "Active"] },
-          { fields: ["0xD4E5", "user-750", "Hank Zhou", "EU", "Active"] },
-          { fields: ["0xF245", "user-999", "Eve Adams", "US", "Active"] }
+          { fields: ["0xB321", "user-105", "Carol Singh", "APAC"] },
+          { fields: ["0xF245", "user-999", "Eve Adams", "US"] }
         ]}
       ]
     },
-    callout: { type: "info", icon: "🔍", text: "<b>Full Scan = O(N):</b> Without an index on <code>name</code>, every tablet must be scanned in parallel. Every single row is evaluated. This is the most expensive pattern — consider adding a GIN or expression index on the column." },
+    callout: { type: "info", icon: "📋", text: "<b>IN-List = Batch Point Lookups:</b> YugabyteDB hashes each value and batches keys by tablet, issuing one parallel RPC per involved tablet. For 100 keys spread across 3 tablets, that is still just 3 RPCs — not 100. Each RPC performs multiple Seeks internally. For IN lists larger than ~1000 values, a <code>JOIN</code> against a temporary/values table is more efficient and avoids query plan bloat." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  user_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+  user_id <span class="sql-type">TEXT PRIMARY KEY</span>,
   name    <span class="sql-type">TEXT</span>,
-  region  <span class="sql-type">TEXT</span>,
-  status  <span class="sql-type">TEXT</span>
+  region  <span class="sql-type">TEXT</span>
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
-<span class="sql-kw">INSERT INTO</span> users (user_id, name, region, status)
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, region)
 <span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
        <span class="sql-str">'User '</span> || i,
-       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
-       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
-<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 20) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- Full table scan: no index on 'name' column</span>
+<span class="sql-comment">-- IN-list: batch of point lookups, not a sequential scan</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
-<span class="sql-kw">WHERE</span> name <span class="sql-kw">LIKE</span> <span class="sql-str">'%Park%'</span>;
+<span class="sql-kw">WHERE</span> user_id <span class="sql-kw">IN</span> (<span class="sql-str">'user-3'</span>, <span class="sql-str">'user-7'</span>, <span class="sql-str">'user-15'</span>);
 
-<span class="sql-comment">-- DocDB must:</span>
-<span class="sql-comment">-- 1. Fan out to ALL tablets (parallel)</span>
-<span class="sql-comment">-- 2. Seek(MIN) → start of each tablet</span>
-<span class="sql-comment">-- 3. Next through EVERY row</span>
-<span class="sql-comment">-- 4. Evaluate LIKE predicate on each</span>
+<span class="sql-comment">-- DocDB execution:</span>
+<span class="sql-comment">-- 1. Hash each key → assign to tablet</span>
+<span class="sql-comment">-- 2. Batch keys by tablet (K keys → ≤ T RPCs)</span>
+<span class="sql-comment">-- 3. Each tablet: one Seek per assigned key</span>
+<span class="sql-comment">-- Result: O(K) seeks, ≤ T RPCs  (K = list size, T = tablets)</span>
 
-<span class="sql-comment">-- 💡 Fix: CREATE INDEX idx_name ON users (name);</span>` },
+<span class="sql-comment">-- For very large IN lists (>1000), prefer a VALUES join:</span>
+<span class="sql-kw">SELECT</span> u.* <span class="sql-kw">FROM</span> users u
+<span class="sql-kw">JOIN</span> (<span class="sql-kw">VALUES</span> (<span class="sql-str">'user-3'</span>), (<span class="sql-str">'user-7'</span>), (<span class="sql-str">'user-15'</span>)) <span class="sql-kw">AS</span> ids(id)
+  <span class="sql-kw">ON</span> u.user_id = ids.id;` },
     guidedTour: [
-      { text: "Click <b>Next Step</b> to manually witness the most expensive execution pattern.", element: "#qe-next-btn" },
-      { text: "Click <b>Play All</b> to see the full fan-out scan automatically.", element: "#qe-play-btn" },
-      { text: "Observe how DocDB is forced to scan <b>every tablet</b> and <b>every row</b> sequentially because there is no index.", element: ".query-exec-container" }
+      { text: "Use <b>Next Step</b> to trace the hash-and-batch routing for all 3 IN values.", element: "#qe-next-btn" },
+      { text: "Or click <b>Play All</b> to see the parallel lookup in one go.", element: "#qe-play-btn" },
+      { text: "Only Tablets 1 and 2 receive RPCs — Tablet 3 is completely skipped.", element: ".query-exec-container" },
+      { text: "Zero Next calls: each IN value is a point lookup (Seek only), never a range scan.", element: ".exec-log" }
     ]
   },
 
@@ -2216,12 +2218,12 @@ Object.assign(SCENARIOS, {
     visual: {
       type: "query-exec",
       columns: [
-        { label: "price", role: "cl", dir: "ASC" }, { label: "product_id", role: "" },
+        { label: "price", role: "cl", dir: "ASC" }, { label: "listing_id", role: "" },
         { label: "name", role: "" }, { label: "status", role: "" }
       ]
     },
     queryConfig: {
-      sql: "SELECT * FROM products WHERE price BETWEEN 25 AND 100",
+      sql: "SELECT * FROM listings WHERE price BETWEEN 25 AND 100",
       targetKey: "25–100",
       steps: [
         { op: "route", detail: "Start key 25 falls in Tablet 1 (-∞, 50)", tablets: [{ id: 0, state: "active" }], dimOthers: true, rows: [] },
@@ -2238,42 +2240,44 @@ Object.assign(SCENARIOS, {
     initialState: {
       tablets: [
         { id: "Tablet 1", range: "(-∞, 50)", rows: [
-          { fields: ["9.99", "prod-501", "Budget Widget", "In Stock"] },
-          { fields: ["19.99", "prod-220", "Basic Kit", "In Stock"] },
-          { fields: ["29.99", "prod-102", "Standard Kit", "In Stock"] },
-          { fields: ["45.00", "prod-315", "Mid-Range", "In Stock"] }
+          { fields: ["9.99", "list-501", "Budget Widget", "In Stock"] },
+          { fields: ["19.99", "list-220", "Basic Kit", "In Stock"] },
+          { fields: ["29.99", "list-102", "Standard Kit", "In Stock"] },
+          { fields: ["45.00", "list-315", "Mid-Range", "In Stock"] }
         ]},
         { id: "Tablet 2", range: "[50, 150)", rows: [
-          { fields: ["59.99", "prod-441", "Pro Mouse", "In Stock"] },
-          { fields: ["89.99", "prod-330", "Pro Suite", "Low"] },
-          { fields: ["129.00", "prod-615", "Ultra Pack", "In Stock"] }
+          { fields: ["59.99", "list-441", "Pro Mouse", "In Stock"] },
+          { fields: ["89.99", "list-330", "Pro Suite", "Low"] },
+          { fields: ["129.00", "list-615", "Ultra Pack", "In Stock"] }
         ]},
         { id: "Tablet 3", range: "[150, ∞)", rows: [
-          { fields: ["149.99", "prod-210", "Premium Pack", "In Stock"] },
-          { fields: ["299.00", "prod-801", "Enterprise", "Pre-order"] }
+          { fields: ["149.99", "list-210", "Premium Pack", "In Stock"] },
+          { fields: ["299.00", "list-801", "Enterprise", "Pre-order"] }
         ]}
       ]
     },
     callout: { type: "info", icon: "📊", text: "<b>Sequential Scan:</b> Range-sorted data means the scan is contiguous. Seek jumps to the start, then Next walks forward. When a value exceeds the upper bound, the scan stops immediately — no wasted I/O." },
     guide: {
-      richSql: `<span class="sql-kw">CREATE TABLE</span> products (
+      richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
   price      <span class="sql-type">DECIMAL</span>,
-  product_id <span class="sql-type">TEXT</span>,
+  listing_id <span class="sql-type">TEXT</span>,
   name       <span class="sql-type">TEXT</span>,
   status     <span class="sql-type">TEXT</span>,
-  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, product_id)
+  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, listing_id)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
-<span class="sql-kw">INSERT INTO</span> products (price, product_id, name, status)
+<span class="sql-kw">INSERT INTO</span> listings (price, listing_id, name, status)
 <span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
-       <span class="sql-str">'prod-'</span> || i,
+       <span class="sql-str">'list-'</span> || i,
        <span class="sql-str">'Product '</span> || i,
        (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+<span class="sql-comment">-- The animation uses hand-crafted prices for clear tablet boundary illustration;</span>
+<span class="sql-comment">-- this INSERT produces different values (19.99, 29.98, 39.97 …).</span>
 
 <span class="sql-comment">-- Range scan: contiguous walk across tablets</span>
-<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> products
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> listings
 <span class="sql-kw">WHERE</span> price <span class="sql-kw">BETWEEN</span> <span class="sql-str">25</span> <span class="sql-kw">AND</span> <span class="sql-str">100</span>;
 
 <span class="sql-comment">-- DocDB execution:</span>
@@ -2361,6 +2365,88 @@ Object.assign(SCENARIOS, {
     ]
   },
 
+  "qe-full-scan": {
+    group: "Query Execution", icon: "🔍", title: "Full Table Scan", subtitle: "Sequential scan — all tablets",
+    description: "When no index can satisfy the query, DocDB must scan every row in every tablet. All tablets are accessed in parallel, but every row is evaluated — the most expensive operation.",
+    legend: [
+      { type: "sharding", label: "user_id", explain: "Hash-sharded PK — no ordering, must check all tablets" }
+    ],
+    visual: {
+      type: "query-exec",
+      columns: [
+        { label: "[hash]", role: "sys" }, { label: "user_id", role: "sh" },
+        { label: "name", role: "" }, { label: "region", role: "" }, { label: "status", role: "" }
+      ]
+    },
+    queryConfig: {
+      sql: "SELECT * FROM users WHERE name LIKE '%Park%'",
+      targetKey: "%Park%",
+      steps: [
+        { op: "fanout", detail: "No index on 'name' — fan out to ALL tablets", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [] },
+        { op: "seek", detail: "Seek(MIN) → cursor at start of each tablet", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "cursor" }, { tablet: 1, row: 0, state: "cursor" }, { tablet: 2, row: 0, state: "cursor" }] },
+        { op: "next", detail: "Scan T1: 'Alice Chen' — no match", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }] },
+        { op: "next", detail: "Scan T1: 'Dan Park' — MATCH! Also scanning T2, T3...", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }, { tablet: 2, row: 1, state: "scanned" }] },
+        { op: "next", detail: "Continue scanning all remaining rows...", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }, { tablet: 2, row: 1, state: "scanned" }, { tablet: 2, row: 2, state: "scanned" }] },
+        { op: "done", detail: "Complete: 3 tablets, 3 Seeks, 8 Next, 1 match — O(N) 💀", tablets: [], rows: [], summary: { tablets: 3, seeks: 3, nexts: 8, rows: 1 } }
+      ]
+    },
+    initialState: {
+      tablets: [
+        { id: "Tablet 1", range: "0x0000–0x5555", rows: [
+          { fields: ["0x21F3", "user-241", "Alice Chen", "US", "Active"] },
+          { fields: ["0x4B12", "user-507", "Dan Park", "EU", "Active"] },
+          { fields: ["0x5501", "user-610", "Fay Lee", "APAC", "Pending"] }
+        ]},
+        { id: "Tablet 2", range: "0x5556–0xAAAA", rows: [
+          { fields: ["0x7D3A", "user-892", "Bob Martinez", "EU", "Pending"] },
+          { fields: ["0x8F11", "user-333", "Grace Kim", "US", "Active"] }
+        ]},
+        { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [
+          { fields: ["0xB321", "user-105", "Carol Singh", "APAC", "Active"] },
+          { fields: ["0xD4E5", "user-750", "Hank Zhou", "EU", "Active"] },
+          { fields: ["0xF245", "user-999", "Eve Adams", "US", "Active"] }
+        ]}
+      ]
+    },
+    callout: { type: "info", icon: "🔍", text: "<b>Full Scan = O(N):</b> Without an index on <code>name</code>, every tablet must be scanned in parallel. Every single row is evaluated. This is the most expensive pattern — consider adding a GIN or expression index on the column." },
+    guide: {
+      richSql: `<span class="sql-kw">CREATE TABLE</span> users (
+  user_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+  name    <span class="sql-type">TEXT</span>,
+  region  <span class="sql-type">TEXT</span>,
+  status  <span class="sql-type">TEXT</span>
+);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> users (user_id, name, region, status)
+<span class="sql-kw">SELECT</span> <span class="sql-str">'user-'</span> || i,
+       <span class="sql-str">'User '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Active'</span>,<span class="sql-str">'Pending'</span>])[1 + mod(i,2)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
+
+<span class="sql-comment">-- Full table scan: no index on 'name' column</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
+<span class="sql-kw">WHERE</span> name <span class="sql-kw">LIKE</span> <span class="sql-str">'%Park%'</span>;
+
+<span class="sql-comment">-- DocDB must:</span>
+<span class="sql-comment">-- 1. Fan out to ALL tablets (parallel)</span>
+<span class="sql-comment">-- 2. Seek(MIN) → start of each tablet</span>
+<span class="sql-comment">-- 3. Next through EVERY row</span>
+<span class="sql-comment">-- 4. Evaluate LIKE predicate on each</span>
+
+<span class="sql-comment">-- ⚠️  Leading-wildcard LIKE cannot use a B-tree index.</span>
+<span class="sql-comment">-- 💡 Fix: use a trigram index for substring search:</span>
+<span class="sql-kw">CREATE EXTENSION IF NOT EXISTS</span> pg_trgm;
+<span class="sql-kw">CREATE INDEX</span> idx_name_trgm <span class="sql-kw">ON</span> users <span class="sql-kw">USING</span> <span class="sql-fn">GIN</span> (name gin_trgm_ops);
+<span class="sql-comment">-- Now LIKE '%Park%' uses the GIN index — no full scan</span>` },
+    guidedTour: [
+      { text: "Click <b>Next Step</b> to manually witness the most expensive execution pattern.", element: "#qe-next-btn" },
+      { text: "Click <b>Play All</b> to see the full fan-out scan automatically.", element: "#qe-play-btn" },
+      { text: "Observe how DocDB is forced to scan <b>every tablet</b> and <b>every row</b> sequentially because there is no index.", element: ".query-exec-container" }
+    ]
+  },
+
   "qe-index-lookup": {
     group: "Query Execution", icon: "🔗", title: "Index Scan", subtitle: "Index Scan + Table Fetch",
     description: "A query that uses a secondary index but needs columns not present in the index. DocDB must first query the index tablet to find the primary key, then perform a second RPC to fetch the full row from the main table.",
@@ -2405,7 +2491,7 @@ Object.assign(SCENARIOS, {
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_users_email
-  <span class="sql-kw">ON</span> users (email);
+  <span class="sql-kw">ON</span> users (email <span class="sh-key">HASH</span>);
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
 <span class="sql-kw">INSERT INTO</span> users (user_id, email, name, region, status)
@@ -2830,6 +2916,169 @@ Object.assign(SCENARIOS, {
     ]
   },
 
+  "qe-limit-pushdown": {
+    group: "Query Execution", icon: "⏹", title: "LIMIT Pushdown", subtitle: "Range sharding — stop early",
+    description: "When a table is range-sharded and the ORDER BY matches the primary key sort order, YugabyteDB embeds the LIMIT directly in the storage RPC. DocDB stops the moment N rows are read — often satisfied entirely within the first tablet, leaving the rest of the cluster untouched.",
+    legend: [
+      { type: "clustering", label: "price ASC", explain: "Range-sharded PK — globally sorted, LIMIT stops the scan as soon as N rows are found" }
+    ],
+    visual: {
+      type: "query-exec",
+      columns: [
+        { label: "price", role: "cl", dir: "ASC" }, { label: "listing_id", role: "" },
+        { label: "name", role: "" }, { label: "status", role: "" }
+      ]
+    },
+    queryConfig: {
+      sql: "SELECT * FROM listings ORDER BY price ASC LIMIT 3",
+      steps: [
+        { op: "route", detail: "ORDER BY price ASC matches range PK — no sort node needed. LIMIT 3 embedded in the storage RPC payload.", tablets: [{ id: 0, state: "active" }], dimOthers: true, rows: [] },
+        { op: "seek", detail: "Seek(MIN) → cursor at the very first row of Tablet 1 (lowest price in cluster)", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "cursor" }] },
+        { op: "next", detail: "Row 1 → 9.99 ✓ | Row 2 → 19.99 ✓ | Row 3 → 29.99 ✓ — LIMIT reached, scan stops immediately", tablets: [{ id: 0, state: "done" }], rows: [{ tablet: 0, row: 0, state: "returned" }, { tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "returned" }] },
+        { op: "done", detail: "Complete: 1 tablet, 1 Seek, 3 Next. Tablets 2 and 3 never contacted — O(LIMIT)", tablets: [], rows: [], summary: { tablets: 1, seeks: 1, nexts: 3, rows: 3 } }
+      ]
+    },
+    initialState: {
+      tablets: [
+        { id: "Tablet 1", range: "(-∞, 50)", rows: [
+          { fields: ["9.99", "list-101", "Budget Widget", "In Stock"] },
+          { fields: ["19.99", "list-220", "Basic Kit", "In Stock"] },
+          { fields: ["29.99", "list-315", "Standard Kit", "Low"] },
+          { fields: ["45.00", "list-410", "Mid-Range", "In Stock"] }
+        ]},
+        { id: "Tablet 2", range: "[50, 150)", rows: [
+          { fields: ["59.99", "list-501", "Pro Mouse", "In Stock"] },
+          { fields: ["89.99", "list-615", "Pro Suite", "Low"] },
+          { fields: ["129.00", "list-720", "Ultra Pack", "In Stock"] }
+        ]},
+        { id: "Tablet 3", range: "[150, ∞)", rows: [
+          { fields: ["199.99", "list-801", "Premium Pack", "In Stock"] },
+          { fields: ["299.00", "list-910", "Enterprise", "Pre-order"] }
+        ]}
+      ]
+    },
+    callout: { type: "info", icon: "⏹", text: "<b>LIMIT Pushdown:</b> The LIMIT value travels inside the DocDB RPC — each tablet server stops scanning as soon as it has enough rows. With a matching range ORDER BY, the first tablet delivers all N rows immediately. Tablets 2 and 3 receive zero RPCs. Compare to a hash-sharded table: <code>ORDER BY LIMIT</code> there forces a full scatter-gather-sort regardless of LIMIT size." },
+    guide: {
+      richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
+  price      <span class="sql-type">DECIMAL</span>,
+  listing_id <span class="sql-type">TEXT</span>,
+  name       <span class="sql-type">TEXT</span>,
+  status     <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, listing_id)
+);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> listings (price, listing_id, name, status)
+<span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       <span class="sql-str">'list-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 20) <span class="sql-kw">AS</span> i;
+<span class="sql-comment">-- The animation uses hand-crafted prices for clear tablet boundary illustration;</span>
+<span class="sql-comment">-- this INSERT produces different values (19.99, 29.98, 39.97 …).</span>
+
+<span class="sql-comment">-- LIMIT pushed into the RPC — scan stops after 3 rows</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> listings
+<span class="sql-kw">ORDER BY</span> price <span class="sql-kw">ASC</span>
+<span class="sql-kw">LIMIT</span> <span class="sql-str">3</span>;
+
+<span class="sql-comment">-- Hash-sharded contrast: LIMIT cannot stop early — full scan needed</span>
+<span class="sql-comment">-- CREATE TABLE listings_h (listing_id TEXT PRIMARY KEY, price DECIMAL, ...);</span>
+<span class="sql-comment">-- SELECT ... ORDER BY listing_id LIMIT 3;  → Scatter-Gather → Sort → Limit</span>
+<span class="sql-comment">-- ^ must read ALL rows from ALL tablets before returning first 3</span>` },
+    guidedTour: [
+      { text: "ORDER BY price ASC matches the range PK — YSQL emits no Sort node at all.", element: ".query-exec-container" },
+      { text: "Click <b>Play All</b> to see the scan stop immediately after 3 rows.", element: "#qe-play-btn" },
+      { text: "Notice Tablets 2 and 3 are completely dark — they received no RPC.", element: ".tablet-card" },
+      { text: "Compare to 'Hash Global Sort': same LIMIT, dramatically more work.", element: ".exec-log" }
+    ]
+  },
+
+  "qe-offset-pagination": {
+    group: "Query Execution", icon: "📄", title: "Offset vs Keyset Pagination", subtitle: "OFFSET cost — O(OFFSET)",
+    description: "OFFSET-based pagination scans and discards all rows before the target position on every page request. Page 100 at LIMIT 10 discards 990 rows every time. Keyset pagination eliminates this by Seeking directly to the last seen value — constant cost regardless of page depth.",
+    legend: [
+      { type: "clustering", label: "price ASC", explain: "Range-sorted PK — keyset uses Seek to jump directly to any page position in O(log N)" }
+    ],
+    visual: {
+      type: "query-exec",
+      columns: [
+        { label: "price", role: "cl", dir: "ASC" }, { label: "listing_id", role: "" },
+        { label: "name", role: "" }, { label: "status", role: "" }
+      ]
+    },
+    queryConfig: {
+      sql: "SELECT * FROM listings ORDER BY price ASC LIMIT 2 OFFSET 3",
+      steps: [
+        { op: "seek", detail: "OFFSET scan: Seek(MIN) → cursor at row 1. Must read and discard 3 rows before returning any.", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "cursor" }] },
+        { op: "next", detail: "price=9.99 — read and discarded (offset discard 1/3)", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }] },
+        { op: "next", detail: "price=19.99 — read and discarded (offset discard 2/3)", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "scanned" }] },
+        { op: "next", detail: "price=29.99 — read and discarded (offset discard 3/3) — offset consumed", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "scanned" }, { tablet: 0, row: 2, state: "scanned" }] },
+        { op: "return", detail: "price=45.00 → return (1/2) · price=59.99 → return (2/2) — LIMIT satisfied", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "scanned" }, { tablet: 0, row: 2, state: "scanned" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 1, row: 0, state: "returned" }] },
+        { op: "done", detail: "OFFSET=3 discarded 3 rows to return 2. At OFFSET=1000: 1000 wasted row reads per request — O(OFFSET) ⚠️", tablets: [], rows: [], summary: { tablets: 2, seeks: 1, nexts: 5, rows: 2 } }
+      ]
+    },
+    initialState: {
+      tablets: [
+        { id: "Tablet 1", range: "(-∞, 50)", rows: [
+          { fields: ["9.99", "list-101", "Budget Widget", "In Stock"] },
+          { fields: ["19.99", "list-220", "Basic Kit", "In Stock"] },
+          { fields: ["29.99", "list-315", "Standard Kit", "Low"] },
+          { fields: ["45.00", "list-410", "Mid-Range", "In Stock"] }
+        ]},
+        { id: "Tablet 2", range: "[50, 150)", rows: [
+          { fields: ["59.99", "list-501", "Pro Mouse", "In Stock"] },
+          { fields: ["89.99", "list-615", "Pro Suite", "Low"] },
+          { fields: ["129.00", "list-720", "Ultra Pack", "In Stock"] }
+        ]},
+        { id: "Tablet 3", range: "[150, ∞)", rows: [
+          { fields: ["199.99", "list-801", "Premium Pack", "In Stock"] },
+          { fields: ["299.00", "list-910", "Enterprise", "Pre-order"] }
+        ]}
+      ]
+    },
+    callout: { type: "warn", icon: "⚠️", text: "<b>OFFSET is O(OFFSET):</b> Every page request re-reads and discards all rows up to the offset — cost grows linearly. Strikethrough rows above were read from disk but never returned. Use <b>keyset pagination</b> instead: store the last seen <code>price</code> and issue <code>WHERE price &gt; :last_price ORDER BY price ASC LIMIT N</code>. DocDB Seeks directly to that position — O(log N) at any depth." },
+    guide: {
+      richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
+  price      <span class="sql-type">DECIMAL</span>,
+  listing_id <span class="sql-type">TEXT</span>,
+  name       <span class="sql-type">TEXT</span>,
+  status     <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (price <span class="sql-kw">ASC</span>, listing_id)
+);
+
+<span class="sql-comment">-- Insert sample data using generate_series</span>
+<span class="sql-kw">INSERT INTO</span> listings (price, listing_id, name, status)
+<span class="sql-kw">SELECT</span> (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
+       <span class="sql-str">'list-'</span> || i,
+       <span class="sql-str">'Product '</span> || i,
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)]
+<span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 50) <span class="sql-kw">AS</span> i;
+<span class="sql-comment">-- The animation uses hand-crafted prices for clear tablet boundary illustration;</span>
+<span class="sql-comment">-- this INSERT produces different values (19.99, 29.98, 39.97 …).</span>
+
+<span class="sql-comment">-- ⚠️  OFFSET pagination — O(OFFSET) cost, grows with depth</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> listings
+<span class="sql-kw">ORDER BY</span> price <span class="sql-kw">ASC</span>
+<span class="sql-kw">LIMIT</span> <span class="sql-str">10</span> <span class="sql-kw">OFFSET</span> <span class="sql-str">990</span>;
+<span class="sql-comment">-- Page 100: DocDB scans and discards 990 rows on every request</span>
+
+<span class="sql-comment">-- ✅ Keyset pagination — O(log N), constant cost at any depth</span>
+<span class="sql-comment">-- Pass the last row's (price, listing_id) as the cursor</span>
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> listings
+<span class="sql-kw">WHERE</span>  (price, listing_id) > (<span class="sql-str">:last_price</span>, <span class="sql-str">:last_listing_id</span>)
+<span class="sql-kw">ORDER BY</span> price <span class="sql-kw">ASC</span>, listing_id <span class="sql-kw">ASC</span>
+<span class="sql-kw">LIMIT</span> <span class="sql-str">10</span>;
+<span class="sql-comment">-- Row value constructor maps to a single composite Seek in DocDB:</span>
+<span class="sql-comment">-- Seek(last_price, last_listing_id) → scan forward — same cost at any depth</span>` },
+    guidedTour: [
+      { text: "Use <b>Next Step</b> to watch OFFSET force a scan through rows it will never return.", element: "#qe-next-btn" },
+      { text: "Or click <b>Play All</b> to see the full wasted-read pattern.", element: "#qe-play-btn" },
+      { text: "Strikethrough rows were read from disk and discarded — pure waste that grows linearly with page depth.", element: ".tablet-card" },
+      { text: "The guide tab shows keyset pagination — a single Seek replaces all that scanning.", element: ".tab-btn" }
+    ]
+  },
+
   "qe-expr-pushdown": {
     group: "Query Execution", icon: "σ", title: "Expression Pushdown",
     subtitle: "Filter at DocDB, not YSQL",
@@ -2905,9 +3154,10 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- Disable pushdown to compare (testing only):</span>
 <span class="sql-comment">-- SET yb_enable_expression_pushdown = false;</span>
 
-<span class="sql-comment">-- Cost comparison (9 rows, 4 match):</span>
-<span class="sql-comment">--   With pushdown:    4 rows × row_size transferred ✓</span>
-<span class="sql-comment">--   Without pushdown: 9 rows × row_size transferred ✗</span>` },
+<span class="sql-comment">-- Cost comparison (generate_series: 10 rows, 3 match active AND total > 100):</span>
+<span class="sql-comment">--   With pushdown:    3 rows × row_size transferred ✓</span>
+<span class="sql-comment">--   Without pushdown: 10 rows × row_size transferred ✗</span>
+<span class="sql-comment">-- (the visualization uses a hand-crafted 9-row / 4-match example)</span>` },
     guidedTour: [
       { text: "Watch the YSQL Layer banner — the predicate is <b>embedded in the RPC</b> payload before it leaves YSQL.", element: "#ysql-layer" },
       { text: "Click <b>Step</b> through the FILTER steps — each tablet evaluates the predicate independently.", element: "#qe-step-btn" },
@@ -2934,7 +3184,7 @@ Object.assign(SCENARIOS, {
         { op: "agg", detail: "Tablet 2 (local): scan 2 rows → partial COUNT=2, SUM=$229.99", ysqlStatus: "Waiting… Tablet 2 computing local aggregate (scanning 2 rows)", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "scanned" }, { tablet: 0, row: 2, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }] },
         { op: "agg", detail: "Tablet 3 (local): scan 3 rows → partial COUNT=3, SUM=$348.97", ysqlStatus: "Waiting… Tablet 3 computing local aggregate (scanning 3 rows)", tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }, { tablet: 0, row: 1, state: "scanned" }, { tablet: 0, row: 2, state: "scanned" }, { tablet: 1, row: 0, state: "scanned" }, { tablet: 1, row: 1, state: "scanned" }, { tablet: 2, row: 0, state: "scanned" }, { tablet: 2, row: 1, state: "scanned" }, { tablet: 2, row: 2, state: "scanned" }] },
         { op: "return", detail: "Each tablet returns one tiny summary: (3,$294.99) | (2,$229.99) | (3,$348.97) — not 8 raw rows", ysqlStatus: "Receiving 3 partial summaries: (COUNT=3, SUM=$294.99) · (COUNT=2, SUM=$229.99) · (COUNT=3, SUM=$348.97)", tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "done" }], rows: [] },
-        { op: "done", detail: "YSQL merges → COUNT=8, SUM=$873.95 — only 3 RPCs, zero raw row transfers", ysqlStatus: "✓ Final result: COUNT=8, SUM=$873.95 — merged from 3 partial aggregates, 0 raw rows transferred", tablets: [], rows: [], summary: { tablets: 3, seeks: 3, nexts: 8, rows: 1 } }
+        { op: "done", detail: "YSQL merges → COUNT=8, SUM=$873.95 — only 3 RPCs, zero raw row transfers", ysqlStatus: "✓ Final result: COUNT=8, SUM=$873.95 — merged from 3 partial aggregates, 0 raw rows transferred", tablets: [], rows: [], summary: { tablets: 3, seeks: 3, nexts: 0, rows: 1 } }
       ]
     },
     initialState: {
@@ -2976,14 +3226,17 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">SELECT</span> <span class="sql-fn">COUNT</span>(*), <span class="sql-fn">SUM</span>(total) <span class="sql-kw">FROM</span> orders;
 
 <span class="sql-comment">-- Per tablet, DocDB computes locally:</span>
-<span class="sql-comment">--   Tablet 1 → (COUNT=3, SUM=294.99)</span>
-<span class="sql-comment">--   Tablet 2 → (COUNT=2, SUM=229.99)</span>
-<span class="sql-comment">--   Tablet 3 → (COUNT=3, SUM=348.97)</span>
+<span class="sql-comment">-- (values below match the visualization's example dataset)</span>
+<span class="sql-comment">--   Tablet 1 → (COUNT=3, SUM=$294.99)</span>
+<span class="sql-comment">--   Tablet 2 → (COUNT=2, SUM=$229.99)</span>
+<span class="sql-comment">--   Tablet 3 → (COUNT=3, SUM=$348.97)</span>
 
 <span class="sql-comment">-- YSQL merges partial results:</span>
 <span class="sql-comment">--   COUNT = 3 + 2 + 3 = 8</span>
 <span class="sql-comment">--   SUM   = 294.99 + 229.99 + 348.97 = $873.95</span>
 
+<span class="sql-comment">-- With generate_series(1,10): COUNT=10, SUM=$1049.45</span>
+<span class="sql-comment">-- (tablet distribution varies by hash — totals are deterministic)</span>
 <span class="sql-comment">-- ✓ 3 RPCs, 0 raw rows transferred over the network</span>` },
     guidedTour: [
       { text: "Click <b>Play All</b> to watch aggregation happen simultaneously across all tablets.", element: "#qe-play-btn" },
@@ -3028,7 +3281,7 @@ WHERE u.name = 'Dan';`,
         { id: "Orders Tablet 2", range: "0x8000–0xFFFF", rows: [{ fields: ["0x8A11", "ord-42", "user-507", "150.00"] }, { fields: ["0xC42A", "ord-88", "user-105", "99.00"] }] }
       ]
     },
-    callout: { type: "info", icon: "🤝", text: "<b>Nested Loop Join:</b> YugabyteDB's query layer executes the join by taking rows from the outer table and issuing point lookups (Seeks) to the inner table. Notice how the inner table is accessed directly via Hash Seek, preventing a full table scan on orders!" },
+    callout: { type: "info", icon: "🤝", text: "<b>Nested Loop Join:</b> YugabyteDB's query layer executes the join by taking rows from the outer table and issuing point lookups (Seeks) to the inner table. Notice how the inner table is accessed directly via Hash Seek, preventing a full table scan on orders! The planner also considers <b>Hash Join</b> (builds an in-memory hash table — better for large outer sets) and <b>Batch Nested Loop</b> (batches outer keys into a single RPC — reduces round trips). NL join wins here because the outer set is a single row." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
   user_id <span class="sql-type">TEXT PRIMARY KEY</span>,
@@ -3056,7 +3309,7 @@ WHERE u.name = 'Dan';`,
 <span class="sql-kw">SELECT</span> u.name, o.total
 <span class="sql-kw">FROM</span> users u
 <span class="sql-kw">JOIN</span> orders o <span class="sql-kw">ON</span> u.user_id = o.user_id
-<span class="sql-kw">WHERE</span> u.name = <span class="sql-str">'Dan'</span>;` },
+<span class="sql-kw">WHERE</span> u.name = <span class="sql-str">'User 2'</span>;` },
     guidedTour: [
       { text: "Click <b>Play All</b> to see the join logic in action.", element: "#qe-play-btn" },
       { text: "Observe the <b>Outer Scan</b> on the Users table (blue) followed by the <b>Inner Seek</b> on the Orders table (green).", element: ".query-exec-container" }

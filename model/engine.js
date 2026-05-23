@@ -2008,12 +2008,6 @@ function renderHome(container) {
                         <p>How queries interact with distributed storage.</p>
                     </div>
                     <div class="home-grid">
-                        <div class="home-card" onclick="selectScenario('qe-full-scan')">
-                            <div class="home-card-icon">🔍</div>
-                            <div class="home-card-title">Full Table Scan</div>
-                            <div class="home-card-desc">The baseline. Sequential scan across all tablets with no index — shows why column selection and predicate pushdown matter even without an index.</div>
-                            <button class="home-card-btn">Explore &rarr;</button>
-                        </div>
                         <div class="home-card" onclick="selectScenario('qe-hash-point')">
                             <div class="home-card-icon">🎯</div>
                             <div class="home-card-title">Point Lookups</div>
@@ -2024,6 +2018,12 @@ function renderHome(container) {
                             <div class="home-card-icon">📊</div>
                             <div class="home-card-title">Scans &amp; Skips</div>
                             <div class="home-card-desc">Advanced scan techniques. Efficient contiguous walks and Skip Scan logic for multi-column indexes.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
+                        <div class="home-card" onclick="selectScenario('qe-full-scan')">
+                            <div class="home-card-icon">🔍</div>
+                            <div class="home-card-title">Full Table Scan</div>
+                            <div class="home-card-desc">The anti-pattern. Sequential scan across all tablets with no index — shows why an index (or GIN for substring search) is critical.</div>
                             <button class="home-card-btn">Explore &rarr;</button>
                         </div>
                         <div class="home-card" onclick="selectScenario('qe-index-lookup')">
