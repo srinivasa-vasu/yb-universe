@@ -3066,11 +3066,9 @@ window.uhToggle = function (id) {
   if (el.style.display === 'none') {
     el.style.display = '';
     tgl.textContent = '▼';
-    tgl.style.transform = 'rotate(0deg)';
   } else {
     el.style.display = 'none';
     tgl.textContent = '▶';
-    tgl.style.transform = 'rotate(-90deg)'; // if I want smooth animation, or just text content is fine
   }
 };
 
@@ -3928,12 +3926,12 @@ function _renderArchUniverseHierarchy(container) {
   // ── Nested hierarchy tree ──
   // unique id counter for expand/collapse
   let _uhId = 0;
-  function uhNode(icon, cls, nameHtml, metaHtml, hasChildren) {
+  function uhNode(icon, cls, nameHtml, metaHtml, hasChildren, defaultCollapsed = false) {
     const id = `uh-c-${_uhId++}`;
     let s = `<div class="uh-node ${cls}" ${hasChildren ? `onclick="uhToggle('${id}')" style="cursor:pointer"` : ''}>`;
-    if (hasChildren) s += `<div class="uh-toggle" id="uh-t-${id}">▼</div>`;
+    if (hasChildren) s += `<div class="uh-toggle" id="uh-t-${id}">${defaultCollapsed ? '▶' : '▼'}</div>`;
     s += `<div class="uh-icon">${icon}</div><div class="uh-info"><div class="uh-name">${nameHtml}</div><div class="uh-meta">${metaHtml}</div></div></div>`;
-    if (hasChildren) s += `<div class="uh-children" id="${id}">`;
+    if (hasChildren) s += `<div class="uh-children" id="${id}"${defaultCollapsed ? ' style="display:none"' : ''}>`;
     return s;
   }
   function uhClose() { return `</div></div>`; } // close children + level
@@ -3972,7 +3970,7 @@ function _renderArchUniverseHierarchy(container) {
     let out = '';
     databases.forEach(db => {
       out += `<div class="uh-level uh-l2">`;
-      out += uhNode('🗄️', `uh-database" style="border-left-color:${db.color}`, `${db.api === 'YCQL' ? 'Keyspace' : 'Database'}: <span class="uh-val">${db.name}</span> <span class="uh-badge" style="background:${db.color}22;color:${db.color};border-color:${db.color}44">${db.api}</span>`, db.api === 'YSQL' ? 'PostgreSQL-compatible · supports schemas, roles, functions' : 'Cassandra-compatible · keyspace = database equivalent', true);
+      out += uhNode('🗄️', `uh-database" style="border-left-color:${db.color}`, `${db.api === 'YCQL' ? 'Keyspace' : 'Database'}: <span class="uh-val">${db.name}</span> <span class="uh-badge" style="background:${db.color}22;color:${db.color};border-color:${db.color}44">${db.api}</span>`, db.api === 'YSQL' ? 'PostgreSQL-compatible · supports schemas, roles, functions' : 'Cassandra-compatible · keyspace = database equivalent', true, true);
 
       db.schemas.forEach(schema => {
         out += `<div class="uh-level uh-l3">`;
@@ -4092,7 +4090,7 @@ function _renderArchUniverseHierarchy(container) {
     ndData.filter(n => n[0] === fi).forEach(([, nid, ti, isL]) => {
       const tc = tbs[ti].color;
       h += `<div style="padding:7px 10px;border-top:1px solid ${fdC[fi]}20;display:flex;align-items:center;gap:7px;">`;
-      h += `<div style="font-size:10px;color:var(--txt2);min-width:42px;flex-shrink:0;">Node ${nid}</div>`;
+      h += `<div style="font-size:10px;color:var(--txt2);min-width:42px;flex-shrink:0;">Node ${(nid - 1) % 3 + 1}</div>`;
       h += `<div style="width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;${isL ? `background:${tc};color:#0f172a;font-weight:700` : `border:1.5px solid ${tc};color:${tc}`}">${isL ? '◉' : '○'}</div>`;
       h += `<div style="font-size:10px;color:${tc};font-weight:${isL ? 600 : 400};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tbs[ti].name}</div>`;
       if (isL) h += `<div style="font-size:9px;background:${tc}22;color:${tc};border-radius:3px;padding:1px 5px;border:1px solid ${tc}44;font-weight:700;letter-spacing:.05em;flex-shrink:0;">LEADER</div>`;
@@ -5151,13 +5149,13 @@ window.addEventListener('load', () => {
 function toggleSidebar() {
   const sb = document.querySelector('.sidebar');
   sb.classList.toggle('collapsed');
-  setTimeout(renderConnections, 310); // After transition
+  setTimeout(renderConnections, 310);
 }
 
 function toggleInfoPanel() {
   const ip = document.querySelector('.info-panel');
   ip.classList.toggle('collapsed');
-  setTimeout(renderConnections, 310); // After transition
+  setTimeout(renderConnections, 310);
 }
 
 function toggleFocusMode() {
