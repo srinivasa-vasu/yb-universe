@@ -2294,7 +2294,7 @@ Object.assign(SCENARIOS, {
 
   "qe-skip-scan": {
     group: "Query Execution", icon: "⏭", title: "Skip Scan", subtitle: "Non-prefix column query",
-    description: "When querying on the second column of a composite index, DocDB performs a Skip Scan: it Seeks into each distinct group of the first column, checks for a match, then skips to the next group.",
+    description: "When querying on the second column of a composite index, DocDB performs a Skip Scan: it Seeks into each distinct group of the first column, checks for a match, then skips to the next group. Skip Scan is available on range-sharded indexes in YugabyteDB v2.21+.",
     legend: [
       { type: "clustering", label: "region ASC", explain: "First key in composite — groups data" },
       { type: "clustering", label: "created_at DESC", explain: "Second key — sorted within each group" }
@@ -2335,7 +2335,7 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls." },
+    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls. <b>Available on range-sharded indexes in YugabyteDB v2.21+.</b>" },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
   region     <span class="sql-type">TEXT</span>,
@@ -2353,7 +2353,8 @@ Object.assign(SCENARIOS, {
        (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- Query on 2nd column only → Skip Scan</span>
+<span class="sql-comment">-- Query on 2nd column only → Skip Scan (requires YugabyteDB v2.21+,</span>
+<span class="sql-comment">-- range-sharded index; not applicable to hash-sharded tables)</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> created_at = <span class="sql-str">'2024-03-18'</span>;
 
@@ -2408,7 +2409,7 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "🔍", text: "<b>Full Scan = O(N):</b> Without an index on <code>name</code>, every tablet must be scanned in parallel. Every single row is evaluated. This is the most expensive pattern — consider adding a GIN or expression index on the column." },
+    callout: { type: "info", icon: "🔍", text: "<b>Full Scan = O(N):</b> Without an index on <code>name</code>, every tablet must be scanned in parallel. Every single row is evaluated. This is the most expensive pattern — for substring search, add a <code>pg_trgm</code> extension and a <code>ybgin</code> index (YugabyteDB's distributed GIN)." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
   user_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
@@ -2438,8 +2439,9 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- ⚠️  Leading-wildcard LIKE cannot use a B-tree index.</span>
 <span class="sql-comment">-- 💡 Fix: use a trigram index for substring search:</span>
 <span class="sql-kw">CREATE EXTENSION IF NOT EXISTS</span> pg_trgm;
-<span class="sql-kw">CREATE INDEX</span> idx_name_trgm <span class="sql-kw">ON</span> users <span class="sql-kw">USING</span> <span class="sql-fn">GIN</span> (name gin_trgm_ops);
-<span class="sql-comment">-- Now LIKE '%Park%' uses the GIN index — no full scan</span>` },
+<span class="sql-kw">CREATE INDEX</span> idx_name_trgm <span class="sql-kw">ON</span> users <span class="sql-kw">USING</span> <span class="sql-fn">ybgin</span> (name gin_trgm_ops);
+<span class="sql-comment">-- YugabyteDB requires 'ybgin' (not 'gin') for distributed tables</span>
+<span class="sql-comment">-- Now LIKE '%Park%' uses the ybgin index — no full scan</span>` },
     guidedTour: [
       { text: "Click <b>Next Step</b> to manually witness the most expensive execution pattern.", element: "#qe-next-btn" },
       { text: "Click <b>Play All</b> to see the full fan-out scan automatically.", element: "#qe-play-btn" },
