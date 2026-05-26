@@ -2074,6 +2074,24 @@ function renderHome(container) {
                             <div class="home-card-desc">Native streaming sort. Range-sharded tables preserve global order — YSQL scans tablets in sequence, returning data without a post-scan Sort.</div>
                             <button class="home-card-btn">Explore &rarr;</button>
                         </div>
+                        <div class="home-card" onclick="selectScenario('qe-in-list')">
+                            <div class="home-card-icon">📋</div>
+                            <div class="home-card-title">IN-List Lookup</div>
+                            <div class="home-card-desc">Batch point lookups. DocDB hashes each IN value, groups them by tablet, and fires parallel RPCs — K keys map to at most T RPCs, not K.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
+                        <div class="home-card" onclick="selectScenario('qe-limit-pushdown')">
+                            <div class="home-card-icon">⏹</div>
+                            <div class="home-card-title">LIMIT Pushdown</div>
+                            <div class="home-card-desc">Stop-early execution. LIMIT travels inside the DocDB RPC — range-sharded tables satisfy LIMIT from the first tablet, leaving the rest untouched.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
+                        <div class="home-card" onclick="selectScenario('qe-offset-pagination')">
+                            <div class="home-card-icon">📄</div>
+                            <div class="home-card-title">Offset vs Keyset</div>
+                            <div class="home-card-desc">Pagination cost model. OFFSET scans and discards rows on every request — O(OFFSET). Keyset pagination Seeks directly to position — O(log N) always.</div>
+                            <button class="home-card-btn">Explore &rarr;</button>
+                        </div>
                     </div>
                 </div>
 

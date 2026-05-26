@@ -2100,7 +2100,7 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "📍", text: "<b>Range Seek + Packed Rows:</b> Because data is globally sorted by price, DocDB knows exactly which tablet contains 89.99. It Seeks directly. Thanks to the <b>Packed Row</b> format, this single Seek retrieves all columns at once without needing additional Next calls for each column." },
+    callout: { type: "info", icon: "📍", text: "<b>Range Seek + Packed Rows:</b> Because data is globally sorted by price, DocDB knows exactly which tablet contains 89.99. It Seeks directly. Thanks to the <b>Packed Row</b> format, all columns are stored together in one RocksDB entry — no per-column Next calls are needed. The 1 Next shown is the boundary check (next row has a different price → stop), not a column fetch." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
   price      <span class="sql-type">DECIMAL</span>,
@@ -2313,11 +2313,11 @@ Object.assign(SCENARIOS, {
         { op: "seek", detail: "Seek('APAC', '2024-03-18') → enter APAC group", tablets: [{ id: 0, state: "active" }], dimOthers: true, rows: [{ tablet: 0, row: 1, state: "cursor" }] },
         { op: "next", detail: "APAC/2024-03-18 → match found → return", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }] },
         { op: "skip", detail: "Skip past remaining APAC rows → Seek to EU group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }] },
-        { op: "seek", detail: "Seek('EU', '2024-03-18') → enter EU group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 3, state: "cursor" }] },
-        { op: "next", detail: "EU/2024-03-18 → match found → return", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 3, state: "returned" }] },
-        { op: "skip", detail: "Skip past remaining EU rows → Seek to US group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 0, row: 4, state: "skipped" }] },
-        { op: "seek", detail: "Seek('US', '2024-03-18') → enter US group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 0, row: 4, state: "skipped" }, { tablet: 0, row: 5, state: "cursor" }] },
-        { op: "next", detail: "US/2024-03-18 → no match (2024-03-15) → done", tablets: [{ id: 0, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 0, row: 4, state: "skipped" }, { tablet: 0, row: 5, state: "scanned" }] },
+        { op: "seek", detail: "Seek('EU', '2024-03-18') → enter EU group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 4, state: "cursor" }] },
+        { op: "next", detail: "EU/2024-03-18 → match found → return", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 4, state: "returned" }] },
+        { op: "skip", detail: "Skip past remaining EU rows → Seek to US group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 4, state: "returned" }, { tablet: 0, row: 5, state: "skipped" }] },
+        { op: "seek", detail: "Seek('US', '2024-03-18') → enter US group", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 4, state: "returned" }, { tablet: 0, row: 5, state: "skipped" }, { tablet: 0, row: 7, state: "cursor" }] },
+        { op: "next", detail: "US/2024-03-18 → no match (2024-03-15) → done", tablets: [{ id: 0, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 0, row: 2, state: "skipped" }, { tablet: 0, row: 4, state: "returned" }, { tablet: 0, row: 5, state: "skipped" }, { tablet: 0, row: 7, state: "scanned" }] },
         { op: "done", detail: "Complete: 1 tablet, 3 Seeks (skip), 3 Next, 2 rows", tablets: [], rows: [], summary: { tablets: 1, seeks: 3, nexts: 3, rows: 2 } }
       ]
     },
@@ -2464,9 +2464,9 @@ Object.assign(SCENARIOS, {
         { op: "route", detail: "Route to Index Tablet 3 (0xAAAB–0xFFFF)", tablets: [{ id: 2, state: "active" }], dimOthers: true, rows: [] },
         { op: "seek", detail: "Seek(0xB321) → cursor on index entry", tablets: [{ id: 2, state: "active" }], rows: [{ tablet: 2, row: 0, state: "cursor" }] },
         { op: "return", detail: "Found PK pointer: 'user-507'", tablets: [{ id: 2, state: "done" }], rows: [{ tablet: 2, row: 0, state: "returned" }] },
-        { op: "route", detail: "Phase 2: Use PK to fetch main table row", tablets: [{ id: 4, state: "active" }], rows: [] },
-        { op: "seek", detail: "Seek('user-507') in Table Tablet 2", tablets: [{ id: 4, state: "active" }], rows: [{ tablet: 4, row: 0, state: "cursor" }] },
-        { op: "return", detail: "Full row fetched — extract 'name, region'", tablets: [{ id: 4, state: "done" }], rows: [{ tablet: 4, row: 0, state: "returned" }] },
+        { op: "route", detail: "Phase 2: Use PK to fetch main table row", tablets: [{ id: 3, state: "active" }], rows: [] },
+        { op: "seek", detail: "Seek('user-507') in Table Tablet 1 (HASH=0x4B12 → 0x0000–0x5555)", tablets: [{ id: 3, state: "active" }], rows: [{ tablet: 3, row: 1, state: "cursor" }] },
+        { op: "return", detail: "Full row fetched — extract 'name, region'", tablets: [{ id: 3, state: "done" }], rows: [{ tablet: 3, row: 1, state: "returned" }] },
         { op: "done", detail: "Complete: 2 RPCs, 2 Seeks", tablets: [], rows: [], summary: { tablets: 2, seeks: 2, nexts: 0, rows: 1 } }
       ]
     },
@@ -2477,8 +2477,8 @@ Object.assign(SCENARIOS, {
         { id: "Idx Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ fields: ["0xB321", "dan@co.com", "user-507"] }] }
       ],
       tableTablets: [
-        { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [{ fields: ["user-241", "alice@co.com", "Alice", "US", "Active"] }] },
-        { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [{ fields: ["user-507", "dan@co.com", "Dan", "EU", "Active"] }, { fields: ["user-892", "bob@co.com", "Bob", "EU", "Pending"] }] },
+        { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [{ fields: ["user-241", "alice@co.com", "Alice", "US", "Active"] }, { fields: ["user-507", "dan@co.com", "Dan", "EU", "Active"] }] },
+        { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [{ fields: ["user-892", "bob@co.com", "Bob", "EU", "Pending"] }] },
         { id: "Table Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ fields: ["user-105", "carol@co.com", "Carol", "APAC", "Active"] }] }
       ]
     },
@@ -2539,8 +2539,8 @@ Object.assign(SCENARIOS, {
         { id: "Idx Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ fields: ["0xB321", "dan@co.com", "Dan", "EU", "user-507"] }] }
       ],
       tableTablets: [
-        { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [{ fields: ["user-241", "alice@co.com", "Alice", "US", "Active"] }] },
-        { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [{ fields: ["user-507", "dan@co.com", "Dan", "EU", "Active"] }, { fields: ["user-892", "bob@co.com", "Bob", "EU", "Pending"] }] },
+        { id: "Table Tablet 1", range: "0x0000–0x5555", rows: [{ fields: ["user-241", "alice@co.com", "Alice", "US", "Active"] }, { fields: ["user-507", "dan@co.com", "Dan", "EU", "Active"] }] },
+        { id: "Table Tablet 2", range: "0x5556–0xAAAA", rows: [{ fields: ["user-892", "bob@co.com", "Bob", "EU", "Pending"] }] },
         { id: "Table Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ fields: ["user-105", "carol@co.com", "Carol", "APAC", "Active"] }] }
       ]
     },
@@ -3039,7 +3039,7 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "warn", icon: "⚠️", text: "<b>OFFSET is O(OFFSET):</b> Every page request re-reads and discards all rows up to the offset — cost grows linearly. Strikethrough rows above were read from disk but never returned. Use <b>keyset pagination</b> instead: store the last seen <code>price</code> and issue <code>WHERE price &gt; :last_price ORDER BY price ASC LIMIT N</code>. DocDB Seeks directly to that position — O(log N) at any depth." },
+    callout: { type: "warn", icon: "⚠️", text: "<b>OFFSET is O(OFFSET):</b> Every page request re-reads and discards all rows up to the offset — cost grows linearly. Strikethrough rows above were read from disk but never returned. Use <b>keyset pagination</b> instead: store the last seen <code>(price, listing_id)</code> and issue <code>WHERE (price, listing_id) &gt; (:last_price, :last_listing_id) ORDER BY price ASC, listing_id ASC LIMIT N</code>. The row value constructor maps to a single composite Seek in DocDB — O(log N) at any depth. (Using <code>price &gt; :last_price</code> alone is insufficient because multiple listings can share the same price.)" },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> listings (
   price      <span class="sql-type">DECIMAL</span>,
@@ -3308,6 +3308,8 @@ WHERE u.name = 'Dan';`,
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Join executed at the query layer</span>
+<span class="sql-comment">-- (the animation uses name = 'Dan' from its hand-crafted dataset;</span>
+<span class="sql-comment">--  with generate_series above, user names are 'User 1', 'User 2', …)</span>
 <span class="sql-kw">SELECT</span> u.name, o.total
 <span class="sql-kw">FROM</span> users u
 <span class="sql-kw">JOIN</span> orders o <span class="sql-kw">ON</span> u.user_id = o.user_id

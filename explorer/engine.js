@@ -2257,11 +2257,12 @@ function resetScenario() { stopPlay(); stepRunning = false; selectScenario(curre
 // ════════════════════════════════════════════
 function addLog(msg, type = '') {
   logTime++;
-  const icons = {
-    li: 'ℹ', ls: '✓', lw: '⚠', le: '✕', lr: '◉', '': '·'
-  };
+  const icons = { li: 'ℹ', ls: '✓', lw: '⚠', le: '✕', lr: '◉', '': '·' };
   const el = document.createElement('div'); el.className = `log-entry ${type}`;
-  el.innerHTML = `<div class="log-time">${String(logTime).padStart(3, '0')}</div><div class="log-icon">${icons[type] || '·'}</div><div class="log-msg">${msg}</div>`;
+  const t = document.createElement('div'); t.className = 'log-time'; t.textContent = String(logTime).padStart(3, '0');
+  const ic = document.createElement('div'); ic.className = 'log-icon'; ic.textContent = icons[type] || '·';
+  const m = document.createElement('div'); m.className = 'log-msg'; m.textContent = msg;
+  el.appendChild(t); el.appendChild(ic); el.appendChild(m);
   const body = document.getElementById('log-body'); body.appendChild(el); body.scrollTop = body.scrollHeight;
 }
 function clearLog() { document.getElementById('log-body').innerHTML = ''; logTime = 0; }
