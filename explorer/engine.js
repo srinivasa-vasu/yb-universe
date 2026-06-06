@@ -1422,7 +1422,7 @@ function makeCtx() {
         }
       }
     },
-    killNode: id => { S.nodes.find(n => n.id === id).alive = false; renderNodeAlive(id, false); renderAllTablets(); },
+    killNode: id => { S.nodes.find(n => n.id === id).alive = false; renderNodeAlive(id, false); _fdDrainLeaders(id); renderAllTablets(); renderConnections(); },
     reviveNode: id => { S.nodes.find(n => n.id === id).alive = true; renderNodeAlive(id, true); renderAllTablets(); setTimeout(renderConnections, 50); },
     reRenderTablet: (tgId, nId, markRow) => {
       if (markRow !== undefined && markRow !== false) {
@@ -2253,6 +2253,25 @@ function stopPlay() { playing = false; document.getElementById('btn-play').textC
 function resetScenario() { stopPlay(); stepRunning = false; selectScenario(currentScenario); }
 
 // ════════════════════════════════════════════
+//  THEME
+// ════════════════════════════════════════════
+function _applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.textContent = theme === 'light' ? '☾' : '☀';
+  const logo = document.getElementById('yb-logo');
+  if (logo) logo.src = theme === 'light' ? '../logo_l.svg' : '../logo.svg';
+}
+function initTheme() {
+  _applyTheme(localStorage.getItem('yb-theme') || 'dark');
+}
+function toggleTheme() {
+  const next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('yb-theme', next);
+  _applyTheme(next);
+}
+
+// ════════════════════════════════════════════
 //  LOG
 // ════════════════════════════════════════════
 function addLog(msg, type = '') {
@@ -2825,9 +2844,11 @@ window.insertColocatedC = async function () {
 }
 
 function toggleNearFollower() {
-  const n2 = S.nodes[1]; n2.alive = !n2.alive; renderNodeAlive(2, n2.alive); renderAllTablets();
+  const n2 = S.nodes[1]; n2.alive = !n2.alive; renderNodeAlive(2, n2.alive);
+  if (!n2.alive) { _fdDrainLeaders(2); renderAllTablets(); renderConnections(); }
+  else { renderAllTablets(); renderConnections(); _fdRebalanceToNode(2); }
   const btn = document.getElementById('btn-tn'); if (btn) btn.textContent = n2.alive ? '💀 Kill Near Follower' : '✅ Revive Near Follower';
-  addLog(`TServer-2: ${n2.alive ? 'REVIVED' : 'KILLED'}`, n2.alive ? 'ls' : 'le');
+  addLog(`TServer-2: ${n2.alive ? 'REVIVED — rebalancing leaders' : 'KILLED'}`, n2.alive ? 'ls' : 'le');
 }
 async function blacklistDrainNode() {
   if (stepRunning) return;
@@ -3646,11 +3667,11 @@ function _renderArchFaultDomains(container) {
              </div>`;
 
     const captions = [
-      `Leadership is <b>per-tablet (Raft group)</b>, not per-node · Each node holds all 3 replicas but leads a <em>different</em> shard · <span style="color:#f59e0b">◎ t1 on Node 1</span> · <span style="color:#60a5fa">◎ t2 on Node 2</span> · <span style="color:#34d399">◎ t3 on Node 3</span>`,
-      `Leadership is <b>per-tablet (Raft group)</b>, not per-rack · Each rack is an independent failure boundary · <span style="color:#f59e0b">◎ t1 in Rack 1</span> · <span style="color:#60a5fa">◎ t2 in Rack 2</span> · <span style="color:#34d399">◎ t3 in Rack 3</span> · even 4 nodes/rack · odd 3 racks`,
-      `Leadership is <b>per-tablet (Raft group)</b>, not per-AZ · A zone outage loses only one replica · <span style="color:#f59e0b">◎ t1 in AZ-a</span> · <span style="color:#60a5fa">◎ t2 in AZ-b</span> · <span style="color:#34d399">◎ t3 in AZ-c</span> · odd 3 nodes/AZ · odd 3 AZs`,
-      `Leadership is <b>per-tablet (Raft group)</b>, not per-region · A region outage loses only one replica — quorum survives · <span style="color:#f59e0b">◎ t1 us-east-1</span> · <span style="color:#60a5fa">◎ t2 eu-west-1</span> · <span style="color:#34d399">◎ t3 ap-south-1</span>`,
-      `Leadership is <b>per-tablet (Raft group)</b>, not per-cloud · An entire cloud outage loses only one replica — quorum survives · <span style="color:#f59e0b">◎ t1 AWS</span> · <span style="color:#60a5fa">◎ t2 GCP</span> · <span style="color:#34d399">◎ t3 Azure</span>`,
+      `Leadership is <b>per-tablet (Raft group)</b>, not per-node · Each node holds all 3 replicas but leads a <em>different</em> shard · <span style="color:var(--leader)">◎ t1 on Node 1</span> · <span style="color:var(--follower)">◎ t2 on Node 2</span> · <span style="color:var(--near)">◎ t3 on Node 3</span>`,
+      `Leadership is <b>per-tablet (Raft group)</b>, not per-rack · Each rack is an independent failure boundary · <span style="color:var(--leader)">◎ t1 in Rack 1</span> · <span style="color:var(--follower)">◎ t2 in Rack 2</span> · <span style="color:var(--near)">◎ t3 in Rack 3</span> · even 4 nodes/rack · odd 3 racks`,
+      `Leadership is <b>per-tablet (Raft group)</b>, not per-AZ · A zone outage loses only one replica · <span style="color:var(--leader)">◎ t1 in AZ-a</span> · <span style="color:var(--follower)">◎ t2 in AZ-b</span> · <span style="color:var(--near)">◎ t3 in AZ-c</span> · odd 3 nodes/AZ · odd 3 AZs`,
+      `Leadership is <b>per-tablet (Raft group)</b>, not per-region · A region outage loses only one replica — quorum survives · <span style="color:var(--leader)">◎ t1 us-east-1</span> · <span style="color:var(--follower)">◎ t2 eu-west-1</span> · <span style="color:var(--near)">◎ t3 ap-south-1</span>`,
+      `Leadership is <b>per-tablet (Raft group)</b>, not per-cloud · An entire cloud outage loses only one replica — quorum survives · <span style="color:var(--leader)">◎ t1 AWS</span> · <span style="color:var(--follower)">◎ t2 GCP</span> · <span style="color:var(--near)">◎ t3 Azure</span>`,
     ];
     const captionBar =
       `<div style="font-size:14px;color:var(--txt2);background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:11px 16px;text-align:center;line-height:1.7;margin-top:8px">
@@ -3987,7 +4008,7 @@ function _renderArchUniverseHierarchy(container) {
           if (isPrimary) {
             out += `<span class="uh-tablet-chip uh-tc-l">◉</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-lbl">tablet×3</span>`;
           } else {
-            out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-lbl">observer×2</span>`;
+            out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:var(--sql-kw);color:var(--sql-kw)">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:var(--sql-kw);color:var(--sql-kw)">○</span><span class="uh-tablet-lbl">observer×2</span>`;
           }
           out += `</div></div>`;
         });
@@ -4003,7 +4024,7 @@ function _renderArchUniverseHierarchy(container) {
           if (isPrimary) {
             out += `<span class="uh-tablet-chip uh-tc-l">◉</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-chip uh-tc-f">○</span><span class="uh-tablet-lbl">tablet×3</span>`;
           } else {
-            out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:#a78bfa;color:#a78bfa">○</span><span class="uh-tablet-lbl">observer×2</span>`;
+            out += `<span class="uh-tablet-chip uh-tc-f" style="border-color:var(--sql-kw);color:var(--sql-kw)">○</span><span class="uh-tablet-chip uh-tc-f" style="border-color:var(--sql-kw);color:var(--sql-kw)">○</span><span class="uh-tablet-lbl">observer×2</span>`;
           }
           out += `</div></div>`;
         });
@@ -4054,9 +4075,9 @@ function _renderArchUniverseHierarchy(container) {
 
   // Step 1: CREATE TABLE → sharding
   h += `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">`;
-  h += `<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;padding:8px 14px;font-family:var(--mono);font-size:12px;color:#60a5fa;white-space:nowrap;"><span style="color:var(--txt2)">CREATE TABLE </span>users <span style="color:var(--txt2)">(id INT </span>PRIMARY KEY<span style="color:var(--txt2)">, name TEXT, city TEXT, ...)</span></div>`;
+  h += `<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:6px;padding:8px 14px;font-family:var(--mono);font-size:12px;color:var(--sql-num);white-space:nowrap;"><span style="color:var(--txt2)">CREATE TABLE </span>users <span style="color:var(--txt2)">(id INT </span>PRIMARY KEY<span style="color:var(--txt2)">, name TEXT, city TEXT, ...)</span></div>`;
   h += `<div style="color:var(--txt2);font-size:13px;flex-shrink:0;">→</div>`;
-  h += `<div style="font-size:11px;color:var(--txt);background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;white-space:nowrap;">⊞ Hash sharding on <code style="color:#60a5fa">id</code> &nbsp;·&nbsp; 3 tablets by default</div>`;
+  h += `<div style="font-size:11px;color:var(--txt);background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;white-space:nowrap;">⊞ Hash sharding on <code style="color:var(--follower)">id</code> &nbsp;·&nbsp; 3 tablets by default</div>`;
   h += `</div>`;
   h += `<div style="text-align:center;color:var(--txt2);font-size:16px;line-height:1;margin:2px 0 8px;">↓</div>`;
 
@@ -4066,16 +4087,16 @@ function _renderArchUniverseHierarchy(container) {
     { name: 'users.tablet2', range: '0x5500 – 0xA9FF', color: '#60a5fa' },
     { name: 'users.tablet3', range: '0xAA00 – 0xFFFF', color: '#34d399' },
   ];
-  h += `<div style="font-size:10px;color:var(--txt2);font-family:var(--mono);display:flex;justify-content:space-between;margin-bottom:4px;padding:0 2px;"><span>0x0000</span><span>← Hash Key Space →</span><span>0xFFFF</span></div>`;
-  h += `<div style="display:flex;gap:4px;height:48px;margin-bottom:4px;">`;
+  h += `<div style="font-size:12px;color:var(--txt2);font-family:var(--mono);display:flex;justify-content:space-between;margin-bottom:4px;padding:0 2px;"><span>0x0000</span><span>← Hash Key Space →</span><span>0xFFFF</span></div>`;
+  h += `<div style="display:flex;gap:4px;height:56px;margin-bottom:4px;">`;
   tbs.forEach(t => {
-    h += `<div style="flex:1;background:${t.color}15;border:1.5px solid ${t.color}55;border-radius:6px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;">`;
-    h += `<div style="font-size:11px;font-weight:700;color:${t.color};">${t.name}</div>`;
-    h += `<div style="font-size:10px;color:var(--txt2);font-family:var(--mono);">${t.range}</div>`;
+    h += `<div style="flex:1;background:${t.color}28;border:2px solid ${t.color}88;border-radius:6px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;">`;
+    h += `<div style="font-size:13px;font-weight:700;color:${t.color};">${t.name}</div>`;
+    h += `<div style="font-size:12px;color:var(--txt2);font-family:var(--mono);">${t.range}</div>`;
     h += `</div>`;
   });
   h += `</div>`;
-  h += `<div style="text-align:center;color:var(--txt2);font-size:11px;margin:8px 0 12px;">↓ &nbsp;RF=3 replication — each tablet replica placed on one node per Fault Domain</div>`;
+  h += `<div style="text-align:center;color:var(--txt2);font-size:13px;margin:8px 0 12px;">↓ &nbsp;RF=3 replication — each tablet replica placed on one node per Fault Domain</div>`;
 
   // Step 3: Fault domain placement grid
   const fdC = ['#fb7185', '#f59e0b', '#34d399'];
@@ -4086,15 +4107,15 @@ function _renderArchUniverseHierarchy(container) {
   ];
   h += `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">`;
   for (let fi = 0; fi < 3; fi++) {
-    h += `<div style="background:${fdC[fi]}08;border:1px solid ${fdC[fi]}30;border-radius:8px;overflow:hidden;">`;
-    h += `<div style="background:${fdC[fi]}18;padding:6px 10px;font-size:10px;font-weight:700;color:${fdC[fi]};letter-spacing:.07em;text-align:center;">FAULT DOMAIN ${fi + 1}</div>`;
+    h += `<div style="background:${fdC[fi]}20;border:1.5px solid ${fdC[fi]}55;border-radius:8px;overflow:hidden;">`;
+    h += `<div style="background:${fdC[fi]}35;padding:8px 12px;font-size:12px;font-weight:700;color:${fdC[fi]};letter-spacing:.07em;text-align:center;">FAULT DOMAIN ${fi + 1}</div>`;
     ndData.filter(n => n[0] === fi).forEach(([, nid, ti, isL]) => {
       const tc = tbs[ti].color;
-      h += `<div style="padding:7px 10px;border-top:1px solid ${fdC[fi]}20;display:flex;align-items:center;gap:7px;">`;
-      h += `<div style="font-size:10px;color:var(--txt2);min-width:42px;flex-shrink:0;">Node ${(nid - 1) % 3 + 1}</div>`;
-      h += `<div style="width:15px;height:15px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;${isL ? `background:${tc};color:#0f172a;font-weight:700` : `border:1.5px solid ${tc};color:${tc}`}">${isL ? '◉' : '○'}</div>`;
-      h += `<div style="font-size:10px;color:${tc};font-weight:${isL ? 600 : 400};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tbs[ti].name}</div>`;
-      if (isL) h += `<div style="font-size:9px;background:${tc}22;color:${tc};border-radius:3px;padding:1px 5px;border:1px solid ${tc}44;font-weight:700;letter-spacing:.05em;flex-shrink:0;">LEADER</div>`;
+      h += `<div style="padding:9px 12px;border-top:1px solid ${fdC[fi]}20;display:flex;align-items:center;gap:8px;">`;
+      h += `<div style="font-size:12px;color:var(--txt2);min-width:48px;flex-shrink:0;">Node ${(nid - 1) % 3 + 1}</div>`;
+      h += `<div style="width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;${isL ? `background:${tc};color:#0f172a;font-weight:700` : `border:1.5px solid ${tc};color:${tc}`}">${isL ? '◉' : '○'}</div>`;
+      h += `<div style="font-size:12px;color:${tc};font-weight:${isL ? 600 : 400};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${tbs[ti].name}</div>`;
+      if (isL) h += `<div style="font-size:11px;background:${tc}22;color:${tc};border-radius:3px;padding:2px 7px;border:1px solid ${tc}44;font-weight:700;letter-spacing:.05em;flex-shrink:0;">LEADER</div>`;
       h += `</div>`;
     });
     h += `</div>`;
@@ -4102,7 +4123,7 @@ function _renderArchUniverseHierarchy(container) {
   h += `</div>`;
 
   // Footer note
-  h += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;color:var(--txt2);line-height:1.6;">`;
+  h += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--txt2);line-height:1.6;">`;
   h += `Each tablet is an independent <strong style="color:var(--txt)">Raft group</strong> — 1 leader + 2 followers, each in a separate Fault Domain. `;
   h += `Leaders distribute evenly so no single node becomes a hotspot. When a leader fails, the remaining followers elect a new one automatically within ~150–300 ms.`;
   h += `</div>`;
@@ -4173,30 +4194,30 @@ function _renderArchConsensus(container) {
   h += `<div style="display:flex;gap:12px;align-items:stretch;margin-bottom:20px;flex-wrap:wrap;">`;
 
   h += `<div style="flex:1;min-width:170px;background:rgba(96,165,250,.07);border:1px solid rgba(96,165,250,.3);border-radius:10px;padding:16px;">`;
-  h += `<div style="font-size:22px;text-align:center;color:#60a5fa;margin-bottom:6px;">○</div>`;
-  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#60a5fa;letter-spacing:.07em;margin-bottom:8px;">FOLLOWER</div>`;
+  h += `<div style="font-size:22px;text-align:center;color:var(--sql-num);margin-bottom:6px;">○</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:var(--sql-num);letter-spacing:.07em;margin-bottom:8px;">FOLLOWER</div>`;
   h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Default state. Receives heartbeats &amp; log entries from Leader. Resets election timer on every heartbeat.</div>`;
-  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:#a78bfa">→ Candidate</strong><br/>Election timer expires with no heartbeat (randomized ms interval)</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:var(--sql-kw)">→ Candidate</strong><br/>Election timer expires with no heartbeat (randomized ms interval)</div>`;
   h += `</div>`;
 
   h += `<div style="display:flex;align-items:center;color:var(--txt2);font-size:18px;padding:0 4px;">→</div>`;
 
   h += `<div style="flex:1;min-width:170px;background:rgba(167,139,250,.07);border:1px solid rgba(167,139,250,.3);border-radius:10px;padding:16px;">`;
-  h += `<div style="font-size:22px;text-align:center;color:#a78bfa;margin-bottom:6px;">🗳️</div>`;
-  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#a78bfa;letter-spacing:.07em;margin-bottom:8px;">CANDIDATE</div>`;
+  h += `<div style="font-size:22px;text-align:center;color:var(--sql-kw);margin-bottom:6px;">🗳️</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:var(--sql-kw);letter-spacing:.07em;margin-bottom:8px;">CANDIDATE</div>`;
   h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Increments term, votes for itself, broadcasts RequestVote RPCs to all peers. Only one candidate can win per term.</div>`;
   h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;">`;
   h += `<strong style="color:#22c55e">→ Leader</strong>&nbsp;&nbsp;Majority votes received<br/>`;
-  h += `<strong style="color:#60a5fa">→ Follower</strong>&nbsp;Higher term seen or split vote`;
+  h += `<strong style="color:var(--follower)">→ Follower</strong>&nbsp;Higher term seen or split vote`;
   h += `</div></div>`;
 
   h += `<div style="display:flex;align-items:center;color:var(--txt2);font-size:18px;padding:0 4px;">→</div>`;
 
   h += `<div style="flex:1;min-width:170px;background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:16px;">`;
-  h += `<div style="font-size:22px;text-align:center;color:#f59e0b;margin-bottom:6px;">◉</div>`;
-  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:#f59e0b;letter-spacing:.07em;margin-bottom:8px;">LEADER</div>`;
+  h += `<div style="font-size:22px;text-align:center;color:var(--sql-str);margin-bottom:6px;">◉</div>`;
+  h += `<div style="font-size:12px;font-weight:700;text-align:center;color:var(--sql-str);letter-spacing:.07em;margin-bottom:8px;">LEADER</div>`;
   h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;margin-bottom:10px;">Handles all client reads &amp; writes. Appends to WAL, replicates to followers, commits on majority ACK. Sends periodic heartbeats.</div>`;
-  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:#60a5fa">→ Follower</strong><br/>Discovers a higher Raft term from any peer</div>`;
+  h += `<div style="font-size:11px;color:var(--txt2);border-top:1px solid var(--border);padding-top:8px;"><strong style="color:var(--follower)">→ Follower</strong><br/>Discovers a higher Raft term from any peer</div>`;
   h += `</div>`;
 
   h += `</div>`;
@@ -4270,10 +4291,10 @@ function _renderArchConsensus(container) {
 
   // Diagram for Heartbeats
   h += `<div class="cq-elect-diagram" style="margin-top:20px;">`;
-  h += `<div class="cq-ed-replica" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.05);"><div class="cq-ed-icon" style="color:#f59e0b">◉</div><div class="cq-ed-role" style="color:#f59e0b">LEADER</div><div class="cq-ed-node">Tablet 1 → Node 1</div><div class="cq-ed-status" style="color:var(--txt);font-weight:400;margin-top:6px;">Lease Valid ⏳</div></div>`;
-  h += `<div class="cq-ed-mid"><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:#f59e0b">Heartbeat (500ms) →</span></div><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:var(--ok)">← ACK</span></div></div>`;
-  h += `<div class="cq-ed-replica" style="border-color:rgba(96,165,250,.3);"><div class="cq-ed-icon" style="color:#60a5fa">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 4</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
-  h += `<div class="cq-ed-replica" style="border-color:rgba(52,211,153,.3);"><div class="cq-ed-icon" style="color:#34d399">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 7</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
+  h += `<div class="cq-ed-replica" style="border-color:rgba(245,158,11,.3);background:rgba(245,158,11,.05);"><div class="cq-ed-icon" style="color:var(--leader)">◉</div><div class="cq-ed-role" style="color:var(--leader)">LEADER</div><div class="cq-ed-node">Tablet 1 → Node 1</div><div class="cq-ed-status" style="color:var(--txt);font-weight:400;margin-top:6px;">Lease Valid ⏳</div></div>`;
+  h += `<div class="cq-ed-mid"><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:var(--leader)">Heartbeat (500ms) →</span></div><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow" style="color:var(--ok)">← ACK</span></div></div>`;
+  h += `<div class="cq-ed-replica" style="border-color:rgba(96,165,250,.3);"><div class="cq-ed-icon" style="color:var(--follower)">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 4</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
+  h += `<div class="cq-ed-replica" style="border-color:rgba(52,211,153,.3);"><div class="cq-ed-icon" style="color:var(--near)">○</div><div class="cq-ed-role">FOLLOWER</div><div class="cq-ed-node">Tablet 1 → Node 7</div><div class="cq-ed-status" style="color:var(--txt2);font-weight:400;margin-top:6px;">Timer Reset ⏱</div></div>`;
   h += `</div>`;
   h += `</div>`;
 
@@ -4307,7 +4328,7 @@ function _renderArchConsensus(container) {
   h += `<div class="cq-ed-replica cq-ed-dead"><div class="cq-ed-icon">✕</div><div class="cq-ed-role">OLD LEADER</div><div class="cq-ed-node">Tablet 1 → Node 1 (FD-1)</div><div class="cq-ed-status">FAILED</div></div>`;
   h += `<div class="cq-ed-mid"><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow">RequestVote →</span></div><div class="cq-ed-vote-line"><span class="cq-ed-vote-arrow">← VoteGranted</span></div><div class="cq-ed-term-badge">term: 4 → 5</div></div>`;
   h += `<div class="cq-ed-replica cq-ed-candidate"><div class="cq-ed-icon" style="color:#22c55e">◉</div><div class="cq-ed-role" style="color:#22c55e">NEW LEADER</div><div class="cq-ed-node">Tablet 1 → Node 4 (FD-2)</div><div class="cq-ed-status cq-ed-promoted">ELECTED ✓</div></div>`;
-  h += `<div class="cq-ed-replica cq-ed-voter"><div class="cq-ed-icon" style="color:#60a5fa">○</div><div class="cq-ed-role">VOTER</div><div class="cq-ed-node">Tablet 1 → Node 7 (FD-3)</div><div class="cq-ed-status">GRANTED VOTE</div></div>`;
+  h += `<div class="cq-ed-replica cq-ed-voter"><div class="cq-ed-icon" style="color:var(--follower)">○</div><div class="cq-ed-role">VOTER</div><div class="cq-ed-node">Tablet 1 → Node 7 (FD-3)</div><div class="cq-ed-status">GRANTED VOTE</div></div>`;
   h += `</div>`;
 
   // Quorum math
@@ -4426,7 +4447,7 @@ function _renderArchHybridTime(container) {
   h += `<div style="font-size:14px;color:var(--txt2);text-transform:uppercase;letter-spacing:1px;font-weight:bold;margin-bottom:16px;">Anatomy of a Hybrid Time Timestamp</div>`;
   h += `<div style="display:inline-flex;border:1px solid #a78bfa;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(167,139,250,0.1);">`;
   h += `<div style="background:rgba(167,139,250,0.1);padding:16px 24px;border-right:1px solid #a78bfa;">`;
-  h += `<div style="font-size:24px;font-family:var(--mono);color:#a78bfa;font-weight:bold;">1682782390123</div>`;
+  h += `<div style="font-size:24px;font-family:var(--mono);color:var(--sql-kw);font-weight:bold;">1682782390123</div>`;
   h += `<div style="font-size:12px;color:var(--txt);margin-top:4px;">Physical Time (Microseconds)</div>`;
   h += `</div>`;
   h += `<div style="background:rgba(236,72,153,0.1);padding:16px 24px;">`;
@@ -4505,7 +4526,7 @@ function _renderArchSecurityTLS(container) {
 
   // Client-to-Node
   h += `<div class="sec-client-node" style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
-  h += `<div style="font-size:13px;font-weight:700;color:#60a5fa;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Client → Node Traffic</div>`;
+  h += `<div style="font-size:13px;font-weight:700;color:var(--sql-num);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Client → Node Traffic</div>`;
   h += `<div style="font-size:13px;color:var(--txt2);line-height:1.6;margin-bottom:16px;">Application drivers and admin tools connect over TLS 1.2+. Supports one-way TLS (server certificate only) or full mutual TLS where the client also presents a certificate.</div>`;
   h += `<div style="display:flex;flex-direction:column;gap:10px;">`;
   const clientPorts = [
@@ -4520,7 +4541,7 @@ function _renderArchSecurityTLS(container) {
     h += `<div style="display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;">`;
     h += `<span style="font-size:13px;font-family:var(--mono);color:${p.color};font-weight:700;min-width:52px;">${p.port}</span>`;
     h += `<span style="font-size:12px;color:var(--txt2);">${p.label}</span>`;
-    h += `<span style="margin-left:auto;font-size:11px;background:rgba(96,165,250,0.1);color:#60a5fa;border:1px solid rgba(96,165,250,0.2);border-radius:4px;padding:2px 7px;">TLS 1.2+</span>`;
+    h += `<span style="margin-left:auto;font-size:11px;background:rgba(96,165,250,0.1);color:var(--sql-num);border:1px solid rgba(96,165,250,0.2);border-radius:4px;padding:2px 7px;">TLS 1.2+</span>`;
     h += `</div>`;
   });
   h += `</div>`;
@@ -4589,7 +4610,7 @@ function _renderArchSecurityRest(container) {
 
   // Layer 1 — Data
   h += `<div style="flex:1;padding:16px 18px;background:rgba(96,165,250,0.05);border-right:1px solid var(--border);">`;
-  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#60a5fa;margin-bottom:8px;">Layer 1 · Data</div>`;
+  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--sql-num);margin-bottom:8px;">Layer 1 · Data</div>`;
   h += `<div style="font-size:22px;margin-bottom:6px;">📄</div>`;
   h += `<div style="font-size:13px;font-weight:600;color:var(--txt1);margin-bottom:4px;">SST Files (Tablets)</div>`;
   h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">Plaintext rows on write → encrypted to disk with DEK (AES-256-CTR). Decrypted on read by the TServer in memory only.</div>`;
@@ -4600,7 +4621,7 @@ function _renderArchSecurityRest(container) {
 
   // Layer 2 — DEK
   h += `<div style="flex:1;padding:16px 18px;background:rgba(167,139,250,0.05);border-right:1px solid var(--border);">`;
-  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#a78bfa;margin-bottom:8px;">Layer 2 · DEK</div>`;
+  h += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--sql-kw);margin-bottom:8px;">Layer 2 · DEK</div>`;
   h += `<div style="font-size:22px;margin-bottom:6px;">🗝️</div>`;
   h += `<div style="font-size:13px;font-weight:600;color:var(--txt1);margin-bottom:4px;">Data Encryption Key</div>`;
   h += `<div style="font-size:12px;color:var(--txt2);line-height:1.5;">Unique per flushed SST file. Encrypted with the Universe Key and <b>embedded in the SST file header</b> (EncryptionHeaderPB). Never stored in plaintext on disk.</div>`;
@@ -4624,7 +4645,7 @@ function _renderArchSecurityRest(container) {
   h += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">`;
 
   h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
-  h += `<div style="font-size:13px;font-weight:700;color:#34d399;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Key Rotation (Zero Downtime)</div>`;
+  h += `<div style="font-size:13px;font-weight:700;color:var(--sql-fn);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Key Rotation (Zero Downtime)</div>`;
   h += `<div style="font-size:13px;color:var(--txt2);line-height:1.6;margin-bottom:12px;">Universe Key rotation is a two-phase cluster operation. Only newly flushed SST files use the new key — existing files are re-encrypted lazily during compaction.</div>`;
   h += `<div style="display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--txt2);">`;
   [
@@ -4635,12 +4656,12 @@ function _renderArchSecurityRest(container) {
     'Older SST files retain their original uk_version — re-encrypted transparently during compaction',
     'Old Universe Key remains "in-use" (can decrypt old files) until all files are compacted'
   ].forEach((s, i) => {
-    h += `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:#34d399;font-weight:700;min-width:14px;">${i+1}.</span><span>${s}</span></div>`;
+    h += `<div style="display:flex;gap:8px;align-items:flex-start;"><span style="color:var(--sql-fn);font-weight:700;min-width:14px;">${i+1}.</span><span>${s}</span></div>`;
   });
   h += `</div></div>`;
 
   h += `<div style="background:var(--s1);border:1px solid var(--border);border-radius:10px;padding:20px;">`;
-  h += `<div style="font-size:13px;font-weight:700;color:#f59e0b;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Supported KMS Providers</div>`;
+  h += `<div style="font-size:13px;font-weight:700;color:var(--sql-str);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Supported KMS Providers</div>`;
   const kms = [
     { name: 'AWS KMS', desc: 'Managed keys in AWS Key Management Service' },
     { name: 'HashiCorp Vault', desc: 'Self-managed secrets engine (Transit backend)' },
@@ -4650,7 +4671,7 @@ function _renderArchSecurityRest(container) {
   ];
   kms.forEach(k => {
     h += `<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;">`;
-    h += `<span style="color:#f59e0b;font-size:14px;margin-top:1px;">◈</span>`;
+    h += `<span style="color:var(--sql-str);font-size:14px;margin-top:1px;">◈</span>`;
     h += `<div><div style="font-size:13px;font-weight:600;color:var(--txt1);">${k.name}</div><div style="font-size:12px;color:var(--txt2);">${k.desc}</div></div>`;
     h += `</div>`;
   });
@@ -4681,24 +4702,24 @@ function _renderArchSecurityRLS(container) {
   h += `<div>`;
   h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Step 1 — Enable RLS on the table</div>`;
   h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
-  h += `<span style="color:#a78bfa;">ALTER TABLE</span> accounts<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ENABLE ROW LEVEL SECURITY</span>;`;
+  h += `<span style="color:var(--sql-kw);">ALTER TABLE</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">ENABLE ROW LEVEL SECURITY</span>;`;
   h += `</div>`;
   h += `<div style="font-size:12px;color:var(--txt3);margin-top:14px;margin-bottom:8px;">Step 2 — Create an isolation policy</div>`;
   h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
-  h += `<span style="color:#a78bfa;">CREATE POLICY</span> tenant_isolation<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ON</span> accounts<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">USING</span> (owner_id = <span style="color:#34d399;">current_user</span>());`;
+  h += `<span style="color:var(--sql-kw);">CREATE POLICY</span> tenant_isolation<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">ON</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">USING</span> (owner_id = <span style="color:var(--sql-fn);">current_user</span>());`;
   h += `</div>`;
   h += `</div>`;
 
   h += `<div>`;
   h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Optional — command-specific policy</div>`;
   h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.7;color:var(--txt);">`;
-  h += `<span style="color:#a78bfa;">CREATE POLICY</span> active_read<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">ON</span> accounts<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">FOR SELECT</span><br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#a78bfa;">USING</span> (status = <span style="color:#f59e0b;">'active'</span>);`;
+  h += `<span style="color:var(--sql-kw);">CREATE POLICY</span> active_read<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">ON</span> accounts<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">FOR SELECT</span><br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-kw);">USING</span> (status = <span style="color:var(--sql-str);">'active'</span>);`;
   h += `</div>`;
   h += `<div style="margin-top:14px;font-size:12px;color:var(--txt2);line-height:1.6;">The policy predicate is <b>transparently appended</b> as a WHERE clause by the query planner. The application issues a plain <code>SELECT * FROM accounts</code> and sees only its permitted rows.</div>`;
   h += `</div>`;
@@ -4728,7 +4749,7 @@ function _renderArchSecurityRLS(container) {
     h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt2);">${r.id}</td>`;
     h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt);">${r.owner}</td>`;
     h += `<td style="padding:8px 12px;font-family:var(--mono);color:var(--txt2);">${r.balance}</td>`;
-    h += `<td style="padding:8px 12px;"><span style="font-size:11px;padding:2px 8px;border-radius:4px;${r.status === 'active' ? 'background:rgba(52,211,153,0.1);color:#34d399;border:1px solid rgba(52,211,153,0.2);' : 'background:rgba(148,163,184,0.1);color:var(--txt3);border:1px solid var(--border);'}">${r.status}</span></td>`;
+    h += `<td style="padding:8px 12px;"><span style="font-size:11px;padding:2px 8px;border-radius:4px;${r.status === 'active' ? 'background:rgba(52,211,153,0.1);color:var(--sql-fn);border:1px solid rgba(52,211,153,0.2);' : 'background:rgba(148,163,184,0.1);color:var(--txt3);border:1px solid var(--border);'}">${r.status}</span></td>`;
     [r.alice, r.bob, r.reader].forEach(v => {
       h += `<td style="padding:8px 12px;text-align:center;"><span style="font-size:15px;">${v ? '✓' : '–'}</span></td>`;
     });
@@ -4759,12 +4780,12 @@ function _renderArchSecurityColumn(container) {
   h += `<div>`;
   h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Enable extension &amp; write encrypted data</div>`;
   h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.8;color:var(--txt);">`;
-  h += `<span style="color:#a78bfa;">CREATE EXTENSION</span> pgcrypto;<br/><br/>`;
-  h += `<span style="color:#a78bfa;">INSERT INTO</span> customers (name, ssn, email)<br/>`;
-  h += `<span style="color:#a78bfa;">VALUES</span> (<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#f59e0b;">'Alice'</span>,<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_encrypt</span>(<span style="color:#f59e0b;">'123-45-6789'</span>, <span style="color:#f59e0b;">'$KEY'</span>),<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_encrypt</span>(<span style="color:#f59e0b;">'alice@co.com'</span>, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
+  h += `<span style="color:var(--sql-kw);">CREATE EXTENSION</span> pgcrypto;<br/><br/>`;
+  h += `<span style="color:var(--sql-kw);">INSERT INTO</span> customers (name, ssn, email)<br/>`;
+  h += `<span style="color:var(--sql-kw);">VALUES</span> (<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-str);">'Alice'</span>,<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-fn);">pgp_sym_encrypt</span>(<span style="color:var(--sql-str);">'123-45-6789'</span>, <span style="color:var(--sql-str);">'$KEY'</span>),<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-fn);">pgp_sym_encrypt</span>(<span style="color:var(--sql-str);">'alice@co.com'</span>, <span style="color:var(--sql-str);">'$KEY'</span>)<br/>`;
   h += `);`;
   h += `</div>`;
   h += `</div>`;
@@ -4772,13 +4793,13 @@ function _renderArchSecurityColumn(container) {
   h += `<div>`;
   h += `<div style="font-size:12px;color:var(--txt3);margin-bottom:8px;">Read — decrypt only when key is supplied</div>`;
   h += `<div style="font-family:var(--mono);font-size:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;line-height:1.8;color:var(--txt);">`;
-  h += `<span style="color:#a78bfa;">SELECT</span><br/>`;
+  h += `<span style="color:var(--sql-kw);">SELECT</span><br/>`;
   h += `&nbsp;&nbsp;name,<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_decrypt</span>(ssn::bytea, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
-  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a78bfa;">AS</span> ssn_plain,<br/>`;
-  h += `&nbsp;&nbsp;<span style="color:#34d399;">pgp_sym_decrypt</span>(email::bytea, <span style="color:#f59e0b;">'$KEY'</span>)<br/>`;
-  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a78bfa;">AS</span> email_plain<br/>`;
-  h += `<span style="color:#a78bfa;">FROM</span> customers <span style="color:#a78bfa;">WHERE</span> id = <span style="color:#60a5fa;">1</span>;`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-fn);">pgp_sym_decrypt</span>(ssn::bytea, <span style="color:var(--sql-str);">'$KEY'</span>)<br/>`;
+  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--sql-kw);">AS</span> ssn_plain,<br/>`;
+  h += `&nbsp;&nbsp;<span style="color:var(--sql-fn);">pgp_sym_decrypt</span>(email::bytea, <span style="color:var(--sql-str);">'$KEY'</span>)<br/>`;
+  h += `&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:var(--sql-kw);">AS</span> email_plain<br/>`;
+  h += `<span style="color:var(--sql-kw);">FROM</span> customers <span style="color:var(--sql-kw);">WHERE</span> id = <span style="color:var(--sql-num);">1</span>;`;
   h += `</div>`;
   h += `</div>`;
 
@@ -5102,6 +5123,7 @@ function _getSidebarScenarioOrder() {
 }
 
 window.addEventListener('load', () => {
+  initTheme();
   buildSidebar();
   selectScenario('home');
   initInfoPanelResize();
@@ -5112,6 +5134,7 @@ window.addEventListener('load', () => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
     const key = e.key.toLowerCase();
+    if (key === 't' && !e.ctrlKey && !e.metaKey) toggleTheme();
     if (key === 'f' && !e.ctrlKey && !e.metaKey) toggleFocusMode();
     if (key === '[') toggleSidebar();
     if (key === ']') toggleInfoPanel();
