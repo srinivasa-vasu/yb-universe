@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YugabyteDB AI & Vector Explorer</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Rajdhani:wght@500;600;700&family=Outfit:wght@300;400;500&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <header>
+    <div class="logo">
+      <img src="../logo.svg" alt="YugabyteDB" style="height: 20px;">
+    </div>
+    <span class="logo-txt" style="font-size:12px;color:var(--txt2);font-family:var(--body);margin-left:4px">AI &amp; Vector Explorer</span>
+
+    <div class="header-right">
+      <div style="display: flex; align-items: center; gap: 12px; margin-right: 20px; padding-right: 20px; border-right: 1px solid var(--border);">
+        <span class="hbadge" id="active-badge">Vectors & Embeddings</span>
+        <div class="cluster-health">
+          <div class="dot" id="health-dot"></div><span id="health-txt">pgvector enabled · YugabyteDB 2024.2+</span>
+        </div>
+      </div>
+
+      <div class="guide-control">
+        <span>GUIDE</span>
+        <label class="slider-switch">
+          <input type="checkbox" id="guide-toggle" onchange="toggleGuideSetting(this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="vertical-sep"></div>
+      <div class="help-icon" onclick="toggleHelp()" title="Keyboard Shortcuts (?)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+          <line x1="12" y1="17" x2="12.01" y2="17"></line>
+        </svg>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-main">
+    <!-- SIDEBAR -->
+    <nav class="sidebar" id="sidebar">
+      <div class="pane-toggle toggle-left" onclick="toggleSidebar()" title="Toggle Sidebar ( [ )">◀</div>
+
+      <button class="sbtn sbtn-home active" onclick="selectScenario(0)">
+        <span class="sicon">🏠</span>
+        <div>
+          <div class="slabel">Explorer Home</div>
+          <div class="ssub">Scenario Overview</div>
+        </div>
+      </button>
+
+      <div class="sgroup">Fundamentals</div>
+      <button class="sbtn" onclick="selectScenario(1)">
+        <span class="sicon">🧩</span>
+        <div>
+          <div class="slabel">Vector Embeddings</div>
+          <div class="ssub">Data Vectorization</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(2)">
+        <span class="sicon">📊</span>
+        <div>
+          <div class="slabel">Vector Dimensions</div>
+          <div class="ssub">Feature Nuance</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(3)">
+        <span class="sicon">⚖️</span>
+        <div>
+          <div class="slabel">Normalization</div>
+          <div class="ssub">Magnitude Scaling</div>
+        </div>
+      </button>
+
+      <div class="sgroup">Similarity</div>
+      <button class="sbtn" onclick="selectScenario(4)">
+        <span class="sicon">🎯</span>
+        <div>
+          <div class="slabel">Distance Metrics</div>
+          <div class="ssub">L2, Cosine, IP</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(5)">
+        <span class="sicon">📏</span>
+        <div>
+          <div class="slabel">L2 (Euclidean)</div>
+          <div class="ssub">Radius & Range</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(6)">
+        <span class="sicon">📐</span>
+        <div>
+          <div class="slabel">Cosine Similarity</div>
+          <div class="ssub">Angular Search</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(7)">
+        <span class="sicon">✖️</span>
+        <div>
+          <div class="slabel">Inner Product</div>
+          <div class="ssub">Projection Score</div>
+        </div>
+      </button>
+
+      <div class="sgroup">HNSW Indexing</div>
+      <button class="sbtn" onclick="selectScenario(8)">
+        <span class="sicon">🏗️</span>
+        <div>
+          <div class="slabel">HNSW Construction</div>
+          <div class="ssub">Construction Mechanics</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(9)">
+        <span class="sicon">🔍</span>
+        <div>
+          <div class="slabel">HNSW Search</div>
+          <div class="ssub">Graph Navigation</div>
+        </div>
+      </button>
+
+      <div class="sgroup">AI Ecosystem</div>
+      <button class="sbtn" onclick="selectScenario(10)">
+        <span class="sicon">🔌</span>
+        <div>
+          <div class="slabel">MCP Integration</div>
+          <div class="ssub">AI Tool Use</div>
+        </div>
+      </button>
+
+      <div class="sgroup">Architecture</div>
+      <button class="sbtn" onclick="selectScenario(11)">
+        <span class="sicon">🔄</span>
+        <div>
+          <div class="slabel">RAG Pipeline</div>
+          <div class="ssub">Retriever + LLM</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(12)">
+        <span class="sicon">🧬</span>
+        <div>
+          <div class="slabel">Hybrid Search</div>
+          <div class="ssub">Filters + Vector</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(13)">
+        <span class="sicon">🌐</span>
+        <div>
+          <div class="slabel">Distributed HNSW</div>
+          <div class="ssub">Multi-node Scaling</div>
+        </div>
+      </button>
+      <div class="sgroup">Advanced Sampling</div>
+      <button class="sbtn" onclick="selectScenario(14)">
+        <span class="sicon">📈</span>
+        <div>
+          <div class="slabel">Top-K Sampling</div>
+          <div class="ssub">Probability Cutoff</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(15)">
+        <span class="sicon">🌊</span>
+        <div>
+          <div class="slabel">Top-P Sampling</div>
+          <div class="ssub">Nucleus Cumulative</div>
+        </div>
+      </button>
+      <button class="sbtn" onclick="selectScenario(16)">
+        <span class="sicon">🎲</span>
+        <div>
+          <div class="slabel">Hybrid Sampling</div>
+          <div class="ssub">Sampling Synergy</div>
+        </div>
+      </button>
+    </nav>
+
+    <!-- MAIN AREA -->
+    <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); min-height: 0;">
+      <!-- MAIN TABS -->
+      <div id="tab-container" style="display:flex; border-bottom:1px solid var(--border); padding: 0 20px; gap: 20px; flex-shrink: 0; align-items:center;">
+        <button id="tab-btn-explorer" onclick="switchMainTab('explorer')" style="padding: 12px 0; background: none; border: none; color: var(--leader); font-family: var(--head); font-size: 14px; cursor: pointer; border-bottom: 2px solid var(--leader); font-weight:600;">Vector Explorer</button>
+        <button id="tab-btn-guide" onclick="switchMainTab('guide')" style="padding: 12px 0; background: none; border: none; color: var(--txt3); font-family: var(--head); font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent; font-weight:600;">Getting Started Guide</button>
+      </div>
+
+      <!-- NARRATION BAR -->
+      <div class="narration-bar idle" id="narration-bar">
+        <span class="narration-step-badge" id="narration-badge">Ready</span>
+        <span class="narration-text" id="narration-text">Select a scenario and click Step → to begin</span>
+      </div>
+
+      <!-- HOME VIEW -->
+      <div id="home-view">
+        <!-- Content dynamically rendered by engine.js -->
+      </div>
+
+      <div class="canvas-wrap" id="main-canvas-wrap" style="flex: 1; padding: 0;">
+        <div class="canvas-container">
+          <!-- SVG for interactive vector space -->
+          <svg id="vector-canvas" width="600" height="600" viewBox="0 0 600 600" role="img" aria-label="Interactive vector-space visualization. Each step is narrated in the Step-by-Step Guide panel."></svg>
+
+          <!-- Metrics Reference Overlay -->
+          <div id="metrics-ref-overlay" class="math-overlay" style="display:none; left:20px; right:auto; width:330px; top:20px">
+            <div style="font-family:var(--head); font-size:14px; color:var(--leader); margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:5px">Metrics Reference Guide</div>
+
+            <table style="width: 100%; font-size: 10px; text-align: left; border-collapse: collapse; margin-bottom: 12px;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border); color: var(--txt2);">
+                  <th style="padding: 4px 0;">Metric</th>
+                  <th>Range</th>
+                  <th>Perfect Match</th>
+                  <th>Opposite</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px 0; color: #60a5fa;">Cosine Sim</td><td>[-1, 1]</td><td style="color:var(--ok)">1</td><td style="color:var(--error)">-1</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px 0; color: #f59e0b;">Cosine Dist</td><td>[0, 2]</td><td style="color:var(--ok)">0</td><td style="color:var(--error)">2</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px 0; color: #10b981;">L2 Dist <span class="sql-kw">&lt;-&gt;</span></td><td>[0, ∞)</td><td style="color:var(--ok)">0</td><td style="color:var(--error)">∞</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #a855f7;">Inner Prod <span class="sql-kw">&lt;#&gt;</span></td><td>(-∞, ∞)</td><td style="color:var(--ok)">Large +</td><td style="color:var(--error)">Large -</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style="font-size:11px; color:var(--txt3); margin-bottom: 8px;">Load an interactive example:</div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="btn" style="font-size:10px; flex:1; padding:4px 0; min-width:80px;" onclick="showL2Example()">📏 L2</button>
+              <button class="btn" style="font-size:10px; flex:1; padding:4px 0; min-width:80px;" onclick="showCosineExample()">∡ Cosine</button>
+              <button class="btn" style="font-size:10px; flex:1; padding:4px 0; min-width:80px;" onclick="showIPExample()">✖ Inner Prod</button>
+            </div>
+          </div>
+
+          <!-- Distance Lab Overlay -->
+          <div id="dist-lab-overlay" class="math-overlay" style="display:none; right:20px; left:auto; width:340px; bottom:20px; top:auto">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); padding-bottom:5px; margin-bottom:10px">
+              <div style="font-family:var(--head); font-size:14px; color:var(--leader)">Distance Mapping Lab</div>
+              <button class="btn" id="btn-toggle-norm" onclick="toggleLabNorm()" style="font-size:9px; padding:2px 6px">Normalize: OFF</button>
+            </div>
+
+            <div class="math-group" style="margin-bottom:12px">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">L2 (Euclidean) · <span class="sql-kw">&lt;-&gt;</span></div>
+              <div class="math-item"><span class="math-label">Raw Distance</span><span class="math-val" id="lab-l2">0.00</span></div>
+              <div id="sql-l2" style="font-size:9px; background:var(--bg); padding:6px; border-radius:4px; color:#8ba3c8; margin-top:6px; font-family:var(--mono);"></div>
+            </div>
+
+            <div class="math-group" style="margin-bottom:12px">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">Cosine Similarity · <span class="sql-kw">&lt;=&gt;</span></div>
+              <div class="math-item"><span class="math-label">Similarity (cos θ)</span><span class="math-val" id="lab-cos-sim">0.00</span></div>
+              <div class="math-item" style="color:var(--ok)"><span class="math-label">Mapped Dist: 1 - Sim</span><span class="math-val" id="lab-cos-dist">0.00</span></div>
+              <div id="sql-cos" style="font-size:9px; background:var(--bg); padding:6px; border-radius:4px; color:#8ba3c8; margin-top:6px; font-family:var(--mono);"></div>
+            </div>
+
+            <div class="math-group">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">Inner Product · <span class="sql-kw">&lt;#&gt;</span></div>
+              <div class="math-item"><span class="math-label">Raw Product (a·b)</span><span class="math-val" id="lab-ip">0.00</span></div>
+              <div class="math-item" style="color:var(--ok)"><span class="math-label">Mapped Dist: - (a·b)</span><span class="math-val" id="lab-ip-dist">0.00</span></div>
+              <div id="sql-ip" style="font-size:9px; background:var(--bg); padding:6px; border-radius:4px; color:#8ba3c8; margin-top:6px; font-family:var(--mono);"></div>
+            </div>
+
+            <div id="lab-norm-hint" style="display:none; font-size:10px; color:var(--ok); margin-top:10px; border-top:1px solid var(--border); padding-top:8px; line-height:1.4">
+              <b>💡 Geometry Tip:</b> When normalized (mag=1), <b>Inner Product</b> is identical to <b>Cosine Similarity</b>.
+            </div>
+          </div>
+
+          <!-- HNSW Controls -->
+          <div class="param-controls" id="hnsw-controls" style="display:none">
+            <div class="param-row"><span>M</span><input type="range" id="param-m" min="2" max="32" value="16"> <span id="val-m">16</span></div>
+            <div class="param-row"><span>ef_const</span><input type="range" id="param-efc" min="10" max="200" value="64"> <span id="val-efc">64</span></div>
+            <div class="param-row"><span>ef_search</span><input type="range" id="param-efs" min="5" max="100" value="40"> <span id="val-efs">40</span></div>
+            <div class="param-row"><span>LIMIT (K)</span><input type="range" id="param-k" min="1" max="20" value="5"> <span id="val-k">5</span></div>
+          </div>
+
+          <div class="param-controls" id="sampling-controls" style="display:none">
+            <div class="param-row sampling-k-row"><span>Top-K (Count)</span><input type="range" id="param-k-2" min="1" max="20" value="5"> <span id="val-k-2">5</span></div>
+            <div class="param-row sampling-p-row"><span>Top-P (Nucleus)</span><input type="range" id="param-p" min="1" max="100" value="70"> <span id="val-p">0.70</span></div>
+            <div style="font-size:10px; color:var(--txt3); margin-top:8px; line-height:1.4"><b>Top-K</b>: Fixed number of results.<br><b>Top-P</b>: Dynamic results based on cumulative probability.</div>
+          </div>
+
+          <!-- RAG Flow container -->
+          <div id="rag-flow-container" style="display:none; width:100%; height:100%"></div>
+
+          <!-- Normalization Info Overlay -->
+          <div id="norm-info-overlay" class="math-overlay" style="display:none; right:20px; left:auto; width:340px; top:20px">
+            <div style="font-family:var(--head); font-size:14px; color:var(--leader); margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:5px">Normalization Lab</div>
+            <div style="font-size:11px; color:var(--txt3); margin-bottom:12px; line-height:1.4">Click any row in the Vector Data View below to inspect its mathematical normalization.</div>
+
+            <div class="math-group" style="margin-bottom:12px">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">1. Original Vector V</div>
+              <div class="math-item"><span class="math-label">Value</span><span class="math-val" id="norm-v">[0.0, 0.0]</span></div>
+            </div>
+
+            <div class="math-group" style="margin-bottom:12px">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">2. Magnitude ||V||</div>
+              <div class="math-item"><span class="math-label">Formula</span><span class="math-val" style="color:var(--txt3); font-family:var(--mono);">√(x² + y²)</span></div>
+              <div class="math-item"><span class="math-label">Calculation</span><span class="math-val" id="norm-mag-calc" style="font-family:var(--mono);">√(0² + 0²)</span></div>
+              <div class="math-item"><span class="math-label">Result</span><strong style="color:var(--ok); font-family:var(--mono);" id="norm-mag">0.00</strong></div>
+            </div>
+
+            <div class="math-group" style="margin-bottom:12px">
+              <div style="font-size:10px; color:var(--info); margin-bottom:4px">3. Normalized Vector</div>
+              <div class="math-item"><span class="math-label">Formula</span><span class="math-val" style="color:var(--txt3); font-family:var(--mono);">[x / ||V||, y / ||V||]</span></div>
+              <div class="math-item"><span class="math-label">Result</span><strong style="color:var(--ok); font-family:var(--mono);" id="norm-res">[0.0, 0.0]</strong></div>
+            </div>
+
+            <div style="margin-top:15px; padding-top:10px; border-top:1px solid var(--border)">
+              <div class="math-label" style="margin-bottom:5px">YugabyteDB SQL:</div>
+              <div id="norm-sql" style="font-size:9px; background:var(--bg); padding:8px; border-radius:4px; color:#8ba3c8; white-space:pre-wrap; font-family:var(--mono)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DATA PANEL AT BOTTOM -->
+      <div class="data-panel" id="data-panel" style="width:100%; height:180px; margin-top:0; border-radius:0; border-left:0; border-right:0; border-bottom:0;">
+        <div class="log-hdr" style="padding: 6px 12px; flex-shrink: 0; display:flex; justify-content:space-between; align-items:center;">
+          Vector Data View
+          <span style="font-size:9px; color:var(--txt3); text-transform:none; letter-spacing:0">Click row to highlight vector</span>
+        </div>
+        <div class="data-table-wrap" style="flex:1">
+          <table class="data-table" id="data-table">
+            <thead><tr id="data-table-head"></tr></thead>
+            <tbody id="data-table-body"></tbody>
+          </table>
+          </div>
+          </div>
+
+          <!-- MAIN GUIDE TAB -->
+          <div id="main-guide" style="display:none; flex: 1; overflow-y:auto; padding:30px; box-sizing:border-box; background:var(--bg); color:var(--txt); min-height: 0;">
+          <div style="max-width: 800px; margin: 0 auto; padding-bottom: 40px; font-family: var(--body);">
+          <h1 style="font-family: var(--head); color: var(--leader); margin-bottom: 10px;">Getting Started with pgvector in YugabyteDB</h1>
+
+          <p style="margin-bottom: 20px; color: var(--txt2); line-height: 1.6;">
+            This guide covers the complete lifecycle of working with AI vectors in YugabyteDB, from enabling the extension to tuning HNSW indexes for production workloads.
+          </p>
+
+          <div style="background: rgba(168, 85, 247, 0.06); border: 1px solid rgba(168, 85, 247, 0.25); padding: 16px 20px; border-radius: 10px; margin-bottom: 24px;">
+            <div style="font-weight: 600; color: var(--leader); font-size: 14px; margin-bottom: 8px;">What is pgvector?</div>
+            <p style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin: 0;">pgvector is a PostgreSQL extension that adds a native <code>vector</code> data type and distance operators (<code>&lt;-&gt;</code>, <code>&lt;=&gt;</code>, <code>&lt;#&gt;</code>) to the database. YugabyteDB ships pgvector built-in from version 2.20, meaning you get distributed, fault-tolerant vector storage and HNSW indexing across multiple nodes — no separate vector database required.</p>
+          </div>
+
+          <!-- TABLE OF CONTENTS -->
+          <nav class="guide-toc" id="guide-toc">
+            <ul class="guide-toc-list">
+              <li><a href="#guide-s1">1. Extension &amp; DDL</a></li>
+              <li><a href="#guide-s2">2. Distance Metrics</a></li>
+              <li><a href="#guide-s3">3. Querying</a></li>
+              <li><a href="#guide-s4">4. Normalization</a></li>
+              <li><a href="#guide-s5">5. HNSW Indexing</a></li>
+              <li><a href="#guide-s6">6. RAG Pipeline</a></li>
+              <li><a href="#guide-s7">7. Hybrid Search</a></li>
+              <li><a href="#guide-s8">8. Production Checklist</a></li>
+              <li><a href="#guide-s9">9. MCP Integration</a></li>
+              <li><a href="#guide-s10">10. Sampling Strategies</a></li>
+              <li><a href="#guide-s11">11. Common Pitfalls</a></li>
+            </ul>
+          </nav>
+
+          <h2 id="guide-s1" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 30px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">1. Extension & Table DDL</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(1)">🧪 Try it in the Explorer →</button>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span class="sql-kw">CREATE EXTENSION IF NOT EXISTS</span> vector;
+
+<span class="sql-kw">CREATE TABLE</span> products (
+  id <span class="sql-type">SERIAL PRIMARY KEY</span>,
+  name <span class="sql-type">TEXT</span>,
+  category <span class="sql-type">TEXT</span>,
+  embedding <span class="sql-type">vector</span>(3) <span style="color:var(--txt3)">-- 3 dimensions for this example</span>
+);
+
+<span style="color:var(--txt3)">-- Insert 10,000 rows of random synthetic data for testing</span>
+<span class="sql-kw">INSERT INTO</span> products (name, category, embedding)
+<span class="sql-kw">SELECT</span>
+  'Product ' || i,
+  <span class="sql-kw">CASE WHEN</span> i % 2 = 0 <span class="sql-kw">THEN</span> 'Electronics' <span class="sql-kw">ELSE</span> 'Fruits' <span class="sql-kw">END</span>,
+  ('[' || random() || ',' || random() || ',' || random() || ']')::vector
+<span class="sql-kw">FROM</span> generate_series(1, 10000) AS i;
+          </pre>
+
+          <h2 id="guide-s2" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 30px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">2. Distance vs. Similarity</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(4)">🧪 Try it in the Explorer →</button>
+          <p style="margin-bottom: 10px; color: var(--txt2);">Databases optimize for <strong>Distance</strong> (smaller is better) rather than <strong>Similarity</strong> (larger is better). YugabyteDB maps similarity metrics into distances using specific operator classes.</p>
+
+          <div style="background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.3); padding: 14px 18px; border-radius: 10px; margin-bottom: 20px;">
+            <div style="font-weight: 600; color: #f59e0b; font-size: 13px; margin-bottom: 8px;">🔬 Reading the Vector Data View</div>
+            <p style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin: 0 0 8px 0;">Open the <strong>Distance Metrics</strong> scenario in the Explorer and click each step button (L2, Cosine, Inner Product). The <strong>Vector Data View</strong> table at the bottom of the screen updates live — the column header switches between <code>L2 Dist</code>, <code>Cos Dist</code>, and <code>IP Score</code>, the rows re-sort by that metric, and the top-K nearest neighbors are highlighted green.</p>
+            <p style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin: 0;">The same three labeled vectors — <em>"Perfect Match"</em>, <em>"Near"</em>, <em>"Far"</em> (L2 view), or <em>"Parallel"</em>, <em>"Orthogonal"</em>, <em>"Opposite"</em> (Cosine view) — produce completely different rankings under each metric. That single observation is the core intuition for metric selection.</p>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+            <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--txt3);">
+              <th style="padding: 8px;">Metric</th>
+              <th style="padding: 8px;">Operator</th>
+              <th style="padding: 8px;">Similarity Range</th>
+              <th style="padding: 8px;">Distance Mapping</th>
+              <th style="padding: 8px;">Use Case</th>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 8px; color: #10b981;">L2 (Euclidean)</td>
+              <td style="padding: 8px;"><code>&lt;-&gt;</code></td>
+              <td style="padding: 8px; color: var(--txt2);">N/A</td>
+              <td style="padding: 8px; color: var(--txt2);"><code>0</code> (identical) to <code>∞</code></td>
+              <td style="padding: 8px; color: var(--txt2);">Spatial data, unnormalized absolute distances.</td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 8px; color: #60a5fa;">Cosine</td>
+              <td style="padding: 8px;"><code>&lt;=&gt;</code></td>
+              <td style="padding: 8px; color: var(--txt2);"><code>1</code> (identical) to <code>-1</code></td>
+              <td style="padding: 8px; color: var(--txt2);"><code>1 - Similarity</code><br><span style="font-size:11px;color:var(--info)">Range: <code>0</code> to <code>2</code></span></td>
+              <td style="padding: 8px; color: var(--txt2);">Text embeddings (OpenAI, etc) where angle matters.</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px; color: #a855f7;">Inner Product</td>
+              <td style="padding: 8px;"><code>&lt;#&gt;</code></td>
+              <td style="padding: 8px; color: var(--txt2);"><code>∞</code> (identical) to <code>-∞</code></td>
+              <td style="padding: 8px; color: var(--txt2);"><code>-1 * Similarity</code><br><span style="font-size:11px;color:var(--info)">Range: <code>-∞</code> to <code>∞</code></span></td>
+              <td style="padding: 8px; color: var(--txt2);">Fastest for embeddings pre-normalized to length 1.</td>
+            </tr>
+          </table>
+
+<h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Use Cases for Distance Metrics</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Different embedding models and applications require different distance calculations. Here is a breakdown of when to use each.</p>
+
+          <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid #10b981; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+            <div style="font-weight: 600; color: #10b981; font-size: 13px; margin-bottom: 5px;">1. L2 Euclidean Distance (&lt;-&gt;)</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Concept:</strong> Measures the physical straight-line distance between two points.</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Use Case:</strong> Spatial data, RGB color matching, facial recognition, or anytime the <em>absolute magnitude</em> of the data is meaningful.</div>
+            <div style="color: var(--txt3); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">Example: Searching for the closest color to True Red [255, 0, 0]. A vector [250, 10, 5] is very close (low L2 distance), whereas [128, 0, 0] is much darker and further away in space.</div>
+          </div>
+
+          <div style="background: rgba(96, 165, 250, 0.05); border-left: 3px solid #60a5fa; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+            <div style="font-weight: 600; color: #60a5fa; font-size: 13px; margin-bottom: 5px;">2. Cosine Distance (&lt;=&gt;)</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Concept:</strong> Measures the <em>angle</em> between two vectors, completely ignoring their length.</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Use Case:</strong> Text embeddings and NLP (OpenAI, HuggingFace).</div>
+            <div style="color: var(--txt3); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">Example: Comparing the query "How to cook pasta" to a massive 10-page recipe document about "Boiling noodles". The document vector is huge (large magnitude) compared to the short query, but because they point in the same semantic "direction" (angle), Cosine considers them highly similar.</div>
+          </div>
+
+          <div style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid #a855f7; padding: 12px; margin-bottom: 15px; border-radius: 4px;">
+            <div style="font-weight: 600; color: #a855f7; font-size: 13px; margin-bottom: 5px;">3. Inner Product (&lt;#&gt;)</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Concept:</strong> Multiplies the vectors together. It takes <em>both</em> angle and magnitude into account.</div>
+            <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;"><strong>Use Case:</strong> High-performance recommendation systems (like Netflix/Amazon predicting user click-through rates) OR replacing Cosine search for maximum speed.</div>
+            <div style="color: var(--txt3); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">Example: If you normalize all your text embeddings to a length of exactly 1 before inserting them into YugabyteDB, Inner Product mathematically produces the exact same ranking as Cosine, but requires significantly fewer CPU cycles to calculate.</div>
+          </div>
+
+          <h2 id="guide-s3" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">3. Querying: Similarity vs. Distance</h2>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">When querying, you often want to return the actual mathematical <strong>Similarity</strong> (e.g., "95% match") to the application, but you <strong>must</strong> use the <strong>Distance</strong> operator in the <code>ORDER BY</code> clause to utilize the HNSW index.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">L2 (Euclidean) Example</h3>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- L2 only has Distance, not a standard "Similarity" bound.</span>
+<span class="sql-kw">SELECT</span>
+  name,
+  (embedding <span class="sql-kw" style="color:#f59e0b">&lt;-&gt;</span> '[0.12, -0.55, 0.89]') <span class="sql-kw">AS</span> distance
+<span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;-&gt;</span> '[0.12, -0.55, 0.89]' <span class="sql-kw">ASC</span>
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Cosine Example</h3>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- 1 - Distance = Cosine Similarity</span>
+<span class="sql-kw">SELECT</span>
+  name,
+  1 - (embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]') <span class="sql-kw">AS</span> similarity,
+  (embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]') <span class="sql-kw">AS</span> distance
+<span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]' <span class="sql-kw">ASC</span> <span style="color:var(--txt3)">-- Index used here</span>
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Inner Product Example</h3>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- -1 * Distance = Inner Product Similarity</span>
+<span class="sql-kw">SELECT</span>
+  name,
+  -1 * (embedding <span class="sql-kw" style="color:#f59e0b">&lt;#&gt;</span> '[0.12, -0.55, 0.89]') <span class="sql-kw">AS</span> similarity,
+  (embedding <span class="sql-kw" style="color:#f59e0b">&lt;#&gt;</span> '[0.12, -0.55, 0.89]') <span class="sql-kw">AS</span> distance
+<span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;#&gt;</span> '[0.12, -0.55, 0.89]' <span class="sql-kw">ASC</span>
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+
+
+          <h2 id="guide-s4" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">4. Vector Normalization</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(3)">🧪 Try it in the Explorer →</button>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Normalization scales a vector so that its total length (magnitude) is exactly 1, mapping it onto a "Unit Hypersphere".</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">The Formula</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">To normalize a vector <code>V</code>, divide every dimension by its Euclidean magnitude <code>|V|</code>.</p>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- 1. Calculate Magnitude: </span>
+|V| = sqrt(v1² + v2² + ... + vn²)
+
+<span style="color:var(--txt3)">-- 2. Normalize Vector:</span>
+V_norm = [v1 / |V|, v2 / |V|, ..., vn / |V|]
+
+<span style="color:var(--txt3)">-- In YugabyteDB, use the built-in function:</span>
+<span class="sql-kw">SELECT</span> l2_normalize('[3.0, 4.0]'::vector); <span style="color:var(--txt3)">-- Returns [0.6, 0.8]</span>
+          </pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Impact on Distance Metrics</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">When vectors are <strong>normalized</strong> (length = 1), the relationships between metrics mathematically collapse:</p>
+          <ul style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin-left: 20px; margin-bottom: 20px;">
+            <li><strong>Cosine vs Inner Product</strong>: Cosine Similarity and Inner Product become <strong>exactly equal</strong>. Because Cosine calculates <code>(A·B) / (|A||B|)</code>, if <code>|A|=1</code> and <code>|B|=1</code>, the formula simply becomes <code>A·B</code> (Inner Product).</li>
+            <li><strong>Performance</strong>: Inner Product requires fewer arithmetic operations than Cosine. Therefore, the most efficient architecture is to normalize your vectors in the application layer, store them in YugabyteDB, build an Inner Product index, and search using <code>&lt;#&gt;</code>.</li>
+            <li><strong>L2 Distance</strong>: The relative ordering (ranking) of L2 distance becomes identical to Cosine and Inner Product when vectors are normalized.</li>
+          </ul>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Examples: Without vs With Normalization</h3>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- V1: [3, 4]  (Magnitude 5)</span>
+<span style="color:var(--txt3)">-- V2: [6, 8]  (Magnitude 10, parallel to V1)</span>
+
+<span style="color:var(--txt3)">-- 🔴 WITHOUT NORMALIZATION:</span>
+<span class="sql-kw">SELECT</span> '[3.0, 4.0]'::vector <span class="sql-kw">&lt;-&gt;</span> '[6.0, 8.0]'::vector; <span style="color:var(--txt3)">-- L2 Distance: 5</span>
+<span class="sql-kw">SELECT</span> '[3.0, 4.0]'::vector <span class="sql-kw">&lt;=&gt;</span> '[6.0, 8.0]'::vector; <span style="color:var(--txt3)">-- Cosine Distance: 0 (Identical angle)</span>
+<span class="sql-kw">SELECT</span> '[3.0, 4.0]'::vector <span class="sql-kw">&lt;#&gt;</span> '[6.0, 8.0]'::vector; <span style="color:var(--txt3)">-- Inner Product Dist: -50</span>
+
+<span style="color:var(--txt3)">-- 🟢 WITH NORMALIZATION (Both become [0.6, 0.8]):</span>
+<span class="sql-kw">SELECT</span> l2_normalize('[3.0, 4.0]') <span class="sql-kw">&lt;-&gt;</span> l2_normalize('[6.0, 8.0]'); <span style="color:var(--txt3)">-- L2 Distance: 0</span>
+<span class="sql-kw">SELECT</span> l2_normalize('[3.0, 4.0]') <span class="sql-kw">&lt;=&gt;</span> l2_normalize('[6.0, 8.0]'); <span style="color:var(--txt3)">-- Cosine Distance: 0</span>
+<span class="sql-kw">SELECT</span> l2_normalize('[3.0, 4.0]') <span class="sql-kw">&lt;#&gt;</span> l2_normalize('[6.0, 8.0]'); <span style="color:var(--txt3)">-- Inner Product Dist: -1</span>
+          </pre>
+
+
+          <h2 id="guide-s5" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">5. HNSW Indexing & Execution Plans</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(8)">🧪 Try it in the Explorer →</button>
+          <p style="margin-bottom: 10px; color: var(--txt2);">Indexes are specific to the distance operator. You must create an index with the exact operator class you intend to search with.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Index Creation</h3>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Index for Cosine Distance (&lt;=&gt;)</span>
+<span class="sql-kw">CREATE INDEX</span> idx_cosine <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> hnsw (embedding vector_cosine_ops) <span class="sql-kw">WITH</span> (m = 16, ef_construction = 64);
+
+<span style="color:var(--txt3)">-- Index for L2 Distance (&lt;-&gt;)</span>
+<span class="sql-kw">CREATE INDEX</span> idx_l2 <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> hnsw (embedding vector_l2_ops);
+
+<span style="color:var(--txt3)">-- Index for Inner Product (&lt;#&gt;)</span>
+<span class="sql-kw">CREATE INDEX</span> idx_ip <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> hnsw (embedding vector_ip_ops);
+          </pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Search Queries & EXPLAIN Plan</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">When you run a similarity search with an <code>ORDER BY ... LIMIT</code> clause, YugabyteDB will use the HNSW index to push down the KNN (K-Nearest Neighbors) scan.</p>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Find the 5 most similar products based on Cosine Distance</span>
+<span class="sql-kw">EXPLAIN</span> (ANALYZE, COSTS OFF)
+<span class="sql-kw">SELECT</span> name, embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]' AS dist
+<span class="sql-kw">FROM</span> products
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]'
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+
+          <p style="margin-bottom: 5px; color: var(--txt2); font-size: 13px;"><strong>Execution Plan Output:</strong></p>
+          <pre style="background: #1e1e1e; padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #a9b7c6; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin-bottom: 15px;">
+ Limit (actual time=2.134..2.145 rows=5 loops=1)
+   -&gt;  Index Scan using idx_cosine on products (actual time=2.133..2.143 rows=5 loops=1)
+         Order By: (embedding &lt;=&gt; '[0.12,-0.55,0.89]'::vector)
+ Planning Time: 0.128 ms
+ Execution Time: 2.181 ms
+          </pre>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Notice the <strong>Index Scan</strong> indicating that the HNSW index successfully served the nearest neighbors without scanning the full 10,000 rows.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Tuning HNSW: The Highway Analogy</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Think of an HNSW index as building a multi-layered highway network connecting thousands of cities (vectors) across a country. When you query the database, you are starting at a random drop-in point and trying to drive to your target destination as fast as possible.</p>
+
+          <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 20px; background: rgba(0,0,0,0.1); border-radius: 8px;">
+            <tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--txt3);">
+              <th style="padding: 10px;">Parameter</th>
+              <th style="padding: 10px;">Default</th>
+              <th style="padding: 10px;">The Analogy</th>
+              <th style="padding: 10px;">Pros & Cons</th>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 10px; color: #f59e0b; vertical-align: top;"><code>m</code><br><span style="font-size:10px;color:var(--txt3)">(Build Time)</span></td>
+              <td style="padding: 10px; vertical-align: top;">16</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;"><strong>Highway Connections:</strong> The maximum number of roads connecting one city to another.</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;">
+                <strong>Higher (e.g. 32, 64)</strong>: More roads mean fewer dead-ends and shortcuts are easier to find (higher Recall for high-dimension data). <em>Cons</em>: Costs more concrete (RAM/Storage) and takes longer to build.<br><br>
+                <strong>Optimal</strong>: 16 is fine for < 500 dims. Use 32+ for 1536+ dimension models (like OpenAI).
+              </td>
+            </tr>
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 10px; color: #f59e0b; vertical-align: top;"><code>ef_construction</code><br><span style="font-size:10px;color:var(--txt3)">(Build Time)</span></td>
+              <td style="padding: 10px; vertical-align: top;">64</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;"><strong>City Planning Effort:</strong> How exhaustively the city planners search for the absolute best neighboring cities to build roads to when a new city is added.</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;">
+                <strong>Higher (e.g. 128, 200)</strong>: Creates a near-perfect highway network, significantly boosting search accuracy. <em>Cons</em>: Makes `INSERT` and `CREATE INDEX` much slower.<br><br>
+                <strong>Optimal</strong>: Set to at least 2x your `m` value (e.g., 128 or 200).
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; color: #f59e0b; vertical-align: top;"><code>ef_search</code><br><span style="font-size:10px;color:var(--txt3)">(Run Time)</span></td>
+              <td style="padding: 10px; vertical-align: top;">40</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;"><strong>GPS Route Candidates:</strong> While driving, how many alternate routes your GPS actively tracks and evaluates simultaneously.</td>
+              <td style="padding: 10px; color: var(--txt2); vertical-align: top;">
+                <strong>Higher (e.g. 100)</strong>: You check more routes, virtually guaranteeing you find the shortest path (Recall approaches 100%). <em>Cons</em>: Checking 100 routes per hop costs CPU time, increasing query latency.<br><br>
+                <strong>Optimal</strong>: Tune this per-session based on your latency SLA (e.g., 100). It MUST be >= your `LIMIT`.
+              </td>
+            </tr>
+          </table>
+
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Tune search accuracy vs latency per session</span>
+<span class="sql-kw">SET</span> hnsw.ef_search = 100;
+
+<span class="sql-kw">SELECT</span> name <span class="sql-kw">FROM</span> products <span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.1, 0.2, ...]' <span class="sql-kw">LIMIT</span> 5;
+          </pre>
+
+
+          <h2 id="guide-s6" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">6. Building a RAG Pipeline</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(11)">🧪 Try it in the Explorer →</button>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Retrieval-Augmented Generation (RAG) is the architecture used to ground Large Language Models (LLMs) with your private, proprietary data stored in YugabyteDB.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px;">
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); padding: 15px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #10b981; font-size: 14px; margin-bottom: 10px;">Step 1: Embed and Store Documents</div>
+              <p style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 10px;">First, you must process your knowledge base. Text is chunked into smaller paragraphs, sent to an embedding model (like OpenAI), and the resulting text and vector are stored together.</p>
+              <pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; color: #8ba3c8; font-family: var(--mono); font-size: 12px; margin: 0;">
+<span class="sql-kw">CREATE TABLE</span> knowledge_base (id <span class="sql-type">SERIAL</span>, content <span class="sql-type">TEXT</span>, embedding <span class="sql-type">vector</span>(1536));
+<span class="sql-kw">CREATE INDEX ON</span> knowledge_base <span class="sql-kw">USING</span> hnsw (embedding vector_cosine_ops);
+
+<span style="color:var(--txt3)">-- App inserts chunked text alongside the vector generated by the LLM</span>
+<span class="sql-kw">INSERT INTO</span> knowledge_base (content, embedding) <span class="sql-kw">VALUES</span> ('YugabyteDB uses Raft...', '[0.12, -0.55, 0.89]');</pre>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); padding: 15px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #60a5fa; font-size: 14px; margin-bottom: 10px;">Step 2: Semantic Retrieval</div>
+              <p style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 10px;">When a user asks a question (e.g., "How does replication work?"), the app converts the question into a vector and searches the database for the closest semantic matches.</p>
+              <pre style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; color: #8ba3c8; font-family: var(--mono); font-size: 12px; margin: 0;">
+<span style="color:var(--txt3)">-- Retrieve the top 3 most relevant document chunks to the user's question</span>
+<span class="sql-kw">SELECT</span> content <span class="sql-kw">FROM</span> knowledge_base
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[-0.01, 0.55, 0.89]' <span class="sql-kw">LIMIT</span> 3;</pre>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border); padding: 15px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #a855f7; font-size: 14px; margin-bottom: 10px;">Step 3: Augment and Generate</div>
+              <p style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 0;">The application takes the text content returned by YugabyteDB and injects it directly into the prompt sent to the LLM. <i>"Answer the user's question using ONLY the following context: [Context 1] [Context 2]..."</i>. This prevents hallucinations.</p>
+            </div>
+          </div>
+
+
+          <h2 id="guide-s7" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">7. Hybrid Search</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(12)">🧪 Try it in the Explorer →</button>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Pure similarity search is rarely enough. Applications usually need to combine <strong>Semantic Search</strong> (vectors) with <strong>Structural Search</strong> (relational data like tenant IDs, dates, and categories).</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">The Partial Index Approach</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">The most performant way to execute Hybrid Search in YugabyteDB is to build <strong>Partial HNSW Indexes</strong> on your most highly-filtered columns (like <code>tenant_id</code> or categorical partitions). This ensures the HNSW graph is perfectly pre-filtered.</p>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Build an HNSW graph ONLY for electronics</span>
+<span class="sql-kw">CREATE INDEX</span> idx_elec_cosine <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> hnsw (embedding vector_cosine_ops)
+<span class="sql-kw">WHERE</span> category = 'Electronics';
+
+<span style="color:var(--txt3)">-- Build an HNSW graph ONLY for fruits</span>
+<span class="sql-kw">CREATE INDEX</span> idx_fruit_cosine <span class="sql-kw">ON</span> products <span class="sql-kw">USING</span> hnsw (embedding vector_cosine_ops)
+<span class="sql-kw">WHERE</span> category = 'Fruits';
+          </pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Hybrid Search Query</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">When you include the exact <code>WHERE</code> clause used in your partial index alongside the vector <code>ORDER BY</code>, YugabyteDB efficiently routes the query to the correct subgraph.</p>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Find the most similar products THAT ARE ALSO strictly Electronics under $50</span>
+<span class="sql-kw">SELECT</span>
+  name,
+  price,
+  (embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.1, 0.5, 0.8]') <span class="sql-kw">AS</span> distance
+<span class="sql-kw">FROM</span> products
+<span class="sql-kw">WHERE</span> category = 'Electronics' <span style="color:var(--txt3)">-- Hits the partial index</span>
+  <span class="sql-kw">AND</span> price &lt; 50.00            <span style="color:var(--txt3)">-- Standard relational filtering</span>
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.1, 0.5, 0.8]'
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+          <p style="margin-bottom: 20px; color: var(--txt2); font-size: 13px;">Without a partial index, the database would have to do a "Post-Filter" (finding KNN results first, then throwing them away if they aren't Electronics) which hurts recall and performance.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Distributed Vector Search</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">When your data grows beyond a single node, YugabyteDB automatically shards the HNSW index across tablets. At query time, a gateway node scatters the search to every tablet leader in parallel, collects each shard's local Top-K results, and merges them into a single globally-sorted response — all transparently.</p>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(13)" style="margin-bottom: 40px;">🧪 See Distributed HNSW in the Explorer →</button>
+
+          <h2 id="guide-s8" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">8. Production Checklist</h2>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Before deploying vector search to production, ensure you have addressed these critical items.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+            <div style="background: rgba(245, 158, 11, 0.05); border-left: 3px solid #f59e0b; padding: 12px; border-radius: 4px;">
+              <div style="font-weight: 600; color: #f59e0b; font-size: 13px; margin-bottom: 5px;">Choose the Right Dimension Size</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">Smaller dimensions (768) are faster but less expressive. Larger (1536, 3072) capture more nuance but consume more RAM and slow index builds. Match dimensions to your embedding model: OpenAI <code>text-embedding-3-small</code> = 1536, Cohere <code>embed-v3</code> = 1024.</div>
+            </div>
+
+            <div style="background: rgba(96, 165, 250, 0.05); border-left: 3px solid #60a5fa; padding: 12px; border-radius: 4px;">
+              <div style="font-weight: 600; color: #60a5fa; font-size: 13px; margin-bottom: 5px;">Index Maintenance &amp; REINDEX</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">After significant data changes (>20% inserts/deletes), consider <code>REINDEX INDEX idx_name;</code> to rebuild the HNSW graph. This ensures graph quality doesn't degrade over time. In YugabyteDB, this is a non-blocking online operation.</div>
+            </div>
+
+            <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid #10b981; padding: 12px; border-radius: 4px;">
+              <div style="font-weight: 600; color: #10b981; font-size: 13px; margin-bottom: 5px;">Connection Pooling for Vector Workloads</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">Vector search is CPU-intensive. Use connection pooling (PgBouncer, Odyssey) with <code>transaction</code> mode. Note that session-level settings like <code>SET hnsw.ef_search</code> must be re-applied per transaction when using transaction pooling.</div>
+            </div>
+
+            <div style="background: rgba(168, 85, 247, 0.05); border-left: 3px solid #a855f7; padding: 12px; border-radius: 4px;">
+              <div style="font-weight: 600; color: #a855f7; font-size: 13px; margin-bottom: 5px;">Monitoring Index Usage</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">Use <code>pg_stat_user_indexes</code> to verify your HNSW index is being hit. If <code>idx_scan = 0</code>, your queries may be falling back to sequential scan — check that you're using the correct operator and have a <code>LIMIT</code> clause.</div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.05); border-left: 3px solid #ef4444; padding: 12px; border-radius: 4px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">ef_search Must Be ≥ LIMIT</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;"><code>ef_search</code> controls the candidate pool at query time. If it is smaller than your <code>LIMIT K</code>, the search cannot return K distinct results and recall silently degrades. Rule: <strong>ef_search ≥ LIMIT</strong>, and typically set to 2–5× LIMIT for high recall.</div>
+              <div style="color: var(--txt3); font-family: var(--mono); font-size: 12px; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px; margin-top: 8px;">SET hnsw.ef_search = 100;  -- LIMIT 20 → ef_search should be ≥ 20, ideally 60–100</div>
+            </div>
+          </div>
+
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- Monitor HNSW index usage</span>
+<span class="sql-kw">SELECT</span> indexrelname, idx_scan, idx_tup_read, idx_tup_fetch
+<span class="sql-kw">FROM</span> pg_stat_user_indexes
+<span class="sql-kw">WHERE</span> indexrelname LIKE '%hnsw%' <span class="sql-kw">OR</span> indexrelname LIKE '%vector%';
+
+<span style="color:var(--txt3)">-- Check index size</span>
+<span class="sql-kw">SELECT</span> pg_size_pretty(pg_relation_size('idx_cosine')) AS index_size;
+
+<span style="color:var(--txt3)">-- Rebuild HNSW index online</span>
+<span class="sql-kw">REINDEX INDEX</span> CONCURRENTLY idx_cosine;
+          </pre>
+
+
+          <h2 id="guide-s9" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">9. MCP Integration</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(10)">🧪 Try it in the Explorer →</button>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">What is MCP?</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">The <strong>Model Context Protocol (MCP)</strong> is an open standard that enables AI assistants (like Claude) to securely connect to external data sources and tools. Think of it as a universal plug-and-play adapter for LLMs. Instead of building custom API layers for every AI agent, MCP provides a standardized way to expose your enterprise data directly to the models.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">What does it do for YugabyteDB?</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">By using the <a href="https://github.com/yugabyte/yugabytedb-mcp-server" target="_blank" style="color:#60a5fa; text-decoration:underline;">YugabyteDB MCP Server</a>, you instantly grant AI assistants the ability to:</p>
+          <ul style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin-left: 20px; margin-bottom: 20px;">
+            <li><strong>Introspect Schemas:</strong> The AI can automatically discover tables, columns, and relationships within your distributed database.</li>
+            <li><strong>Query Live Data:</strong> The AI can write and execute SQL queries in real-time to answer user questions based on the latest data.</li>
+            <li><strong>Perform Vector Search:</strong> The AI can natively perform similarity searches using <code>pgvector</code> without needing an intermediate middleware layer.</li>
+          </ul>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">Example Queries for AI Assistants</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Once integrated, you can ask your AI assistant to execute queries like the following to verify the setup and explore YugabyteDB-specific capabilities:</p>
+          <pre style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 13px; overflow-x: auto; margin: 15px 0;">
+<span style="color:var(--txt3)">-- 1. Verify YugabyteDB Cluster Architecture</span>
+<span class="sql-kw">SELECT</span> host, port, region, zone <span class="sql-kw">FROM</span> yb_servers();
+
+<span style="color:var(--txt3)">-- 2. Check Table Distribution & Sharding (Tablets)</span>
+<span class="sql-kw">SELECT</span> table_name, num_tablets <span class="sql-kw">FROM</span> yb_table_properties <span class="sql-kw">WHERE</span> table_name = 'products';
+
+<span style="color:var(--txt3)">-- 3. Run a Hybrid Vector Search</span>
+<span class="sql-kw">SELECT</span> name, price <span class="sql-kw">FROM</span> products
+<span class="sql-kw">WHERE</span> category = 'Electronics'
+<span class="sql-kw">ORDER BY</span> embedding <span class="sql-kw" style="color:#f59e0b">&lt;=&gt;</span> '[0.12, -0.55, 0.89]'
+<span class="sql-kw">LIMIT</span> 5;
+          </pre>
+          <p style="margin-bottom: 40px; color: var(--txt2); font-size: 13px;">By using MCP, you empower your AI to act as a highly capable database administrator and data analyst directly over your distributed YugabyteDB cluster.</p>
+
+          <h2 id="guide-s10" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">10. Sampling Strategies</h2>
+          <button class="try-explorer-btn" onclick="switchMainTab('explorer');selectScenario(16)">🧪 Try Hybrid Sampling Synergy →</button>
+
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">In LLM generation, the model outputs a probability distribution for the next token. <strong>Sampling</strong> is the process of selecting the actual token to print. Choosing the right strategy is critical for balancing "creativity" with "factuality".</p>
+          <p style="margin-bottom: 15px; color: var(--txt2); font-size: 13px;">In a YugabyteDB RAG pipeline, your vector search returns the Top-K candidate chunks (<code>LIMIT K</code>). These candidates enter the LLM's context window and influence the token probability distribution. Raising <code>ef_search</code> in YugabyteDB improves <em>retrieval recall</em>; the sampling parameters below then control how the LLM <em>generates</em> from that retrieved context.</p>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">A. Real-World Example: "The cat sat on the..."</h3>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">Imagine the model predicts the following probabilities for the next token:</p>
+          <table style="width: 100%; font-size: 12px; text-align: left; border-collapse: collapse; margin: 15px 0; background: rgba(0,0,0,0.2); border-radius: 8px; overflow: hidden;">
+            <thead>
+              <tr style="background: rgba(59, 130, 246, 0.1); color: var(--leader);">
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Token</th>
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Probability</th>
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Cumulative P</th>
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Sampling Result</th>
+              </tr>
+            </thead>
+            <tbody style="color: var(--txt2);">
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">mat</td><td>0.45</td><td>0.45</td><td>Top-K (1), Top-P (0.5)</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">floor</td><td>0.30</td><td>0.75</td><td>Top-K (2), Out of P</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">bed</td><td>0.15</td><td>0.90</td><td>Top-K (3), Out of P</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px;">couch</td><td>0.08</td><td>0.98</td><td>Top-K (4), Out of P</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px;">moon</td><td>0.02</td><td>1.00</td><td>Top-K (5), Out of P</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">B. SQL Implementations</h3>
+
+          <div style="font-size: 11px; color: var(--txt3); margin-bottom: 8px;">1. Simple Top-K (K=10)</div>
+          <pre style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0 0 15px 0;">
+<span class="sql-kw">SELECT</span> token, probability <span class="sql-kw">FROM</span> llm_output <span class="sql-kw">ORDER BY</span> probability <span class="sql-kw">DESC LIMIT</span> 10;</pre>
+
+          <div style="font-size: 11px; color: var(--txt3); margin-bottom: 8px;">2. Top-P / Nucleus (P=0.70)</div>
+          <pre style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0 0 15px 0;">
+<span class="sql-kw">WITH</span> ranked <span class="sql-kw">AS</span> (
+  <span class="sql-kw">SELECT</span> token, probability,
+         <span class="sql-kw">SUM</span>(probability) <span class="sql-kw">OVER</span> (<span class="sql-kw">ORDER BY</span> probability <span class="sql-kw">DESC</span>) <span class="sql-kw">as</span> cum_p
+  <span class="sql-kw">FROM</span> llm_output
+)
+<span class="sql-kw">SELECT</span> token <span class="sql-kw">FROM</span> ranked <span class="sql-kw">WHERE</span> cum_p <= 0.70;</pre>
+
+          <div style="font-size: 11px; color: var(--txt3); margin-bottom: 8px;">3. Advanced: Temperature (T=0.7)</div>
+          <pre style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; border: 1px solid var(--border); color: #8ba3c8; font-family: var(--mono); font-size: 12px; overflow-x: auto; margin: 0 0 15px 0;">
+<span class="sql-kw">WITH</span> temp_adjusted <span class="sql-kw">AS</span> (
+  <span class="sql-kw">SELECT</span> token, <span class="sql-kw">EXP</span>(<span class="sql-kw">LN</span>(probability) / 0.7) <span class="sql-kw">as</span> adjusted_p <span class="sql-kw">FROM</span> llm_output
+),
+normalized <span class="sql-kw">AS</span> (
+  <span class="sql-kw">SELECT</span> token, adjusted_p / <span class="sql-kw">SUM</span>(adjusted_p) <span class="sql-kw">OVER</span>() <span class="sql-kw">as</span> final_p <span class="sql-kw">FROM</span> temp_adjusted
+)
+<span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> normalized <span class="sql-kw">ORDER BY</span> final_p <span class="sql-kw">DESC LIMIT</span> 10;</pre>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">C. Comparison & Synergy Table</h3>
+          <table style="width: 100%; font-size: 12px; text-align: left; border-collapse: collapse; margin: 15px 0; background: rgba(255,255,255,0.02); border-radius: 8px; overflow: hidden;">
+            <thead>
+              <tr style="background: rgba(168, 85, 247, 0.1); color: var(--leader);">
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Strategy</th>
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Pros</th>
+                <th style="padding: 10px; border-bottom: 1px solid var(--border);">Cons</th>
+              </tr>
+            </thead>
+            <tbody style="color: var(--txt2);">
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px; font-weight: 600;">Greedy (K=1)</td><td>Fastest, most deterministic</td><td>Repetitive, lacks "soul"</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px; font-weight: 600;">Top-K (50)</td><td>Reliable noise filter</td><td>Ignores actual distribution shape</td>
+              </tr>
+              <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 10px; font-weight: 600;">Top-P (0.70)</td><td>Dynamic and nuanced</td><td>Computationally heavier (Sort + Sum)</td>
+              </tr>
+              <tr style="background: rgba(16, 185, 129, 0.05);">
+                <td style="padding: 10px; font-weight: 600; color:#10b981;">Hybrid</td><td>Best of both worlds</td><td>Requires careful tuning of K and P</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 style="color: #60a5fa; margin-top: 20px; font-size: 14px;">D. Edge Case Analysis</h3>
+          <ul style="color: var(--txt2); font-size: 13px; line-height: 1.6; margin-left: 20px; margin-bottom: 20px;">
+            <li><strong>K=0</strong>: Usually treated as "infinity" (disables Top-K).</li>
+            <li><strong>P=1.0</strong>: Disables Top-P (includes all tokens in the tail).</li>
+            <li><strong>High T + Low P</strong>: A "chaotic" setting that can lead to creative but hallucinated results.</li>
+          </ul>
+
+          <h2 id="guide-s11" class="guide-section" style="font-family: var(--head); color: #f59e0b; margin-top: 40px; border-bottom: 1px solid var(--border); padding-bottom: 5px;">11. Common Pitfalls</h2>
+          <p style="margin-bottom: 10px; color: var(--txt2); font-size: 13px;">These are the most frequent mistakes developers encounter when working with pgvector in YugabyteDB.</p>
+
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px;">
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 14px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">❌ Mismatched Operator Class</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;">Creating an index with <code>vector_cosine_ops</code> but querying with <code>&lt;-&gt;</code> (L2). The planner will <strong>NOT</strong> use the index and silently fall back to a sequential scan.</div>
+              <div style="color: var(--ok); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">✅ Fix: Match the operator to the index. <code>vector_cosine_ops</code> → <code>&lt;=&gt;</code>, <code>vector_l2_ops</code> → <code>&lt;-&gt;</code>, <code>vector_ip_ops</code> → <code>&lt;#&gt;</code></div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 14px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">❌ Forgetting the LIMIT Clause</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;">HNSW indexes <strong>require</strong> an <code>ORDER BY &lt;distance&gt; LIMIT K</code> pattern. Without <code>LIMIT</code>, PG computes distances to <em>all</em> rows, completely defeating the index.</div>
+              <div style="color: var(--ok); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">✅ Fix: Always include LIMIT. Use <code>EXPLAIN</code> to verify "Index Scan" appears in the plan.</div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 14px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">❌ Using Inner Product Without Normalizing</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;">Inner Product distance is only equivalent to Cosine Distance when all vectors have a magnitude of exactly 1. If you skip normalization, rankings will be wildly incorrect.</div>
+              <div style="color: var(--ok); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">✅ Fix: Normalize in your app layer before INSERT, or use <code>l2_normalize()</code> in SQL. Then safely use <code>&lt;#&gt;</code> for maximum throughput.</div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 14px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">❌ ef_search Too Low for Production</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;">The default <code>ef_search = 40</code> is fine for dev, but production workloads on high-dimensional data (1536+) often need 100-200 for acceptable recall (&gt;95%).</div>
+              <div style="color: var(--ok); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">✅ Fix: Benchmark with <code>SET hnsw.ef_search = 100;</code> and measure recall vs. latency. Increase until recall stabilizes.</div>
+            </div>
+
+            <div style="background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); padding: 14px; border-radius: 8px;">
+              <div style="font-weight: 600; color: #ef4444; font-size: 13px; margin-bottom: 5px;">❌ Mixing Embedding Models</div>
+              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5; margin-bottom: 8px;">Inserting vectors from <code>text-embedding-ada-002</code> and querying with <code>text-embedding-3-small</code>. Different models produce incompatible vector spaces — results will be meaningless.</div>
+              <div style="color: var(--ok); font-size: 12px; font-family: var(--mono); background: rgba(0,0,0,0.2); padding: 6px; border-radius: 4px;">✅ Fix: Use the same model for both ingestion and query. Store the model name as a column for traceability.</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- INFO PANEL -->
+    <aside class="info-panel" id="info-panel">
+      <div class="pane-toggle toggle-right" onclick="toggleInfoPanel()" title="Toggle Info Panel ( ] )">▶</div>
+      <div class="i-title" id="i-title-wrap" style="display:flex; justify-content:space-between; align-items:center;">
+        <span id="i-title">AI & Vector Search</span>
+        <button class="expand-btn" onclick="toggleExpandInfoPanel()" title="Expand Panel">↔</button>
+      </div>
+      <div class="i-desc" id="i-desc" role="status" aria-live="polite">Learn how high-dimensional vectors and pgvector power AI applications in YugabyteDB.</div>
+
+      <div class="step-sec" id="step-sec"><span class="scount">—</span></div>
+
+      <div class="ddl-sec" id="ddl-sec">
+        <div class="lat-title" style="display:flex; justify-content:space-between; align-items:center;">
+          YugabyteDB Practice SQL
+          <button class="btn" onclick="copySQL()" style="font-size:10px; padding:2px 8px;">Copy</button>
+        </div>
+        <div class="ddl-code" id="ddl-code"></div>
+      </div>
+
+      <div class="log-sec">
+        <div class="log-hdr">Step-by-Step Guide</div>
+        <div class="log-body" id="log-body" role="log" aria-live="polite" aria-relevant="additions"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- CTRL BAR -->
+  <div class="ctrl-bar">
+    <div class="cgrp">
+      <button class="btn" id="btn-back" onclick="stepBack()" disabled>← Back</button>
+      <button class="btn btn-p" id="btn-step" onclick="stepForward()">Step →</button>
+      <button class="btn" id="btn-play" onclick="togglePlay()">▶ Play</button>
+      <button class="btn" id="btn-reset" onclick="resetScenario()">↺ Reset</button>
+    </div>
+    <div class="cdiv"></div>
+    <div class="spd-wrap">Speed: <input type="range" id="spd" min="0.5" max="3" step="0.5" value="1"
+        oninput="speedVal=+this.value;document.getElementById('spd-val').textContent=this.value+'×'"><span
+        id="spd-val">1×</span></div>
+    <div class="cgrp" id="extra-btns"></div>
+    <div class="cdiv"></div>
+    <div class="kbd-help-btn">
+      ⌨
+      <div class="kbd-help-popup">
+        <div style="font-size:10px; color:var(--leader); margin-bottom:6px; font-weight:600">Keyboard Shortcuts</div>
+        <div class="kbd-row"><span class="kbd-desc">Step forward</span><span class="kbd-key">→ / S</span></div>
+        <div class="kbd-row"><span class="kbd-desc">Step back</span><span class="kbd-key">←</span></div>
+        <div class="kbd-row"><span class="kbd-desc">Play / Pause</span><span class="kbd-key">Space</span></div>
+        <div class="kbd-row"><span class="kbd-desc">Reset</span><span class="kbd-key">R</span></div>
+        <div class="kbd-row"><span class="kbd-desc">Scenario 1-7</span><span class="kbd-key">1-7</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="help-modal" onclick="if(event.target===this) toggleHelp()">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:12px">
+          <div class="help-icon" style="background:var(--accent); color:white; border:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+              <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+          </div>
+          <h2 style="margin:0; font-family:var(--head); font-size:20px; letter-spacing:0.5px">Keyboard Shortcuts</h2>
+        </div>
+        <button class="close-btn" onclick="toggleHelp()">×</button>
+      </div>
+      <div class="shortcut-grid">
+        <div class="shortcut-item"><kbd>H</kbd> <span>Return to Home Page</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> <span>Toggle Explorer Guide</span></div>
+        <div class="shortcut-item"><kbd>?</kbd> <span>Show / Hide this menu</span></div>
+        <div class="shortcut-item"><kbd>F</kbd> <span>Toggle Focus Mode</span></div>
+        <div class="shortcut-item"><kbd>←</kbd> / <kbd>→</kbd> <span>Navigate steps</span></div>
+        <div class="shortcut-item"><kbd>S</kbd> <span>Next step</span></div>
+        <div class="shortcut-item"><kbd>↑</kbd> / <kbd>↓</kbd> <span>Navigate chapters</span></div>
+        <div class="shortcut-item"><kbd>Space</kbd> <span>Play / Pause</span></div>
+        <div class="shortcut-item"><kbd>R</kbd> <span>Reset scenario</span></div>
+        <div class="shortcut-item"><kbd>1</kbd> – <kbd>9</kbd> <span>Jump to scenario</span></div>
+        <div class="shortcut-item"><kbd>[</kbd> / <kbd>]</kbd> <span>Toggle sidebars</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tour-guide" id="tour-guide" style="display: none;">
+    <div class="tg-hdr">
+      <div style="display:flex; align-items:center; gap:8px">
+        <div class="tg-icon">🧭</div>
+        <span id="tg-title">Scenario Guide</span>
+      </div>
+      <button class="tg-close" onclick="closeTour()">×</button>
+    </div>
+    <div class="tg-body" id="tg-text"></div>
+    <div class="tg-ctrls">
+      <div class="tg-step-info"><span id="tg-current">1</span> / <span id="tg-total">3</span></div>
+      <div style="display:flex; gap:8px">
+        <button class="tg-btn" onclick="prevTourStep()">Prev</button>
+        <button class="tg-btn tg-btn-next" id="tg-next-btn" onclick="nextTourStep()">Next</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="scenarios.js"></script>
+  <script src="engine.js"></script>
+</body>
+
+</html>

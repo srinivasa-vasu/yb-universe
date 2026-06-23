@@ -40,3 +40,19 @@ Interactive visualizer for YugabyteDB's YSQL data model — insert rows, watch t
 | **Tablespaces** | Geo-partitioning with regional tablespaces |
 | **Query Execution** | Hash/range point lookups, full table scan, range scan, skip scan, index scan, index-only scan, parallel range scan, bucket index scan, hash global sort, range ordered scan, expression pushdown, aggregate pushdown, nested loop join |
 | **Data Modeling Patterns** | Time-series, multi-tenant, JSONB & GIN indexes |
+
+
+---
+
+### [AI & Vector Explorer](https://srinivasa-vasu.github.io/yb-universe/ai/index.html)
+
+Interactive visualizer for AI vector search on YugabyteDB with pgvector — explore embeddings, similarity metrics, HNSW indexing, and RAG pipelines, with a built-in Getting Started guide.
+
+| Module | Topics |
+|---|---|
+| **Fundamentals** | Vector embeddings, vector dimensions, normalization (unit-vector scaling) |
+| **Similarity** | Distance metrics, L2 (Euclidean), cosine similarity, inner product |
+| **HNSW Indexing** | Index construction mechanics, graph-navigation search |
+| **AI Ecosystem** | MCP integration for AI tool use |
+| **Architecture** | RAG pipeline (retriever + LLM), hybrid search (filters + vector), distributed HNSW across nodes |
+| **Advanced Sampling** | Top-K sampling, Top-P (nucleus) sampling, hybrid sampling |
