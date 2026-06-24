@@ -56,3 +56,23 @@ Interactive visualizer for AI vector search on YugabyteDB with pgvector — expl
 | **AI Ecosystem** | MCP integration for AI tool use |
 | **Architecture** | RAG pipeline (retriever + LLM), hybrid search (filters + vector), distributed HNSW across nodes |
 | **Advanced Sampling** | Top-K sampling, Top-P (nucleus) sampling, hybrid sampling |
+
+
+---
+
+### [YugabyteDB Vanguard](https://github.com/srinivasa-vasu/ybdb-vanguard)
+
+Hands-on YugabyteDB exercises with pre-configured cloud development environments — covering distributed SQL, data architecture, scalability, fault tolerance, multi-region distribution, disaster recovery, CDC, observability, security, and data migration.
+
+| Module | Topics |
+|---|---|
+| **SQL Fundamentals** | Distributed SQL universe (sharding, YSQL/YCQL basics, tablets), query tuning tips & tricks, query plan management (QPM) with pg_hint_plan |
+| **Data Placement & Architecture** | Colocation & distributed tables, tablespaces & online data migration (region-pinned tables, online ALTER TABLE) |
+| **Scalability & High Availability** | Tablet-based distribution, automatic splitting, horizontal scale-out, chaos engineering, leader election, zero data loss |
+| **Multi-Region & Disaster Recovery** | Geo-distribution & tablespaces, follower reads, xCluster replication, automatic DDL propagation, failover |
+| **Data Protection & Recovery** | Point-in-time recovery (PITR), DB clone, time travel (`yb_read_time`) |
+| **Streaming & CDC** | Change data capture (YugabyteDB → PostgreSQL via Debezium), CDC streaming (YSQL → YCQL microservices) |
+| **Observability** | pg_stat_statements, Active Session History, EXPLAIN ANALYZE |
+| **Security** | Encryption at rest (EAR) & key rotation, row level security & multi-tenancy, data privacy (column encryption, anonymization via pgcrypto) |
+| **Search & Extensions** | Full-text search (tsvector/tsquery, ranking, highlighting), semantic search with pgvector (HNSW indexes) |
+| **Migration** | YB Voyager support for MySQL, MariaDB, Oracle, PostgreSQL |
