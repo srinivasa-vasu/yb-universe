@@ -78,7 +78,8 @@ function buildRS(groups = INITIAL_GROUPS) {
         ssts: [Math.floor(20 + Math.random() * 30)], // Initial SST file size
         newRows: [],
         provisionalRows: [],
-        readRow: undefined
+        readRow: undefined,
+        safePulse: false
       };
   }
   return rs;
@@ -330,10 +331,9 @@ function renderHaPanel({ nodes = [], rf = 3, quorum = true, availability = 100, 
     const colsHtml = systems.map(sys => {
       const aliveCount = sys.nodes.filter(n => n.alive).length;
       const ok = sys.available;
-      const degraded = sys.degraded;
-      const colCls = ok ? (degraded ? ' hap-sys-warn' : ' hap-sys-ok') : ' hap-sys-err';
-      const badgeCls = ok ? (degraded ? 'hap-cmp-warn' : 'hap-cmp-ok') : 'hap-cmp-err';
-      const badgeTxt = ok ? (degraded ? '⚠ DEGRADED' : '● AVAILABLE') : '✕ OUTAGE';
+      const colCls = ok ? ' hap-sys-ok' : ' hap-sys-err';
+      const badgeCls = ok ? 'hap-cmp-ok' : 'hap-cmp-err';
+      const badgeTxt = ok ? '● AVAILABLE' : '✕ OUTAGE';
       const nodesHtml = sys.nodes.map(n => {
         const cls = n.alive ? 'hap-node-ok' : 'hap-node-dead';
         const dot = n.alive ? '●' : '✕';
@@ -811,6 +811,330 @@ function renderTTPanel({ query = '', timestamp = '', hlc = '', rows = [] }) {
     </div>` : ''}`;
 }
 
+// ── CDC Logical Replication Panel ────────────────────────────────────────────
+function renderCdcPanel({
+  phase = 'idle',           // 'idle' | 'snapshot' | 'streaming' | 'lag'
+  snapshotPct = 0,          // 0-100 for snapshot phase progress
+  slotName = 'slot1',
+  pubName = 'pub_orders',
+  lsn = '—',
+  confirmedLsn = '—',
+  lagBytes = 0,
+  walRetainedKb = 0,        // KB of WAL held back by slot lag (LSN-gated)
+  intentsHeld = 0,          // count of write intents retained past normal GC (time-gated)
+  walBufferedKb = 0,        // KB of WAL accumulated after T₀ during snapshot phase
+  snapshotAnchorLsn = '0/1000050', // LSN at T₀ — streaming picks up here
+  packets = [],             // [{from, to, label, active}] for animated flow
+  records = [],             // CDC records visible in the stream pane
+  tabletHighlight = -1,     // 0-2 which tablet is emitting
+  phaseLabel = '',
+  vwalAssembly = [],        // rows being assembled in VWAL
+  consumerType = 'kafka',   // 'kafka' | 'pgrecvlogical' | 'custom'
+} = {}) {
+  const cont = document.getElementById('cdc-content');
+  if (!cont) return;
+
+  const phaseColors = { idle: 'var(--txt3)', snapshot: '#f59e0b', streaming: '#34d399', lag: '#fb7185' };
+  const phaseLabels = {
+    idle: '— idle —',
+    snapshot: '📸 Snapshot Phase — reading initial table state at HybridTime',
+    streaming: '🟢 Streaming — WAL changes flowing to consumer',
+    lag: '⚠ Slot lag growing — consumer behind, WAL retained',
+  };
+  const pColor = phaseColors[phase] || 'var(--txt3)';
+  const pLabel = phaseLabel || phaseLabels[phase] || '';
+
+  const tabletColors = ['#f59e0b', '#60a5fa', '#34d399'];
+  const consumerIcon = { kafka: '☁ Kafka', pgrecvlogical: '$ pg_recvlogical', custom: '⬡ App Client' }[consumerType] || '☁ Kafka';
+
+  // Tablet WAL boxes
+  const showRetention = phase === 'lag' && (walRetainedKb > 0 || intentsHeld > 0);
+  const walBarPct   = Math.min((walRetainedKb / 80) * 100, 100);
+  const intentBarPct = Math.min((intentsHeld / 20) * 100, 100);
+  const retentionBlock = showRetention ? `
+    <div class="cdc-retention-block">
+      <div class="cdc-ret-row">
+        <span class="cdc-ret-lbl">WAL held</span>
+        <div class="cdc-ret-track"><div class="cdc-ret-fill cdc-ret-wal" style="width:${walBarPct}%;"></div></div>
+        <span class="cdc-ret-val" style="color:#f59e0b;">${walRetainedKb} KB</span>
+      </div>
+      <div class="cdc-ret-row">
+        <span class="cdc-ret-lbl">Intents</span>
+        <div class="cdc-ret-track"><div class="cdc-ret-fill cdc-ret-int" style="width:${intentBarPct}%;"></div></div>
+        <span class="cdc-ret-val" style="color:#fb7185;">${intentsHeld}</span>
+      </div>
+    </div>` : '';
+
+  const tabletHtml = [0,1,2].map(i => {
+    const active = tabletHighlight === i || phase === 'streaming';
+    const hl = tabletHighlight === i;
+    return `<div class="cdc-tablet ${active ? 'active' : ''} ${hl ? 'hl' : ''}" style="border-color:${tabletColors[i]}${hl ? '' : '55'};background:${tabletColors[i]}${hl ? '18' : '09'};">
+      <div class="cdc-tablet-hdr" style="color:${tabletColors[i]};font-weight:700;font-size:12px;">Tablet-${i+1}</div>
+      <div style="font-size:10px;color:var(--txt3);margin-top:2px;">CDC Service</div>
+      <div class="cdc-wal-lines">
+        ${phase === 'idle' ? '<div class="cdc-wal-line dim">— no changes —</div>' : ''}
+        ${(records.filter(r => r.tablet === i+1)).slice(-3).map(r =>
+          `<div class="cdc-wal-line ${r.type === 'COMMIT' ? 'commit' : r.type === 'BEGIN' ? 'begin' : ''}">${r.type}: ${r.table} ${r.data}</div>`
+        ).join('')}
+        ${(phase === 'streaming' || phase === 'lag') && records.filter(r=>r.tablet===i+1).length === 0
+          ? `<div class="cdc-wal-line dim">polling WAL…</div>` : ''}
+      </div>
+      ${retentionBlock}
+      <div class="cdc-wal-indicator ${active ? 'pulse' : ''}" style="background:${tabletColors[i]};"></div>
+    </div>`;
+  }).join('');
+
+  // VWAL assembly rows
+  const vwalHtml = vwalAssembly.length
+    ? vwalAssembly.slice(-6).map(r =>
+        `<div class="cdc-vwal-row ${r.fresh ? 'fresh' : ''}">
+          <span class="cdc-vwal-lsn">${r.lsn}</span>
+          <span class="cdc-vwal-type ${r.type === 'COMMIT' ? 'commit' : r.type === 'BEGIN' ? 'begin' : ''}">${r.type}</span>
+          <span class="cdc-vwal-body">${r.table ? r.table + ' · ' : ''}${r.data || ''}</span>
+        </div>`
+      ).join('')
+    : `<div style="color:var(--txt3);font-size:10px;padding:10px 0;text-align:center;">— awaiting changes —</div>`;
+
+  // CDC records in stream pane
+  const streamHtml = records.length
+    ? records.slice(-8).map(r =>
+        `<div class="cdc-record ${r.type === 'COMMIT' ? 'commit' : r.type === 'BEGIN' ? 'begin' : ''} ${r.fresh ? 'fresh' : ''}">
+          <span class="cdc-rec-type">${r.type}</span>
+          ${r.table ? `<span class="cdc-rec-table">${r.table}</span>` : ''}
+          <span class="cdc-rec-body">${r.data || ''}</span>
+          ${r.lsn ? `<span class="cdc-rec-lsn">${r.lsn}</span>` : ''}
+        </div>`
+      ).join('')
+    : `<div style="color:var(--txt3);font-size:10px;padding:10px 0;text-align:center;">— no records yet —</div>`;
+
+  // Slot + LSN status
+  const lagBar = lagBytes > 0
+    ? `<div class="cdc-lag-track"><div class="cdc-lag-fill" style="width:${Math.min(lagBytes,100)}%;background:${lagBytes > 60 ? '#fb7185' : '#f59e0b'};"></div></div>
+       <div class="cdc-lag-val" style="color:${lagBytes > 60 ? '#fb7185' : '#f59e0b'};">${lagBytes > 0 ? lagBytes + ' KB behind' : ''}</div>`
+    : '';
+
+  const isStreaming = phase === 'streaming' && snapshotPct >= 100;
+  const showCheckpoint = phase === 'snapshot' || (isStreaming && walBufferedKb > 0);
+  const totalBuffered = 32; // KB buffered during snapshot — fixed anchor
+  // During snapshot: fill grows (buffering). During streaming: consumed portion grows green, remaining amber.
+  const walConsumedKb = isStreaming ? Math.max(0, totalBuffered - walBufferedKb) : 0;
+  const consumedPct   = Math.min((walConsumedKb / totalBuffered) * 100, 100);
+  const remainingPct  = Math.min((walBufferedKb  / totalBuffered) * 100, 100);
+  const bufferingPct  = Math.min((walBufferedKb  / totalBuffered) * 100, 100); // snapshot phase
+
+  const snapshotBar = showCheckpoint
+    ? `<div class="cdc-snap-section">
+
+        <!-- Header -->
+        <div class="cdc-snap-section-hdr">
+          <span class="cdc-snap-hdr-lbl">📸 HybridTime Checkpoint</span>
+          <code class="cdc-snap-hdr-val">T₀ = snapshot_name (slot creation)</code>
+        </div>
+
+        <!-- Timeline strip: past | T₀ pin | right zone -->
+        <div class="cdc-snap-tl-wrap">
+          <div class="cdc-snap-tl-past">
+            <span class="cdc-snap-tl-past-lbl">history</span>
+          </div>
+          <div class="cdc-snap-tl-pin">T₀</div>
+          <div class="cdc-snap-tl-future">
+            ${isStreaming
+              ? `<!-- consumed (green) grows left→right, remaining (amber) follows -->
+                 <div class="cdc-snap-tl-consumed" style="width:${consumedPct}%;"></div>
+                 <div class="cdc-snap-tl-remaining" style="width:${remainingPct}%;"></div>`
+              : `<!-- buffering: amber fill grows right -->
+                 <div class="cdc-snap-tl-fill" style="width:${bufferingPct}%;"></div>`
+            }
+          </div>
+        </div>
+        <div class="cdc-snap-tl-sublabels">
+          <span>← rows read as-of T₀ (consistent, no partial TX)</span>
+          <span>${isStreaming ? 'consuming buffered WAL →' : 'new writes → WAL buffered after T₀ →'}</span>
+        </div>
+
+        <!-- Two meters -->
+        <div class="cdc-snap-meters">
+          <div class="cdc-snap-meter-col">
+            <div class="cdc-snap-meter-lbl">Snapshot read at T₀</div>
+            <div class="cdc-snap-track"><div class="cdc-snap-fill" style="width:${snapshotPct}%;"></div></div>
+            <div class="cdc-snap-meter-val" style="color:${snapshotPct >= 100 ? '#34d399' : '#f59e0b'};">${snapshotPct >= 100 ? '✓ 100%' : snapshotPct + '%'}</div>
+            <div class="cdc-snap-meter-sub">SET LOCAL yb_read_time TO '&lt;HT&gt; ht'</div>
+          </div>
+          <div class="cdc-snap-meter-div"></div>
+          <div class="cdc-snap-meter-col" style="text-align:right;">
+            <div class="cdc-snap-meter-lbl">${isStreaming ? 'Buffer remaining' : 'WAL buffered after T₀'}</div>
+            <div class="cdc-snap-meter-val" style="color:${isStreaming ? (walBufferedKb > 0 ? '#60a5fa' : '#34d399') : (walBufferedKb > 0 ? '#f59e0b' : 'var(--txt3)')};">
+              ${isStreaming ? walBufferedKb + ' KB' : walBufferedKb + ' KB'}
+            </div>
+            <div class="cdc-snap-meter-sub">${isStreaming ? `${walConsumedKb} KB consumed · replaying from T₀` : 'live writes → queued for streaming'}</div>
+          </div>
+        </div>
+
+        <!-- Handoff / status line -->
+        <div class="cdc-snap-handoff done">
+          ${isStreaming
+            ? (walBufferedKb > 0
+                ? `<span style="color:#60a5fa;font-weight:700;">⚡ Replaying</span>
+                   buffered WAL from T₀ LSN <code class="cdc-snap-code">${snapshotAnchorLsn}</code>
+                   · <b>${walBufferedKb} KB</b> remaining · streaming live when done`
+                : `<span class="cdc-snap-handoff-ok">✓ Buffer cleared</span>
+                   · streaming live from frontier · no gap from snapshot`)
+            : (snapshotPct >= 100
+                ? `<span class="cdc-snap-handoff-ok">✓ Snapshot complete</span>
+                   → streaming picks up from LSN <code class="cdc-snap-code">${snapshotAnchorLsn}</code>
+                   · <b>${walBufferedKb} KB</b> buffered WAL ready · no gap · no overlap`
+                : `→ Streaming will resume from LSN <code class="cdc-snap-code">${snapshotAnchorLsn}</code>
+                   — gap-free handoff at T₀ boundary`
+              )
+          }
+        </div>
+
+      </div>` : '';
+
+  const FLAGS = [
+    { flag: 'cdc_wal_retention_time_secs',              default: '14400',  scope: 'TServer', desc: 'Minimum WAL retention time (seconds) even without an active slot. Prevents GC before CDC picks up. Default 4 h.' },
+    { flag: 'cdc_intent_retention_ms',                  default: '60000',  scope: 'TServer', desc: 'How long uncommitted write intents are retained for CDC. If a transaction exceeds this, CDC may miss its intents.' },
+    { flag: 'cdc_enable_intra_transactional_before_image', default: 'false', scope: 'TServer', desc: 'Enable before-image for multiple row changes within the same transaction. Works in conjunction with REPLICA IDENTITY FULL on the table.' },
+    { flag: 'cdc_poll_delay_ms',                        default: '0',      scope: 'TServer', desc: 'Delay between CDC Service polls of tablet WALs (ms). Increase to reduce TServer CPU at the cost of higher replication lag.' },
+  ];
+
+  const CONSTRAINTS = [
+    { icon: '⚠', text: 'LSN ≠ byte offset — <code>pg_wal_lsn_diff()</code>, <code>pg_current_wal_lsn()</code>, and cross-slot LSN arithmetic are unsupported.' },
+    { icon: '✕', text: '<code>TRUNCATE</code> and <code>DROP TABLE</code> are not supported after slot creation. <code>TRUNCATE</code> is never captured in the stream.' },
+    { icon: '⚠', text: 'Incompatible with <b>xCluster</b> as a replication target — a cluster with an active slot cannot be an xCluster secondary.' },
+    { icon: '⚠', text: 'After a <b>PITR restore</b>, all existing slots are invalidated and must be recreated from scratch.' },
+    { icon: '✕', text: '<code>pg_stat_replication</code> and replication-protocol monitoring views are unsupported.' },
+    { icon: '✕', text: 'Only YSQL tables added to a <code>PUBLICATION</code> are captured — YCQL is not supported for CDC.' },
+  ];
+
+  const flagsHtml = FLAGS.map(f => `
+    <div class="cdc-flag-row">
+      <div class="cdc-flag-name">${f.flag}</div>
+      <div class="cdc-flag-default">${f.default}</div>
+      <div class="cdc-flag-scope">${f.scope}</div>
+      <div class="cdc-flag-desc">${f.desc}</div>
+    </div>`).join('');
+
+  const constraintsHtml = CONSTRAINTS.map(c => `
+    <div class="cdc-constraint-row">
+      <span class="cdc-constraint-icon ${c.icon === '✕' ? 'err' : 'warn'}">${c.icon}</span>
+      <span class="cdc-constraint-text">${c.text}</span>
+    </div>`).join('');
+
+  cont.innerHTML = `
+  <div class="cdc-layout">
+
+    <!-- LEFT: Pipeline diagram -->
+    <div class="cdc-pipeline">
+
+      <!-- Phase banner -->
+      <div class="cdc-phase-banner" style="color:${pColor};border-color:${pColor}40;background:${pColor}10;">
+        ${pLabel}
+      </div>
+
+      <!-- Row 1: Tablet WALs -->
+      <div class="cdc-section-lbl">Tablet WAL Leaders <span class="cdc-section-sub">CDC Service polls each independently</span></div>
+      <div class="cdc-tablets-row">${tabletHtml}</div>
+
+      <!-- Arrow: tablets → VWAL -->
+      <div class="cdc-flow-arrow">
+        <div class="cdc-arrow-line"></div>
+        <div class="cdc-arrow-label">per-tablet WAL records · commit-time ordered</div>
+        <div class="cdc-arrow-head">▼</div>
+      </div>
+
+      <!-- Row 2: Virtual WAL -->
+      <div class="cdc-section-lbl">Virtual WAL (VWAL) <span class="cdc-section-sub">Assembles multi-tablet changes · assigns LSNs · maintains commit-time order</span></div>
+      <div class="cdc-vwal-box">
+        <div class="cdc-vwal-hdr">
+          <span class="cdc-vwal-title">VWAL · LSN stream</span>
+          <span class="cdc-vwal-note">LSN ≠ byte offset · no arithmetic · no cross-slot compare</span>
+        </div>
+        <div class="cdc-vwal-rows">${vwalHtml}</div>
+      </div>
+
+      <!-- Arrow: VWAL → walsender -->
+      <div class="cdc-flow-arrow">
+        <div class="cdc-arrow-line"></div>
+        <div class="cdc-arrow-label">yboutput plugin (default) · BEGIN/CHANGE/COMMIT messages</div>
+        <div class="cdc-arrow-head">▼</div>
+      </div>
+
+      <!-- Row 3: walsender -->
+      <div class="cdc-section-lbl">walsender <span class="cdc-section-sub">PostgreSQL backend process · streams via PG wire protocol · handles ACKs</span></div>
+      <div class="cdc-walsender-box">
+        <div class="cdc-ws-left">
+          <div class="cdc-ws-name">walsender</div>
+          <div class="cdc-ws-detail">slot: <b>${slotName}</b> · pub: <b>${pubName}</b></div>
+          <div class="cdc-ws-detail">plugin: <b>yboutput</b> (default)</div>
+        </div>
+        <div class="cdc-ws-lsns">
+          <div class="cdc-lsn-row"><span class="cdc-lsn-lbl">LSN sent</span><span class="cdc-lsn-val">${lsn}</span></div>
+          <div class="cdc-lsn-row"><span class="cdc-lsn-lbl">Confirmed flush LSN</span><span class="cdc-lsn-val ok">${confirmedLsn}</span></div>
+          ${lagBar}
+        </div>
+      </div>
+      ${snapshotBar}
+
+      <!-- Arrow: walsender → consumer -->
+      <div class="cdc-flow-arrow">
+        <div class="cdc-arrow-line"></div>
+        <div class="cdc-arrow-label">at-least-once · commit-time ordered · no gaps</div>
+        <div class="cdc-arrow-head">▼</div>
+      </div>
+
+      <!-- Row 4: Consumer -->
+      <div class="cdc-section-lbl">Consumer <span class="cdc-section-sub">ACKs advance confirmed flush LSN · releases WAL retention</span></div>
+      <div class="cdc-consumer-box">
+        <div class="cdc-consumer-icon">☁</div>
+        <div class="cdc-consumer-detail">
+          <div class="cdc-consumer-name">${consumerIcon}</div>
+          <div class="cdc-consumer-sub">Kafka Connect · YugabyteDB Debezium Connector</div>
+        </div>
+        <div class="cdc-consumer-status ${phase === 'lag' ? 'lag' : phase === 'streaming' ? 'ok' : ''}">
+          ${phase === 'lag' ? '⚠ behind' : phase === 'streaming' ? '✓ consuming' : phase === 'snapshot' ? '📸 snapshotting' : '— idle'}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: Stream records + slot info -->
+    <div class="cdc-stream-pane">
+      <div class="cdc-stream-hdr">yboutput stream</div>
+      <div class="cdc-records">${streamHtml}</div>
+    </div>
+
+  </div>
+
+  <!-- STATIC CALLOUTS: always shown below the pipeline -->
+  <div class="cdc-callouts">
+
+    <!-- Constraints -->
+    <div class="cdc-callout cdc-callout-warn">
+      <div class="cdc-callout-hdr">
+        <span class="cdc-callout-icon">⚠</span>
+        <span class="cdc-callout-title">Key Constraints &amp; Incompatibilities</span>
+      </div>
+      <div class="cdc-constraint-list">${constraintsHtml}</div>
+    </div>
+
+    <!-- Flags -->
+    <div class="cdc-callout cdc-callout-info">
+      <div class="cdc-callout-hdr">
+        <span class="cdc-callout-icon">⚙</span>
+        <span class="cdc-callout-title">Important TServer Flags</span>
+      </div>
+      <div class="cdc-flags-table">
+        <div class="cdc-flag-head">
+          <span>Flag</span><span>Default</span><span>Scope</span><span>Purpose</span>
+        </div>
+        ${flagsHtml}
+      </div>
+    </div>
+
+  </div>`;
+}
+
 function renderScalingStats() {
   const container = document.getElementById('sd-stats-grid');
   if (!container) return;
@@ -1107,8 +1431,10 @@ function buildTabletHTML(g, nodeId) {
           </div>`;
     }
 
-    const combined = [...g.data.map(d => ({ ...d, data: d, type: 'comm' })), ... (rs?.provisionalRows || []).map(d => ({ ...d, data: d, type: 'prov' }))];
-    const rowsToShow = combined.slice(-(g.maxRows ?? 3));
+    const combined = [...g.data.map(d => ({ ...d, data: d, type: 'comm' })), ...(rs?.provisionalRows || []).map(d => ({ ...d, data: d, type: 'prov' }))];
+    const catchupOffset = rs?.catchupOffset ?? 0;
+    const cappedCombined = catchupOffset > 0 ? combined.slice(0, combined.length - catchupOffset) : combined;
+    const rowsToShow = cappedCombined.slice(-(g.maxRows ?? 3));
 
     for (let i = 0; i < rowsToShow.length; i++) {
       const entry = rowsToShow[i];
@@ -1116,8 +1442,9 @@ function buildTabletHTML(g, nodeId) {
       const isProv = entry.type === 'prov';
       const isN = rs?.newRows?.includes(i);
       const isR = rs?.readRow === i;
+      const isS = rs?.safePulse;
 
-      dHtml += `<div class="d-row ${isProv ? 'provisional' : ''} ${isN ? 'r-new' : ''} ${isR ? 'r-read' : ''} ${showReg ? 'is-geo' : ''}">`;
+      dHtml += `<div class="d-row ${isProv ? 'provisional' : ''} ${isN ? 'r-new' : ''} ${isR ? 'r-read' : ''} ${isS ? 'r-safe' : ''} ${showReg ? 'is-geo' : ''}">`;
 
       if (g.isColocated) {
         const rowTable = row[5] || 'users';
@@ -1406,6 +1733,16 @@ function makeCtx() {
       rs.readRow = ri; reRenderTabletInternal(tgId, nId);
       setTimeout(() => { rs.readRow = undefined; reRenderTabletInternal(tgId, nId); }, 2200);
     },
+    safeFlash: (tgId, nId, durationMs = 3500) => {
+      const rs = S.replicaState[tgId]?.[nId]; if (!rs) return;
+      const el = document.getElementById(`tablet-${tgId}-${nId}`);
+      rs.safePulse = true; reRenderTabletInternal(tgId, nId);
+      if (el) { el.classList.add('t-safe'); }
+      setTimeout(() => {
+        rs.safePulse = false; reRenderTabletInternal(tgId, nId);
+        if (el) el.classList.remove('t-safe');
+      }, durationMs);
+    },
     addMem: (tgId, nId, amt) => {
       const rs = S.replicaState[tgId]?.[nId]; if (!rs) return;
       rs.mem = Math.min(100, rs.mem + amt); reRenderTabletInternal(tgId, nId);
@@ -1429,13 +1766,14 @@ function makeCtx() {
         const g = S.groups.find(x => x.id === tgId);
         if (g) {
           const rs = S.replicaState[tgId][nId];
+          if (rs._nrTimer) { clearTimeout(rs._nrTimer); rs._nrTimer = null; }
           const maxRows = g.maxRows ?? 3;
           const dataIdx = (markRow === true) ? g.data.length - 1 : markRow;
           const start = Math.max(0, g.data.length - maxRows);
           const sliceIdx = dataIdx - start;
           rs.newRows = (sliceIdx >= 0 && sliceIdx < maxRows) ? [sliceIdx] : [];
           reRenderTabletInternal(tgId, nId);
-          setTimeout(() => { rs.newRows = []; reRenderTabletInternal(tgId, nId); }, 2000);
+          rs._nrTimer = setTimeout(() => { rs.newRows = []; rs._nrTimer = null; reRenderTabletInternal(tgId, nId); }, 2000);
           return;
         }
       }
@@ -1548,6 +1886,7 @@ function makeCtx() {
     backupPanel: (data) => renderBackupPanel(data),
     pitrPanel: (data) => renderPitrPanel(data),
     ttPanel: (data) => renderTTPanel(data),
+    cdcPanel: (data) => renderCdcPanel(data),
     setNodeRegion: (nId, region, label) => {
       const card = document.getElementById(`node-${nId}`);
       if (!card) return;
@@ -1791,7 +2130,7 @@ function renderHome() {
     "Read & Write Paths":              { chapter: "CHAPTER 7", icon: "⚡", desc: "How reads and writes flow through the distributed Raft layers." },
     "Scalability":                     { chapter: "CHAPTER 8", icon: "📈", desc: "Elastic scale-out and automatic tablet splitting as the cluster grows." },
     "Security":                         { chapter: "CHAPTER 9",  icon: "🔒", desc: "Encryption in transit, encryption at rest, row-level security, column-level encryption, authentication, and audit logging." },
-    "Data Management":                 { chapter: "CHAPTER 10", icon: "💾", desc: "Consistent snapshots, distributed backup, point-in-time recovery, database cloning, and time travel queries." },
+    "Data Management":                 { chapter: "CHAPTER 10", icon: "💾", desc: "Consistent snapshots, distributed backup, point-in-time recovery, database cloning, time travel queries, and CDC logical replication." },
     "System Internals":                { chapter: "CHAPTER 11", icon: "🔬", desc: "DocDB storage engine, MVCC, control plane, and distributed time." },
   };
 
@@ -2062,6 +2401,8 @@ function selectScenario(id) {
     if (_pitrp2) _pitrp2.classList.remove('visible');
     const _ttp2 = document.getElementById('tt-panel');
     if (_ttp2) _ttp2.classList.remove('visible');
+    const _cdcp2 = document.getElementById('cdc-panel');
+    if (_cdcp2) _cdcp2.classList.remove('visible');
     const _svp2 = document.getElementById('snap-viz-panel');
     if (_svp2) _svp2.classList.remove('visible');
     const _cw2 = document.getElementById('canvas-wrap');
@@ -2166,6 +2507,8 @@ function selectScenario(id) {
   if (pitrp) pitrp.classList.toggle('visible', !!sc.pitrPanel);
   const ttp = document.getElementById('tt-panel');
   if (ttp) ttp.classList.toggle('visible', !!sc.ttPanel);
+  const cdcp = document.getElementById('cdc-panel');
+  if (cdcp) cdcp.classList.toggle('visible', !!sc.cdcPanel);
   const svp = document.getElementById('snap-viz-panel');
   if (svp) {
     svp.classList.toggle('visible', !!sc.snapshotVizPanel);
@@ -2173,11 +2516,11 @@ function selectScenario(id) {
     svp.style.height = '';
   }
   const cwEl = document.getElementById('canvas-wrap');
-  if (cwEl) cwEl.classList.toggle('snap-hidden', !!sc.snapshotVizPanel);
+  if (cwEl) cwEl.classList.toggle('snap-hidden', !!sc.snapshotVizPanel || !!sc.cdcPanel);
   const dpEl = document.getElementById('docdb-panel');
   if (dpEl) dpEl.classList.toggle('snap-expanded', !!sc.snapshotVizPanel);
   const stkEl = document.getElementById('steps-tracker');
-  if (stkEl) stkEl.style.display = sc.snapshotVizPanel && sc.steps?.length ? '' : 'none';
+  if (stkEl) stkEl.style.display = (sc.snapshotVizPanel || sc.cdcPanel) && sc.steps?.length ? '' : 'none';
 
   const toolbar = document.querySelector('.toolbar');
   if (toolbar) toolbar.style.display = sc.group === 'Data Management' ? 'none' : '';
@@ -3040,20 +3383,18 @@ const ARCH_TABLETS = [
 ];
 
 let _archFailedFD = -1;
-let _archLeaderPref = -1; // -1=balanced, 0/1/2=preferred FD index
+let _archLeaderPref = new Set(); // empty=balanced, else Set of preferred FD indices
 
 function _archEffectiveLeader(tablet) {
   const getFD = (nid) => ARCH_FDS.findIndex(fd => fd.nodes.includes(nid));
-  let targetFD = _archLeaderPref;
-  if (targetFD === -1) {
+  if (_archLeaderPref.size === 0) {
     if (_archFailedFD !== -1 && getFD(tablet.leader) === _archFailedFD)
       return tablet.replicas.find(n => getFD(n) !== _archFailedFD) ?? tablet.leader;
     return tablet.leader;
   }
-  if (targetFD === _archFailedFD) {
-    const survFDs = [0, 1, 2].filter(x => x !== _archFailedFD);
-    targetFD = survFDs[ARCH_TABLETS.indexOf(tablet) % 2];
-  }
+  let selFDs = [..._archLeaderPref].filter(fd => fd !== _archFailedFD);
+  if (selFDs.length === 0) selFDs = [0, 1, 2].filter(x => x !== _archFailedFD);
+  const targetFD = selFDs[ARCH_TABLETS.indexOf(tablet) % selFDs.length];
   return tablet.replicas.find(n => getFD(n) === targetFD) ?? tablet.leader;
 }
 
@@ -3108,11 +3449,16 @@ window.fdSetTab = function (idx) {
 };
 
 window.archSetLeaderPref = function (fi) {
-  _archLeaderPref = (_archLeaderPref === fi) ? -1 : fi;
+  if (fi === -1) {
+    _archLeaderPref.clear();
+  } else {
+    if (_archLeaderPref.has(fi)) _archLeaderPref.delete(fi);
+    else _archLeaderPref.add(fi);
+  }
   document.querySelectorAll('.av-lp-btn').forEach(btn => {
     const bfi = parseInt(btn.dataset.fd);
-    if (isNaN(bfi)) return; // Skip view mode buttons
-    const isActive = bfi === _archLeaderPref;
+    if (isNaN(bfi)) return;
+    const isActive = bfi === -1 ? _archLeaderPref.size === 0 : _archLeaderPref.has(bfi);
     btn.classList.toggle('active', isActive);
     const fc = bfi >= 0 ? _archFdColors[bfi] : 'var(--txt2)';
     btn.style.background = isActive ? fc : '';
@@ -3143,6 +3489,12 @@ function _exitArchMode(showCanvas) {
   if (hv) hv.style.display = 'none';
   const cb = document.querySelector('.ctrl-bar');
   if (cb) cb.style.display = showCanvas ? 'flex' : 'none';
+  if (!showCanvas) {
+    const ht = document.getElementById('health-txt');
+    if (ht) ht.textContent = '';
+    const hd = document.getElementById('health-dot');
+    if (hd) hd.style.background = 'transparent';
+  }
 }
 
 function selectArch(tab) {
@@ -3164,6 +3516,8 @@ function selectArch(tab) {
   if (_pitrA) _pitrA.classList.remove('visible');
   const _ttA = document.getElementById('tt-panel');
   if (_ttA) _ttA.classList.remove('visible');
+  const _cdcA = document.getElementById('cdc-panel');
+  if (_cdcA) _cdcA.classList.remove('visible');
   const _svpA = document.getElementById('snap-viz-panel');
   if (_svpA) _svpA.classList.remove('visible');
   const _cwA = document.getElementById('canvas-wrap');
@@ -3173,12 +3527,12 @@ function selectArch(tab) {
   const av = document.getElementById('arch-view');
   if (!av) return;
   av.style.display = 'flex';
-  const badgeMap = { 'universe-hierarchy': 'Architecture · Universe', universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'fault-domains': 'Architecture · Fault Domains', consensus: 'Architecture · Consensus Quorum', 'security-tls': 'Security · Encryption in Transit', 'security-rest': 'Security · Encryption at Rest', 'security-rls': 'Security · Row Level Security', 'security-column': 'Security · Column Level Encryption', 'security-auth': 'Security · Authentication', 'security-audit': 'Security · Audit Logging' };
-  const titleMap = { 'universe-hierarchy': 'Universe Hierarchy', universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'fault-domains': 'Fault Domains', consensus: 'Consensus (Raft) Quorum', 'security-tls': 'Encryption in Transit', 'security-rest': 'Encryption at Rest', 'security-rls': 'Row Level Security', 'security-column': 'Column Level Encryption', 'security-auth': 'Authentication Methods', 'security-audit': 'Audit Logging' };
+  const badgeMap = { 'universe-hierarchy': 'Architecture · Universe', universe: 'Architecture · Global Universe', xcl: 'Architecture · xCluster', 'read-replica': 'Architecture · Read Replica', 'cdc-arch': 'Architecture · CDC Logical Replication', 'fault-domains': 'Architecture · Fault Domains', consensus: 'Architecture · Consensus Quorum', 'security-tls': 'Security · Encryption in Transit', 'security-rest': 'Security · Encryption at Rest', 'security-rls': 'Security · Row Level Security', 'security-column': 'Security · Column Level Encryption', 'security-auth': 'Security · Authentication', 'security-audit': 'Security · Audit Logging' };
+  const titleMap = { 'universe-hierarchy': 'Universe Hierarchy', universe: 'Global Universe Architecture', xcl: 'xCluster Topology', 'read-replica': 'Read Replica Topology', 'cdc-arch': 'CDC Logical Replication Architecture', 'fault-domains': 'Fault Domains', consensus: 'Consensus (Raft) Quorum', 'security-tls': 'Encryption in Transit', 'security-rest': 'Encryption at Rest', 'security-rls': 'Row Level Security', 'security-column': 'Column Level Encryption', 'security-auth': 'Authentication Methods', 'security-audit': 'Audit Logging' };
   document.getElementById('active-badge').textContent = badgeMap[tab] || tab;
   document.getElementById('i-title').textContent = titleMap[tab] || tab;
   _archFailedFD = -1;
-  _archLeaderPref = -1;
+  _archLeaderPref = new Set();
   _archViewMode = 'zone';
   ARCH_FDS = [...ARCH_FDS_MODES.zone];
   av.innerHTML = '';
@@ -3188,6 +3542,7 @@ function selectArch(tab) {
   else if (tab === 'control-plane') _renderArchControlPlane(av);
   else if (tab === 'hybrid-time') _renderArchHybridTime(av);
   else if (tab === 'read-replica') _renderArchReadReplica(av);
+  else if (tab === 'cdc-arch') _renderArchCDC(av);
   else if (tab === 'fault-domains') _renderArchFaultDomains(av);
   else if (tab === 'security-tls') _renderArchSecurityTLS(av);
   else if (tab === 'security-rest') _renderArchSecurityRest(av);
@@ -3229,10 +3584,10 @@ function _renderArchUniverse(container) {
   h += `<span class="av-lp-lbl">Leader Preference:</span>`;
   for (let i = 0; i < 3; i++) {
     const fc = _archFdColors[i];
-    const isActive = _archLeaderPref === i;
+    const isActive = _archLeaderPref.has(i);
     h += `<button class="av-lp-btn${isActive ? ' active' : ''}" data-fd="${i}" onclick="archSetLeaderPref(${i})" style="border-color:${fc}55;color:${fc}${isActive ? `;background:${fc};color:#0f172a` : ''}">◎ Fault Domain ${i + 1}</button>`;
   }
-  const balActive = _archLeaderPref === -1;
+  const balActive = _archLeaderPref.size === 0;
   h += `<button class="av-lp-btn${balActive ? ' active' : ''}" data-fd="-1" onclick="archSetLeaderPref(-1)" style="${balActive ? 'background:var(--txt2);color:#0f172a;border-color:var(--txt2)' : ''}">⚖ Balanced</button>`;
 
   h += `<div style="margin-left:auto; display:flex; gap:8px; align-items:center">`;
@@ -3328,11 +3683,13 @@ function archFailDomain(fi) {
   const row = document.getElementById('av-fd-row');
   if (!msg) { msg = document.createElement('div'); msg.id = 'av-fail-msg'; msg.className = 'av-fail-msg'; row.after(msg); }
   let prefNote = '';
-  if (_archLeaderPref === fi) {
+  const selFDs = [..._archLeaderPref];
+  if (selFDs.length > 0 && selFDs.every(x => x === fi)) {
     const survFDs = [0, 1, 2].filter(x => x !== fi).map(x => x + 1);
     prefNote = ` &nbsp;·&nbsp; <strong>Preferred FD down</strong> — leaders balanced across FD ${survFDs[0]} &amp; FD ${survFDs[1]}`;
-  } else if (_archLeaderPref !== -1) {
-    prefNote = ` &nbsp;·&nbsp; Leaders remain pinned to <strong>Fault Domain ${_archLeaderPref + 1}</strong>`;
+  } else if (selFDs.length > 0) {
+    const surviving = selFDs.filter(x => x !== fi).map(x => `FD ${x + 1}`).join(' &amp; ');
+    prefNote = ` &nbsp;·&nbsp; Leaders remain pinned to <strong>${surviving}</strong>`;
   } else {
     prefNote = ` &nbsp;·&nbsp; Leaders auto-elect on surviving nodes`;
   }
@@ -3349,6 +3706,252 @@ function archToggle(id) {
   if (btn) btn.textContent = open ? '▶' : '▼';
 }
 
+function _renderArchCDC(container) {
+  const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
+
+  function statBar(stats) {
+    return `<div class="av-xcl-statsbar">${stats.map(s => `<div class="av-xcl-stat"><span class="av-xcl-stat-v">${s.val}</span><span class="av-xcl-stat-l">${s.lbl}</span></div>`).join('')}</div>`;
+  }
+
+  // YB cluster box — 3 AZs × 3 nodes stacked vertically
+  function ybCluster() {
+    const fcVars  = ['var(--leader)', 'var(--follower)', 'var(--ok)'];
+    const ldrBgs  = ['rgba(217,119,6,.12)', 'rgba(37,99,235,.12)', 'rgba(22,163,74,.12)'];
+    let azs = '';
+    for (let az = 0; az < 3; az++) {
+      const fc = fcVars[az];
+      let nodes = '';
+      for (let n = 0; n < 3; n++) {
+        const nodeNum = az * 3 + n + 1;
+        const isLeader = n === az;
+        nodes += `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;border:1px solid ${isLeader ? fc : 'var(--border-hi)'};background:${isLeader ? ldrBgs[az] : 'transparent'};">
+          <div style="font-size:11px;color:${isLeader ? fc : 'var(--txt2)'};">${isLeader ? '◉' : '○'}</div>
+          <div style="flex:1;">
+            <div style="font-size:9px;font-weight:700;color:${isLeader ? fc : 'var(--txt2)'};">${isLeader ? 'LEADER' : 'FOLLOWER'} · Node ${nodeNum}</div>
+            ${isLeader ? `<div class="av-cdc-svc-badge" style="margin-top:3px;display:inline-block;">CDC Svc</div>` : ''}
+          </div>
+        </div>`;
+      }
+      azs += `<div class="av-xcl-az" style="display:flex;flex-direction:column;border-left:3px solid ${fc}">
+        <div class="av-xcl-az-lbl">AZ-${az + 1}</div>
+        <div style="display:flex;flex-direction:column;gap:6px;padding:8px 10px;flex:1;">${nodes}</div>
+        <div style="font-size:9px;font-weight:600;color:${fc};text-align:center;padding:4px 0 2px;letter-spacing:.3px">Fault Domain ${az + 1}</div>
+      </div>`;
+    }
+    return `<div class="av-xcl-cluster" style="display:flex;flex-direction:column;flex:1.4">
+      <div class="av-xcl-hdr av-xcl-primary">YugabyteDB Cluster · RF=3<span class="av-xcl-region">3 AZs · 9 nodes · 3 tablet leaders</span></div>
+      <div style="font-size:9px;color:var(--txt3);padding:4px 10px 2px;font-style:italic;">
+        PUBLICATION pub_orders FOR TABLE orders, users
+      </div>
+      <div class="av-xcl-az-row" style="flex:1;align-items:stretch">${azs}</div>
+      <div class="av-xcl-rpo">◉ Leaders emit WAL · CDC Service polls each independently · Raft RF=3 unaffected</div>
+    </div>`;
+  }
+
+  // CDC pipeline middle column
+  function cdcPipeline() {
+    const tabletColors = ['var(--leader)', 'var(--follower)', 'var(--ok)'];
+    const streams = tabletColors.map((c, i) =>
+      `<div class="av-xcl-poller" style="border-color:${c};padding:4px 8px;">
+         <span style="color:${c};font-size:9px;font-weight:600;">tablet-${i+1} WAL</span>
+         <span class="av-xcl-a-fwd" style="color:${c};">→</span>
+       </div>`
+    ).join('');
+
+    return `<div class="av-cdc-pipeline" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;padding:0 6px;min-width:172px;">
+      <div class="av-xcl-mode-lbl" style="margin-bottom:5px;">CDC Service</div>
+      ${streams}
+
+      <!-- CDC Service → VWAL -->
+      <div style="display:flex;flex-direction:column;align-items:center;margin:3px 0 2px;">
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+        <div style="font-size:8px;color:var(--txt2);font-style:italic;line-height:1.3;">assemble ▼</div>
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+      </div>
+
+      <div class="av-cdc-pipe-box cdc-pipe-vwal" style="width:100%;">
+        <div class="av-cdc-pipe-name" style="color:var(--follower);">Virtual WAL (VWAL)</div>
+        <div class="av-cdc-pipe-sub">Assembles tablets · assigns LSNs<br>commit-time ordered</div>
+      </div>
+
+      <!-- VWAL → walsender -->
+      <div style="display:flex;flex-direction:column;align-items:center;margin:3px 0 2px;">
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+        <div style="font-size:8px;color:var(--follower);font-style:italic;line-height:1.3;">LSN stream ▼</div>
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+      </div>
+
+      <div class="av-cdc-pipe-box cdc-pipe-ws" style="width:100%;position:relative;">
+        <div class="av-cdc-pipe-name" style="color:var(--candidate);">walsender</div>
+        <div class="av-cdc-pipe-sub">yboutput / pgoutput plugin<br>BEGIN / CHANGE / COMMIT</div>
+        <div style="font-size:8px;color:var(--candidate);margin-top:5px;text-align:right;letter-spacing:.2px;">PG wire → ▶</div>
+      </div>
+
+      <!-- walsender → Slot (tracked by) -->
+      <div style="display:flex;flex-direction:column;align-items:center;margin:3px 0 2px;">
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+        <div style="font-size:8px;color:var(--txt2);font-style:italic;line-height:1.3;">tracked by ▼</div>
+        <div style="width:2px;height:7px;background:var(--border-hi);"></div>
+      </div>
+
+      <div class="av-cdc-pipe-box cdc-pipe-slot" style="width:100%;">
+        <div class="av-cdc-pipe-name" style="color:var(--warn);font-size:9px;">Replication Slot</div>
+        <div class="av-cdc-pipe-sub">slot: slot1<br>confirmed flush LSN · WAL retained until ACK</div>
+      </div>
+      <div style="font-size:8px;color:var(--txt2);font-style:italic;margin-top:5px;text-align:center;">at-least-once · no gaps</div>
+    </div>`;
+  }
+
+  // Consumer stack right column
+  function consumerStack() {
+    return `<div class="av-cdc-consumers" style="display:flex;flex-direction:column;gap:8px;flex:1.2;">
+      <div class="av-cdc-consumer-block cdc-cons-kafka">
+        <div class="av-cdc-consumer-hdr" style="color:var(--ok);">☁ Kafka Connect</div>
+        <div class="av-cdc-consumer-sub">YugabyteDB Debezium Connector</div>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:3px;">
+          <div class="av-cdc-consumer-row"><span class="av-cdc-cr-lbl">Protocol</span><span class="av-cdc-cr-val">PostgreSQL wire (yboutput / pgoutput)</span></div>
+          <div class="av-cdc-consumer-row"><span class="av-cdc-cr-lbl">Snapshot</span><span class="av-cdc-cr-val">HybridTime consistent read</span></div>
+          <div class="av-cdc-consumer-row"><span class="av-cdc-cr-lbl">Ordering</span><span class="av-cdc-cr-val">Commit-time · cross-tablet</span></div>
+          <div class="av-cdc-consumer-row"><span class="av-cdc-cr-lbl">Delivery</span><span class="av-cdc-cr-val">At-least-once</span></div>
+        </div>
+      </div>
+
+      <div style="text-align:center;font-size:11px;color:var(--txt3);">▼</div>
+
+      <div class="av-cdc-consumer-block cdc-cons-broker">
+        <div class="av-cdc-consumer-hdr" style="color:var(--candidate);">Apache Kafka Broker</div>
+        <div class="av-cdc-consumer-sub">One topic per table (configurable)</div>
+        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">
+          ${['orders','users','products'].map(t =>
+            `<div class="cdc-cons-topic">${t}</div>`
+          ).join('')}
+        </div>
+      </div>
+
+      <div style="text-align:center;font-size:11px;color:var(--txt3);">▼</div>
+
+      <div class="av-cdc-consumer-block cdc-cons-downstream">
+        <div class="av-cdc-consumer-hdr" style="color:var(--txt2);">Downstream Consumers</div>
+        <div style="margin-top:6px;display:flex;flex-direction:column;gap:4px;">
+          ${[
+            { icon: '🏛', label: 'Data Warehouse', sub: 'Snowflake · BigQuery · Redshift' },
+            { icon: '🔍', label: 'Search Index',   sub: 'Elasticsearch · OpenSearch' },
+            { icon: '⬡',  label: 'Microservices',  sub: 'Event-driven via Kafka streams' },
+          ].map(c =>
+            `<div style="display:flex;align-items:center;gap:6px;">
+               <span style="font-size:13px;">${c.icon}</span>
+               <div>
+                 <div style="font-size:10px;font-weight:600;color:var(--txt);">${c.label}</div>
+                 <div style="font-size:9px;color:var(--txt2);">${c.sub}</div>
+               </div>
+             </div>`
+          ).join('')}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Capabilities / Watch out for — reusing capsSection pattern
+  function capsSection(id, pros, cons) {
+    let h = `<div class="av-collapse-hdr" onclick="archToggle('${id}')"><span class="av-collapse-sub-lbl">Capabilities &amp; Watch out for</span><button class="av-collapse-btn" data-arch-toggle="${id}">▼</button></div>`;
+    h += `<div id="${id}" class="av-xcl-caps">`;
+    h += `<div class="av-xcl-cap-col av-xcl-cap-pros"><div class="av-xcl-cap-hdr">✓ Capabilities</div>`;
+    pros.forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+    h += `</div><div class="av-xcl-cap-col av-xcl-cap-cons"><div class="av-xcl-cap-hdr">⚠ Watch out for</div>`;
+    cons.forEach(t => h += `<div class="av-xcl-cap-item">${t}</div>`);
+    h += `</div></div>`;
+    return h;
+  }
+
+  let h = `<div class="av-xcl-title">CDC · PostgreSQL Logical Replication Architecture</div>`;
+  h += `<div class="av-xcl-sub">YugabyteDB streams row-level changes via the PostgreSQL logical replication protocol. A <strong>CDC Service</strong> polls each tablet leader WAL independently. A <strong>Virtual WAL (VWAL)</strong> assembles and globally orders changes across shards. The <strong>walsender</strong> encodes records using the <code>yboutput</code> plugin (default; <code>pgoutput</code> also supported) and streams them to any PG-compatible consumer — Debezium, Kafka Connect, or <code>pg_recvlogical</code>.</div>`;
+  h += `<div class="av-xcl-modes">`;
+
+  // Main topology block
+  h += `<div class="av-xcl-block">`;
+  h += `<div class="av-xcl-block-hdr">
+    <div class="av-xcl-block-lbl">Topology</div>
+    <div class="av-xcl-order-badges">
+      <span class="av-order-badge av-ob-ok">✓ Commit-time Ordered</span>
+      <span class="av-order-badge av-ob-ok">✓ At-least-once</span>
+      <span class="av-order-badge av-ob-ok">✓ yboutput / pgoutput</span>
+      <span class="av-order-badge av-ob-warn">⚠ LSN ≠ Byte Offset</span>
+      <span class="av-order-badge av-ob-warn">⚠ No xCluster as Target</span>
+    </div>
+  </div>`;
+  h += statBar([
+    { val: 'yboutput',    lbl: 'Output Plugin' },
+    { val: 'VWAL',        lbl: 'Ordering Layer' },
+    { val: 'at-least-once', lbl: 'Delivery' },
+    { val: 'Slot + Pub',  lbl: 'Setup' },
+    { val: 'HybridTime',  lbl: 'Snapshot anchor' },
+  ]);
+  h += `<div class="av-xcl-row" style="gap:0;align-items:stretch;">`;
+  h += ybCluster();
+  h += `<div style="display:flex;align-items:center;padding:0 4px;color:var(--border-hi);font-size:18px;">▶</div>`;
+  h += cdcPipeline();
+  h += `<div style="display:flex;align-items:center;padding:0 4px;color:var(--border-hi);font-size:18px;">▶</div>`;
+  h += consumerStack();
+  h += `</div>`;
+  h += `</div>`;
+
+  // Capabilities & Watch out for
+  h += `<div class="av-xcl-block">`;
+  h += capsSection('cdc-arch-caps',
+    [
+      'Row-level change capture (INSERT / UPDATE / DELETE) for any YSQL table in a publication',
+      'Initial consistent snapshot at HybridTime before streaming — no partial or mid-TX rows',
+      'VWAL guarantees commit-time ordering across all tablets — cross-shard TX visibility is atomic',
+      'No gaps: receiving a change at LSN <em>n</em> means all prior changes are already delivered',
+      '<code>yboutput</code> (default) or <code>pgoutput</code> plugin — compatible with Debezium, <code>pg_recvlogical</code>, and any PG wire client',
+      '<code>REPLICA IDENTITY FULL</code> enables full before-image (old row) for UPDATE and DELETE operations',
+      'v2026.1+: DDL changes detected in correct commit order via sys-catalog polling — no periodic publication refresh needed',
+    ],
+    [
+      'LSN is not a byte offset — <code>pg_wal_lsn_diff()</code>, <code>pg_current_wal_lsn()</code>, and cross-slot arithmetic are unsupported',
+      '<code>TRUNCATE</code> and <code>DROP TABLE</code> are not supported after slot creation — <code>TRUNCATE</code> is never captured in the stream',
+      'A cluster with an active slot cannot be used as an xCluster replication target',
+      'PITR restore invalidates all existing slots — they must be recreated and re-snapshotted',
+      'Slot retains WAL until consumer ACKs (durable across restarts) — but unbounded lag if the consumer stalls; WAL accumulates on every TServer until it is released',
+      'Only YSQL tables in a <code>PUBLICATION</code> are captured — CDC is not supported for YCQL',
+    ]
+  );
+  h += `</div>`;
+
+  // YB vs PG comparison table
+  h += `<div class="av-xcl-block">`;
+  h += `<div class="av-collapse-hdr" onclick="archToggle('cdc-arch-cmp')"><span class="av-collapse-sub-lbl">YugabyteDB vs PostgreSQL Logical Replication</span><button class="av-collapse-btn" data-arch-toggle="cdc-arch-cmp">▼</button></div>`;
+  h += `<div id="cdc-arch-cmp" style="overflow-x:auto;">`;
+  const cmpRows = [
+    ['Feature',                    'YugabyteDB',                             'PostgreSQL'],
+    ['Ordering layer',             'Virtual WAL (VWAL) — cross-shard',       'WAL stream — single node'],
+    ['LSN semantics',              'Logical counter, no byte offset',         'Byte offset in WAL file'],
+    ['pg_wal_lsn_diff()',          '✕ Unsupported',                          '✓ Supported'],
+    ['pg_stat_replication',        '✕ Unsupported',                          '✓ Supported'],
+    ['TRUNCATE capture',           '✕ Not captured; blocked post-slot',      '✓ Supported'],
+    ['Tablet / shard awareness',   '✓ CDC polls each shard independently',   'N/A — single WAL'],
+    ['Snapshot anchor',            'HybridTime (yb_read_time)',               'LSN-based snapshot'],
+    ['DDL replication (v2026.1+)', '✓ Sys-catalog polling, commit-time order', '✓ Native DDL events'],
+    ['PITR interaction',           '✗ Slots invalidated on restore',         'N/A'],
+    ['xCluster compatibility',     '✗ Cannot be xCluster target',            'N/A'],
+  ];
+  h += `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px;">`;
+  cmpRows.forEach((r, i) => {
+    const bg = i === 0 ? 'var(--s3)' : (i % 2 === 0 ? 'var(--s2)' : 'transparent');
+    h += `<tr style="background:${bg};">`;
+    r.forEach((c, j) => {
+      const color = i === 0 ? 'var(--txt2)' : j === 0 ? 'var(--txt)' : j === 1 ? '#34d399' : '#60a5fa';
+      const fw = (i === 0 || j === 0) ? '600' : '400';
+      h += `<td style="padding:7px 10px;border-bottom:1px solid var(--border);color:${color};font-weight:${fw};">${c}</td>`;
+    });
+    h += `</tr>`;
+  });
+  h += `</table></div></div>`;
+
+  h += `</div>`;
+  container.innerHTML = h;
+}
+
 function _renderArchXCluster(container) {
   const pollers = [
     { name: 'users', color: '#f59e0b' },
@@ -3360,9 +3963,10 @@ function _renderArchXCluster(container) {
     return `<div class="av-xcl-statsbar">${stats.map(s => `<div class="av-xcl-stat"><span class="av-xcl-stat-v">${s.val}</span><span class="av-xcl-stat-l">${s.lbl}</span></div>`).join('')}</div>`;
   }
   const fdColors = ['#f59e0b', '#60a5fa', '#34d399'];
-  function miniCluster(label, region, cls) {
+  function miniCluster(label, region, cls, rwLabel) {
     let h = `<div class="av-xcl-cluster" style="display:flex;flex-direction:column">`;
-    h += `<div class="av-xcl-hdr ${cls}">${label}<span class="av-xcl-region">${region}</span></div>`;
+    const rwBadge = rwLabel ? `<span class="av-xcl-rw-badge ${cls.includes('secondary') ? 'av-xcl-rw-ro' : 'av-xcl-rw-rw'}">${rwLabel}</span>` : '';
+    h += `<div class="av-xcl-hdr ${cls}">${label}${rwBadge}<span class="av-xcl-region">${region}</span></div>`;
     h += `<div class="av-xcl-az-row" style="flex:1;align-items:stretch">`;
     for (let az = 0; az < 3; az++) {
       const fc = fdColors[az];
@@ -3415,9 +4019,9 @@ function _renderArchXCluster(container) {
     { val: 'Async', lbl: 'CDC Mode' },
   ]);
   h += `<div class="av-xcl-row" style="min-height:280px">`;
-  h += miniCluster('PRIMARY', 'ap-south-1', 'av-xcl-primary');
+  h += miniCluster('PRIMARY', 'ap-south-1', 'av-xcl-primary', 'Read / Write');
   h += midSection('CDC Pollers', pollers, 'RPO ≈ seconds · async WAL · ordered delivery', false);
-  h += miniCluster('SECONDARY', 'us-east-1', 'av-xcl-secondary');
+  h += miniCluster('SECONDARY', 'us-east-1', 'av-xcl-secondary', 'Read Only');
   h += `</div>`;
   h += capsSection('xcl-dr-caps',
     ['Full transactional consistency — no partial-TX windows at secondary', 'Global write ordering preserved across all tablets', 'n:m parallel CDC streams — one independent WAL poller per tablet, all running concurrently', 'Per-tablet ordered delivery — each stream maintains commit order end-to-end', 'Failover &amp; Switchover — promote on unplanned failure or planned switchover with zero data loss', 'Secondary serves local reads — reduces latency for read-heavy workloads'],
@@ -3435,9 +4039,9 @@ function _renderArchXCluster(container) {
     { val: 'Async', lbl: 'CDC Mode' },
   ]);
   h += `<div class="av-xcl-row" style="min-height:280px">`;
-  h += miniCluster('CLUSTER S1', 'ap-south-1', 'av-xcl-primary');
+  h += miniCluster('CLUSTER S1', 'ap-south-1', 'av-xcl-primary', 'Read / Write');
   h += midSection('Bidirectional Pollers', pollers, 'LWW by HLC · no cross-tablet ordering', true);
-  h += miniCluster('CLUSTER S2', 'eu-central-1', 'av-xcl-primary');
+  h += miniCluster('CLUSTER S2', 'eu-central-1', 'av-xcl-primary', 'Read / Write');
   h += `</div>`;
   h += capsSection('xcl-aa-caps',
     ['Both clusters accept writes simultaneously — write-anywhere for all regions', 'Local low-latency writes for users in each geographic region', 'n:m parallel bidirectional CDC streams — one WAL poller per tablet in each direction', 'Replication throughput scales with tablet count — more tablets, more parallelism', 'Either cluster survives full failure; peer continues independently', 'No single point of write bottleneck across regions'],

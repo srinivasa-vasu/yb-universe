@@ -565,6 +565,18 @@ const SCENARIOS = {
       { text: "Use them to provide <b>local read latency</b> in regions far from your primary cluster.", element: ".av-highlights" }
     ]
   },
+  // Architecture: CDC Logical Replication
+  "cdc-arch": {
+    group: "Deployment Architectures", icon: "🔄", sortOrder: 4,
+    name: 'Change Data Capture', title: 'CDC · Logical Replication Architecture', subtitle: 'CDC Service · VWAL · walsender · Kafka',
+    isArch: true,
+    desc: 'YugabyteDB CDC uses the PostgreSQL logical replication protocol. A <b>CDC Service</b> polls each tablet WAL independently. A <b>Virtual WAL (VWAL)</b> assembles changes from all shards, assigns LSNs, and maintains commit-time order across tablets. The <b>walsender</b> process streams records using the <code>yboutput</code> plugin (default; <code>pgoutput</code> also supported) to consumers such as the YugabyteDB Debezium Connector for Kafka, or any standard <code>pg_recvlogical</code>-compatible client.',
+    guidedTour: [
+      { text: "The <b>YugabyteDB cluster</b> on the left shows tablet leaders in each AZ. Only leaders emit CDC WAL — the CDC Service polls each independently.", element: ".av-xcl-cluster" },
+      { text: "The <b>CDC pipeline</b> in the middle shows how per-tablet WAL records are assembled by the <b>Virtual WAL (VWAL)</b> into a single commit-time-ordered stream, then encoded by <b>walsender</b> using the <code>yboutput</code> plugin (default).", element: ".av-cdc-pipeline" },
+      { text: "The <b>consumer stack</b> on the right shows Kafka Connect (YB Debezium Connector) consuming the stream, writing to Kafka topics, and fanning out to downstream systems. The <b>confirmed flush LSN</b> tracks how far the consumer has committed.", element: ".av-cdc-consumers" }
+    ]
+  },
   // Architecture: Cluster Overview
   "cluster-overview": {
     group: "Foundations", icon: "🗺️", sortOrder: 6,
@@ -1856,10 +1868,14 @@ const SCENARIOS = {
           ctx.setLat(1, 300);
           await ctx.delay(600);
 
-          // RF=3: TS-2 still leads, TS-4 still has follower — quorum held
-          [2, 4].forEach(n => ctx.hlTablet('rf3', n, 't-hl'));
+          // RF=3: TS-2 still leads, TS-4 still has follower — quorum held, data intact
           addLog('RF=1 · TS-1: DEAD — data unreachable, system down ✗', 'le');
           addLog('RF=3 · TS-3: DEAD — but TS-2+TS-4 hold quorum ✓', 'ls');
+          addLog('RF=3: all 6 rows still present on TS-2 (leader) and TS-4 (follower)', 'ls');
+          await ctx.delay(200);
+          ctx.safeFlash('rf3', 2, 3500);
+          await ctx.delay(120);
+          ctx.safeFlash('rf3', 4, 3500);
           ctx.setLat(2, 15);
 
           renderHaPanel({ systems: [
@@ -1875,11 +1891,20 @@ const SCENARIOS = {
         action: async (ctx) => {
           ctx.activateClient(true);
           addLog('Sending writes — RF=3 accepts, RF=1 unreachable', 'li');
-          for (let i = 0; i < 3; i++) {
+          const missedRows = [
+            [7, 'George', 'DAL', 88, 1713289010.1],
+            [8, 'Hannah', 'DEN', 76, 1713289010.2],
+            [9, 'Ivan',   'MIA', 84, 1713289010.3],
+          ];
+          for (const newRow of missedRows) {
             ctx.pktClientToTablet('rf3', 2, 'pk-write', 500);
-            await ctx.delay(250);
-            ctx.pktTabletToTablet('rf3', 2, 'rf3', 4, 'pk-raft', 400);
-            await ctx.delay(450);
+            await ctx.delay(200);
+            S.groups.find(x => x.id === 'rf3').data.push([...newRow]);
+            ctx.reRenderTablet('rf3', 2, true);                                   // both alive replicas at once
+            ctx.reRenderTablet('rf3', 4, true);
+            await ctx.pktTabletToTablet('rf3', 2, 'rf3', 4, 'pk-raft', 400);     // Raft flies
+            await ctx.pktTabletToTablet('rf3', 4, 'rf3', 2, 'pk-ack', 350);      // ACK back
+            await ctx.delay(150);
           }
           ctx.activateClient(false);
           addLog('RF=3: all writes succeed — 0 ms downtime ✓', 'ls');
@@ -1895,15 +1920,23 @@ const SCENARIOS = {
         label: '4. RF=3 Self-Heals — RF=1 Cannot',
         desc: 'TS-3 rejoins the RF=3 cluster, catches up via Raft, and RF=3 is fully restored. TS-1 (RF=1) remains down — there is no replica to recover from. Zero-touch recovery on one side; manual intervention required on the other.',
         action: async (ctx) => {
+          // Node 3 comes back 3 rows behind — reveal rows one at a time during catch-up
+          S.replicaState['rf3'][3].catchupOffset = 3;
           S.nodes.find(n => n.id === 3).alive = true;
           renderNodeAlive(3, true);
           renderAllTablets(); setTimeout(renderConnections, 50);
-          addLog('TS-3: ONLINE — Raft catch-up starting', 'ls');
+          ctx.hlTablet('rf3', 3, 't-syncing');
+          addLog('TS-3: ONLINE — Raft catch-up starting (3 rows behind)', 'ls');
           ctx.setLat(3, 150);
 
+          const catchupNames = ['George', 'Hannah', 'Ivan'];
           for (let i = 0; i < 3; i++) {
-            ctx.pktTabletToTablet('rf3', 2, 'rf3', 3, 'pk-raft', 400);
-            await ctx.delay(450);
+            S.replicaState['rf3'][3].catchupOffset = 2 - i;  // row appears first
+            ctx.reRenderTablet('rf3', 3, true);
+            await ctx.pktTabletToTablet('rf3', 2, 'rf3', 3, 'pk-raft', 400);   // Raft flies
+            await ctx.pktTabletToTablet('rf3', 3, 'rf3', 2, 'pk-ack', 350);    // ACK back
+            addLog(`TS-3: applied row ${catchupNames[i]} ✓`, 'ls');
+            await ctx.delay(150);
           }
           addLog('TS-3 caught up — RF=3 fully restored ✓', 'ls');
           [2, 3, 4].forEach(n => ctx.hlTablet('rf3', n, 't-hl'));
@@ -4556,6 +4589,263 @@ const SCENARIOS = {
           });
           addLog('Live read (T3) + AS OF -5m read · concurrent · no locks', 'ls');
           addLog('MVCC GC controlled by --timestamp_history_retention_interval_sec', 'ls');
+        }
+      }
+    ]
+  },
+
+  // ── CDC Logical Replication ────────────────────────────────────────────────
+
+  "dm-cdc": {
+    group: "Data Management", icon: "🔄", sortOrder: 6,
+    name: 'CDC · Logical Replication',
+    title: 'CDC · PostgreSQL Logical Replication',
+    subtitle: 'CDC Service · Virtual WAL · walsender · Kafka',
+    cdcPanel: true,
+    desc: 'YugabyteDB CDC uses PostgreSQL logical replication protocol. A <b>CDC Service</b> polls each tablet WAL independently. A <b>Virtual WAL (VWAL)</b> assembles changes from all shards, assigns LSNs, and maintains commit-time order across tablets. The <b>walsender</b> streams BEGIN/CHANGE/COMMIT records via the <code>yboutput</code> plugin (default; <code>pgoutput</code> also supported) to consumers (Debezium, Kafka Connect, <code>pg_recvlogical</code>). Every replication slot tracks a <b>confirmed flush LSN</b> — WAL is retained until the consumer ACKs. Delivery guarantee: at-least-once, no gaps, commit-time ordered.',
+    guidedTour: [
+      { text: "The three <b>Tablet WAL</b> boxes at the top represent the CDC Service polling each tablet leader independently. Watch WAL records appear as writes land.", element: ".cdc-tablets-row" },
+      { text: "The <b>Virtual WAL (VWAL)</b> is YugabyteDB's key differentiator — it assembles per-tablet changes into a single transactional stream and assigns LSNs. Note: YB LSNs are not byte offsets.", element: ".cdc-vwal-box" },
+      { text: "The <b>walsender</b> process streams yboutput messages downstream (yboutput is the default plugin; pgoutput is also supported). The <b>confirmed flush LSN</b> tracks how far the consumer has committed — WAL before this point can be released.", element: ".cdc-walsender-box" }
+    ],
+    latencies: [
+      { lbl: 'Slot creation',   cls: 'll', max: 20  },
+      { lbl: 'Snapshot read',   cls: 'lm', max: 500 },
+      { lbl: 'Stream lag',      cls: 'll', max: 50  }
+    ],
+    init: (ctx) => {
+      ctx.cdcPanel({
+        phase: 'idle',
+        slotName: '—', pubName: '—',
+        lsn: '—', confirmedLsn: '—',
+        records: [], vwalAssembly: [],
+        phaseLabel: '— run the steps to start CDC setup —'
+      });
+    },
+    steps: [
+      {
+        label: '1. Create Publication & Replication Slot',
+        desc: 'First, define which tables to stream with <code>CREATE PUBLICATION</code>. Then create a replication slot using <code>pg_create_logical_replication_slot(\'slot1\', \'yboutput\')</code> — <code>yboutput</code> is the default YugabyteDB output plugin; <code>pgoutput</code> is also supported. YugabyteDB returns a <b>snapshot_name</b> encoding the HybridTime consistent point — this is the anchor for the initial snapshot read.',
+        action: async (ctx) => {
+          addLog('CREATE PUBLICATION pub_orders FOR TABLE orders, users', 'li');
+          await ctx.delay(400);
+          addLog('Publication created: pub_orders (2 tables)', 'ls');
+          await ctx.delay(300);
+          addLog("SELECT * FROM pg_create_logical_replication_slot('slot1', 'yboutput')", 'li');
+          await ctx.delay(500);
+          addLog('Slot created: slot1 · snapshot_name=0000000100000001 (HybridTime anchor)', 'ls');
+          addLog('WAL retention active from this point — slot lag begins accumulating', 'lw');
+          ctx.cdcPanel({
+            phase: 'idle',
+            slotName: 'slot1', pubName: 'pub_orders',
+            lsn: '0/1000000', confirmedLsn: '0/0',
+            phaseLabel: '🔒 Slot created · snapshot_name = HybridTime consistent point',
+            records: [
+              { type: 'BEGIN', data: 'slot created · WAL retention starts', lsn: '0/1000000' },
+            ],
+            vwalAssembly: [
+              { lsn: '0/1000000', type: 'BEGIN', data: 'slot boundary established' },
+            ]
+          });
+        }
+      },
+      {
+        label: '2. Snapshot Phase — Initial Table Read at HybridTime',
+        desc: 'Before streaming begins, the consumer reads the initial table state at the <b>HybridTime anchor T₀</b> returned with the slot (<code>snapshot_name</code>). All rows are read via <code>SET LOCAL yb_read_time TO \'&lt;HybridTime&gt; ht\'</code> — a consistent point-in-time view with no partial rows. Crucially, <b>while the snapshot is being read</b>, live writes continue and their WAL is buffered after T₀. When the snapshot completes, streaming picks up from exactly T₀ — <b>no gap, no overlap</b>.',
+        action: async (ctx) => {
+          addLog('Consumer: reading initial snapshot at HybridTime anchor T₀', 'li');
+          // walBuffered grows independently — simulates live writes during snapshot read
+          const walPerStep = [0, 5, 11, 18, 26, 32];
+          ctx.cdcPanel({
+            phase: 'snapshot', snapshotPct: 0, walBufferedKb: 0,
+            snapshotAnchorLsn: '0/1000050',
+            slotName: 'slot1', pubName: 'pub_orders',
+            lsn: '0/1000000', confirmedLsn: '0/0',
+            phaseLabel: '📸 Snapshot Phase — reading all rows as-of T₀',
+            records: [{ type: 'BEGIN', data: 'snapshot read starting…', lsn: '0/1000000' }],
+            vwalAssembly: [{ lsn: '0/1000000', type: 'BEGIN', data: 'snapshot boundary — T₀' }]
+          });
+          for (let step = 0; step <= 5; step++) {
+            const pct = step * 20;
+            const walKb = walPerStep[step];
+            await ctx.delay(380);
+            const recs = [{ type: 'BEGIN', data: 'snapshot read', lsn: '0/1000000' }];
+            if (pct >= 20)  recs.push({ type: 'CHANGE', table: 'orders', data: 'id=1 · amount=299.00', lsn: '0/1000010', tablet: 1, fresh: pct === 20 });
+            if (pct >= 40)  recs.push({ type: 'CHANGE', table: 'orders', data: 'id=2 · amount=150.00', lsn: '0/1000020', tablet: 2, fresh: pct === 40 });
+            if (pct >= 60)  recs.push({ type: 'CHANGE', table: 'users',  data: 'id=1 · name=Alice',    lsn: '0/1000030', tablet: 1, fresh: pct === 60 });
+            if (pct >= 80)  recs.push({ type: 'CHANGE', table: 'users',  data: 'id=2 · name=Bob',      lsn: '0/1000040', tablet: 3, fresh: pct === 80 });
+            if (pct >= 100) recs.push({ type: 'COMMIT', data: 'snapshot complete · 4 rows', lsn: '0/1000050', fresh: true });
+            ctx.cdcPanel({
+              phase: 'snapshot', snapshotPct: pct, walBufferedKb: walKb,
+              snapshotAnchorLsn: '0/1000050',
+              slotName: 'slot1', pubName: 'pub_orders',
+              lsn: '0/1000050', confirmedLsn: '0/0',
+              phaseLabel: pct < 100
+                ? `📸 Snapshot ${pct}% · WAL buffering ${walKb} KB after T₀`
+                : `📸 Snapshot complete · ${walKb} KB buffered · handoff to streaming`,
+              records: recs, vwalAssembly: recs.map(r => ({ ...r })),
+              tabletHighlight: pct < 60 ? 0 : pct < 80 ? 2 : -1
+            });
+            if (pct < 100) addLog(`Snapshot: ${pct}% · live writes buffering ${walKb} KB after T₀`, '');
+          }
+          addLog('Snapshot complete · 32 KB buffered since T₀ · streaming will replay from T₀ LSN', 'ls');
+        }
+      },
+      {
+        label: '3. Streaming — CDC Service → VWAL → walsender → Kafka',
+        desc: 'Streaming picks up from exactly <b>T₀</b> — the HybridTime anchor set at slot creation. The first records streamed are the <b>32 KB buffered during snapshot</b> (writes that landed after T₀ while the snapshot was being read). Once those are replayed and ACKed, the consumer is at the live frontier. From there, the <b>CDC Service</b> polls each tablet leader WAL independently, the <b>VWAL</b> assembles and globally orders changes, and <b>walsender</b> encodes via <code>yboutput</code> and streams downstream — no gap from snapshot, no duplicates.',
+        action: async (ctx) => {
+          // Show handoff moment: replaying 32 KB buffered since T₀
+          // Drain the 32 KB buffer first: 32→24→16→8→0
+          addLog('Streaming started · replaying 32 KB WAL buffered since T₀', 'li');
+          for (let rem = 32; rem >= 0; rem -= 8) {
+            ctx.cdcPanel({
+              phase: 'streaming', snapshotPct: 100, walBufferedKb: rem,
+              snapshotAnchorLsn: '0/1000050',
+              slotName: 'slot1', pubName: 'pub_orders',
+              lsn: '0/1000050', confirmedLsn: '0/1000050',
+              phaseLabel: rem > 0
+                ? `⚡ Replaying buffered WAL — ${rem} KB remaining from T₀`
+                : '🟢 Buffer cleared · streaming live from frontier',
+              records: [{ type: 'COMMIT', data: 'snapshot complete · 4 rows', lsn: '0/1000050' }],
+              vwalAssembly: [{ lsn: '0/1000050', type: 'COMMIT', data: `snapshot boundary · ${rem > 0 ? rem + ' KB remaining' : 'buffer clear'}`, fresh: rem === 32 }],
+              tabletHighlight: -1
+            });
+            if (rem > 0) addLog(`Replaying buffered WAL: ${rem} KB remaining`, '');
+            await ctx.delay(420);
+          }
+          addLog('Buffer cleared · now streaming live changes from frontier', 'ls');
+          const txns = [
+            { id: 'TX-A', table: 'orders', rows: [
+              { data: 'INSERT id=10 · amount=499.00', tablet: 1 },
+              { data: 'INSERT id=11 · amount=89.50',  tablet: 2 },
+            ]},
+            { id: 'TX-B', table: 'users', rows: [
+              { data: 'UPDATE id=1 · email=alice@co', tablet: 1 },
+            ]},
+            { id: 'TX-C', table: 'orders', rows: [
+              { data: 'DELETE id=2',                  tablet: 3 },
+              { data: 'INSERT id=12 · amount=210.00', tablet: 2 },
+            ]},
+          ];
+          let lsnCounter = 0x1000060;
+          const allRecords = [
+            { type: 'COMMIT', data: 'snapshot complete', lsn: '0/1000050' },
+          ];
+          const vwalAll = [...allRecords];
+          for (const tx of txns) {
+            const lsnHex = n => '0/' + n.toString(16).toUpperCase();
+            addLog(`TX ${tx.id}: CDC Service detecting changes on tablets`, 'li');
+            const beginLsn = lsnHex(lsnCounter++);
+            allRecords.push({ type: 'BEGIN', data: tx.id, lsn: beginLsn });
+            vwalAll.push({ lsn: beginLsn, type: 'BEGIN', data: tx.id, fresh: true });
+            ctx.cdcPanel({
+              phase: 'streaming', slotName: 'slot1', pubName: 'pub_orders',
+              lsn: beginLsn, confirmedLsn: lsnHex(lsnCounter - 5),
+              phaseLabel: '🟢 Streaming — CDC Service → VWAL → walsender → Kafka',
+              records: [...allRecords], vwalAssembly: [...vwalAll],
+              tabletHighlight: tx.rows[0].tablet - 1
+            });
+            await ctx.delay(400);
+            for (const row of tx.rows) {
+              const rowLsn = lsnHex(lsnCounter++);
+              allRecords.push({ type: 'CHANGE', table: tx.table, data: row.data, lsn: rowLsn, tablet: row.tablet, fresh: true });
+              vwalAll.push({ lsn: rowLsn, type: 'CHANGE', table: tx.table, data: row.data, fresh: true });
+              ctx.cdcPanel({
+                phase: 'streaming', slotName: 'slot1', pubName: 'pub_orders',
+                lsn: rowLsn, confirmedLsn: lsnHex(lsnCounter - 6),
+                phaseLabel: '🟢 Streaming — VWAL assembling cross-tablet changes',
+                records: [...allRecords], vwalAssembly: [...vwalAll],
+                tabletHighlight: row.tablet - 1
+              });
+              addLog(`VWAL: CHANGE ${tx.table} · ${row.data} · LSN=${rowLsn} · tablet-${row.tablet}`, '');
+              await ctx.delay(350);
+            }
+            const commitLsn = lsnHex(lsnCounter++);
+            allRecords.push({ type: 'COMMIT', data: tx.id + ' committed', lsn: commitLsn, fresh: true });
+            vwalAll.push({ lsn: commitLsn, type: 'COMMIT', data: tx.id, fresh: true });
+            ctx.cdcPanel({
+              phase: 'streaming', slotName: 'slot1', pubName: 'pub_orders',
+              lsn: commitLsn, confirmedLsn: lsnHex(lsnCounter - 4),
+              phaseLabel: '🟢 Streaming — walsender → Kafka · consumer ACKing',
+              records: [...allRecords], vwalAssembly: [...vwalAll],
+              tabletHighlight: -1
+            });
+            addLog(`walsender: COMMIT ${tx.id} · LSN=${commitLsn} → Kafka`, 'ls');
+            await ctx.delay(500);
+          }
+          addLog('All transactions streamed · confirmed flush LSN advancing · WAL released', 'ls');
+        }
+      },
+      {
+        label: '4. Slot Lag — Consumer Falls Behind',
+        desc: 'If the consumer stalls, two things accumulate on <b>every TServer</b> simultaneously. <b>WAL retention</b> (LSN-gated): the slot holds back WAL GC until <code>confirmed_flush_lsn</code> advances — unread WAL files pile up proportionally to unread changes. <b>Intent retention</b> (time-gated): write intents in the intents RocksDB that haven\'t been streamed yet are kept beyond normal GC, controlled by <code>cdc_intent_retention_ms</code>. Both grow independently and create disk pressure cluster-wide.',
+        action: async (ctx) => {
+          const recs = [
+            { type: 'COMMIT', data: 'TX-C committed',    lsn: '0/1000090' },
+            { type: 'BEGIN',  data: 'TX-D',              lsn: '0/10000A0' },
+            { type: 'CHANGE', table: 'orders', data: 'INSERT id=13 · amount=99.99', lsn: '0/10000B0', tablet: 2 },
+            { type: 'CHANGE', table: 'orders', data: 'UPDATE id=10 · status=shipped', lsn: '0/10000C0', tablet: 1 },
+            { type: 'COMMIT', data: 'TX-D committed',    lsn: '0/10000D0' },
+            { type: 'BEGIN',  data: 'TX-E',              lsn: '0/10000E0' },
+            { type: 'CHANGE', table: 'users',  data: 'DELETE id=2',  lsn: '0/10000F0', tablet: 3 },
+            { type: 'COMMIT', data: 'TX-E committed',    lsn: '0/1000100' },
+          ];
+          const vwal = recs.map(r => ({ ...r }));
+          addLog('Consumer stalled — WAL retention + intent retention both active', 'lw');
+          for (let lag = 0; lag <= 80; lag += 16) {
+            const intents = Math.round(lag * 0.25); // intents grow with time (slower, time-gated)
+            await ctx.delay(420);
+            ctx.cdcPanel({
+              phase: 'lag', slotName: 'slot1', pubName: 'pub_orders',
+              lsn: '0/1000100', confirmedLsn: '0/1000050',
+              lagBytes: lag, walRetainedKb: lag, intentsHeld: intents,
+              phaseLabel: `⚠ Slot lag: ${lag} KB · WAL held: ${lag} KB · Intents retained: ${intents}`,
+              records: recs, vwalAssembly: vwal,
+              tabletHighlight: -1
+            });
+            if (lag > 0) addLog(`WAL retained: ${lag} KB · Intents held: ${intents} (cdc_intent_retention_ms gate)`, 'lw');
+          }
+          addLog('⚠ SELECT slot_name, confirmed_flush_lsn, lag FROM pg_replication_slots', 'lw');
+          addLog('⚠ Drop idle slots to release WAL and intent retention on TServers', 'lw');
+        }
+      },
+      {
+        label: '5. Consumer Recovers — Lag Clears',
+        desc: 'When the consumer comes back online, it resumes from its last <b>confirmed flush LSN</b> — no changes are lost. As it processes each batch and ACKs, two things are released in tandem: <b>WAL GC resumes</b> (LSN-gated — as confirmed_flush_lsn advances, WAL files before it are eligible for GC), and <b>intents are cleared</b> (time-gate is lifted as the consumer streams and commits the pending changes). Both the WAL held and intent count drain toward zero.',
+        action: async (ctx) => {
+          const frozenRecs = [
+            { type: 'COMMIT', data: 'TX-C committed',               lsn: '0/1000090' },
+            { type: 'BEGIN',  data: 'TX-D',                          lsn: '0/10000A0' },
+            { type: 'CHANGE', table: 'orders', data: 'INSERT id=13 · amount=99.99',     lsn: '0/10000B0', tablet: 2 },
+            { type: 'CHANGE', table: 'orders', data: 'UPDATE id=10 · status=shipped',   lsn: '0/10000C0', tablet: 1 },
+            { type: 'COMMIT', data: 'TX-D committed',                lsn: '0/10000D0' },
+            { type: 'BEGIN',  data: 'TX-E',                          lsn: '0/10000E0' },
+            { type: 'CHANGE', table: 'users',  data: 'DELETE id=2',  lsn: '0/10000F0', tablet: 3 },
+            { type: 'COMMIT', data: 'TX-E committed',                lsn: '0/1000100' },
+          ];
+          addLog('Consumer reconnected to slot1 · resuming from confirmed_flush_lsn=0/1000050', 'li');
+          await ctx.delay(400);
+          const catchupLsns = ['0/1000060','0/1000070','0/1000080','0/1000090','0/10000D0','0/1000100'];
+          for (let i = 0; i < catchupLsns.length; i++) {
+            const lag     = Math.max(0, 80 - i * 16);
+            const intents = Math.max(0, Math.round(lag * 0.25));
+            await ctx.delay(380);
+            ctx.cdcPanel({
+              phase: lag > 0 ? 'lag' : 'streaming',
+              slotName: 'slot1', pubName: 'pub_orders',
+              lsn: '0/1000100', confirmedLsn: catchupLsns[i],
+              lagBytes: lag, walRetainedKb: lag, intentsHeld: intents,
+              phaseLabel: lag > 0
+                ? `⚡ Catching up — WAL held: ${lag} KB · Intents: ${intents} · draining`
+                : '🟢 Caught up — WAL GC resumed · intents cleared · streaming live',
+              records: frozenRecs, vwalAssembly: frozenRecs.map(r => ({ ...r })),
+              tabletHighlight: -1
+            });
+            addLog(`ACK: confirmed_flush_lsn=${catchupLsns[i]} · WAL held: ${lag} KB · intents: ${intents}`, lag > 0 ? 'lw' : 'ls');
+          }
+          await ctx.delay(300);
+          addLog('WAL GC resumed · intents cleared · no records lost', 'ls');
         }
       }
     ]
