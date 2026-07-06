@@ -37,6 +37,19 @@ function initKeyboardShortcuts() {
                     toggleGuideSetting();
                 }
             }
+            if (currentScenario?.queryConfig) {
+                if (e.key.toLowerCase() === 's') {
+                    const btn = document.getElementById('qe-step-btn');
+                    if (btn && !btn.disabled) runQueryStep();
+                }
+                if (e.key.toLowerCase() === 'p') {
+                    const btn = document.getElementById('qe-play-btn');
+                    if (btn && !btn.disabled) runAllSteps();
+                }
+                if (e.key.toLowerCase() === 'r') {
+                    resetQuery();
+                }
+            }
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 const btns = [...document.querySelectorAll('#sidebar .sbtn')];
                 const activeIdx = btns.findIndex(b => b.classList.contains('active'));
@@ -1653,7 +1666,35 @@ function applyQueryStep(stepIdx) {
 
     // Show summary on done
     if (step.op === 'done' && step.summary) {
-        const s = step.summary;
+        // Seeks/Nexts/Tablets-touched are mechanically defined by the step list itself —
+        // derive them here so a scenario's hand-typed summary can never drift from what
+        // the steps actually show (this is how the qe-range-scan/qe-join-nl count bugs
+        // slipped through undetected). "rows" is left as-authored: for aggregate/join
+        // steps it means the final logical result count, not a literal returned-row tally,
+        // so it can't be derived generically — only flagged if it looks inconsistent.
+        const touchedTablets = new Set();
+        let lastRows = [];
+        qc.steps.forEach(st => {
+            (st.tablets || []).forEach(t => {
+                if (t.state === 'active' || t.state === 'done') touchedTablets.add(t.id);
+            });
+            if (st.rows && st.rows.length) lastRows = st.rows;
+        });
+        const derived = {
+            tablets: touchedTablets.size,
+            seeks: qc.steps.filter(st => st.op === 'seek').length,
+            nexts: qc.steps.filter(st => st.op === 'next').length
+        };
+        const returnedRows = lastRows.filter(r => r.state === 'returned').length;
+        ['tablets', 'seeks', 'nexts'].forEach(key => {
+            if (step.summary[key] !== derived[key]) {
+                console.warn(`[scenario data] "${currentScenario?.title}" step.summary.${key}=${step.summary[key]} but steps actually show ${derived[key]} — using derived value`);
+            }
+        });
+        if (returnedRows && step.summary.rows !== returnedRows) {
+            console.warn(`[scenario data] "${currentScenario?.title}" step.summary.rows=${step.summary.rows} but ${returnedRows} rows are marked "returned" in the last step — verify this is intentional (e.g. an aggregate/join result count)`);
+        }
+        const s = { ...step.summary, ...derived };
         const log = document.getElementById('qe-exec-log');
         if (log) {
             const sumDiv = document.createElement('div');

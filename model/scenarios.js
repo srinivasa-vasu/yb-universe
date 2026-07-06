@@ -532,7 +532,7 @@ const SCENARIOS = {
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
 <span class="sql-kw">INSERT INTO</span> metrics (sensor_id, ts, value, unit, check_status)
-<span class="sql-kw">SELECT</span> <span class="sql-str">'S-'</span> || (100 + mod(i,3)) * 100,
+<span class="sql-kw">SELECT</span> <span class="sql-str">'S-'</span> || (100 + mod(i,3)),
        <span class="sql-fn">NOW</span>() - (i || <span class="sql-str">' minutes'</span>)<span class="sql-type">::INTERVAL</span>,
        20.0 + <span class="sql-fn">random</span>() * 10,
        <span class="sql-str">'°C'</span>,
@@ -1950,6 +1950,14 @@ Object.assign(SCENARIOS, {
   ]}'</span>
 );
 
+<span class="sql-kw">CREATE TABLESPACE</span> apac_south_ts <span class="sql-kw">WITH</span> (
+  replica_placement = <span class="sql-str">'{"num_replicas": 3, "placement_blocks": [
+    {"cloud":"gcp","region":"asia-southeast1","zone":"asia-southeast1-a","min_num_replicas":1},
+    {"cloud":"gcp","region":"asia-southeast1","zone":"asia-southeast1-b","min_num_replicas":1},
+    {"cloud":"gcp","region":"asia-southeast1","zone":"asia-southeast1-c","min_num_replicas":1}
+  ]}'</span>
+);
+
 <span class="sql-comment">-- 2. Create partitioned table</span>
 <span class="sql-kw">CREATE TABLE</span> transactions (
   order_id   <span class="sql-type">INT</span>,
@@ -1965,10 +1973,13 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">CREATE TABLE</span> trans_eu <span class="sql-kw">PARTITION OF</span> transactions
   <span class="sql-kw">FOR VALUES IN</span> (<span class="sql-str">'EU'</span>) <span class="sql-kw">TABLESPACE</span> eu_central_ts;
 
+<span class="sql-kw">CREATE TABLE</span> trans_apac <span class="sql-kw">PARTITION OF</span> transactions
+  <span class="sql-kw">FOR VALUES IN</span> (<span class="sql-str">'APAC'</span>) <span class="sql-kw">TABLESPACE</span> apac_south_ts;
+
 <span class="sql-comment">-- Insert sample data using generate_series</span>
 <span class="sql-kw">INSERT INTO</span> transactions (order_id, geo_region, amount)
 <span class="sql-kw">SELECT</span> i,
-       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>])[1 + mod(i,4)],
+       (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'US'</span>,<span class="sql-str">'EU'</span>,<span class="sql-str">'APAC'</span>])[1 + mod(i,3)],
        (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;` },
     guidedTour: [
@@ -2234,7 +2245,7 @@ Object.assign(SCENARIOS, {
         { op: "return", detail: "price=59.99 is in [25,100] → return", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 2, state: "returned" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 1, row: 0, state: "returned" }] },
         { op: "next", detail: "Next → price=89.99 is in [25,100] → return", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 2, state: "returned" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 1, row: 0, state: "returned" }, { tablet: 1, row: 1, state: "returned" }] },
         { op: "next", detail: "Next → price=129.00 > 100 → stop scan", tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }], rows: [{ tablet: 0, row: 2, state: "returned" }, { tablet: 0, row: 3, state: "returned" }, { tablet: 1, row: 0, state: "returned" }, { tablet: 1, row: 1, state: "returned" }, { tablet: 1, row: 2, state: "scanned" }] },
-        { op: "done", detail: "Complete: 2 tablets, 1 Seek, 5 Next, 4 rows returned", tablets: [], rows: [], summary: { tablets: 2, seeks: 1, nexts: 5, rows: 4 } }
+        { op: "done", detail: "Complete: 2 tablets, 1 Seek, 4 Next, 4 rows returned", tablets: [], rows: [], summary: { tablets: 2, seeks: 1, nexts: 4, rows: 4 } }
       ]
     },
     initialState: {
@@ -2294,7 +2305,7 @@ Object.assign(SCENARIOS, {
 
   "qe-skip-scan": {
     group: "Query Execution", icon: "⏭", title: "Skip Scan", subtitle: "Non-prefix column query",
-    description: "When querying on the second column of a composite index, DocDB performs a Skip Scan: it Seeks into each distinct group of the first column, checks for a match, then skips to the next group. Skip Scan is available on range-sharded indexes in YugabyteDB v2.21+.",
+    description: "When querying on the second column of a composite index, DocDB performs a Skip Scan: it Seeks into each distinct group of the first column, checks for a match, then skips to the next group. Skip Scan is available on range-sharded indexes in YugabyteDB.",
     legend: [
       { type: "clustering", label: "region ASC", explain: "First key in composite — groups data" },
       { type: "clustering", label: "created_at DESC", explain: "Second key — sorted within each group" }
@@ -2335,7 +2346,7 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls. <b>Available on range-sharded indexes in YugabyteDB v2.21+.</b>" },
+    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls. <b>Available on range-sharded indexes in YugabyteDB.</b>" },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
   region     <span class="sql-type">TEXT</span>,
@@ -2353,7 +2364,7 @@ Object.assign(SCENARIOS, {
        (50 + i * 9.99)<span class="sql-type">::DECIMAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- Query on 2nd column only → Skip Scan (requires YugabyteDB v2.21+,</span>
+<span class="sql-comment">-- Query on 2nd column only → Skip Scan (requires a</span>
 <span class="sql-comment">-- range-sharded index; not applicable to hash-sharded tables)</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> created_at = <span class="sql-str">'2024-03-18'</span>;
@@ -2632,10 +2643,11 @@ Object.assign(SCENARIOS, {
   qty        <span class="sql-type">INT</span>
 );
 
-<span class="sql-comment">-- Covering secondary index, range-sharded by price</span>
+<span class="sql-comment">-- Covering secondary index, pre-split into 3 range tablets by price</span>
 <span class="sql-kw">CREATE INDEX</span> idx_products_price
   <span class="sql-kw">ON</span> products (<span class="cl-key">price ASC</span>)
-  <span class="sql-kw">INCLUDE</span> (<span class="inc-key">product, qty</span>);
+  <span class="sql-kw">INCLUDE</span> (<span class="inc-key">product, qty</span>)
+  <span class="sql-kw">SPLIT AT VALUES</span> ((60), (120));
 <span class="sql-comment">-- Idx T1: (-∞,60)  Idx T2: [60,120)  Idx T3: [120,∞)</span>
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -3270,7 +3282,7 @@ WHERE u.name = 'Dan';`,
         { op: "seek", detail: "Seek(0x8A11) in Orders T2", tablets: [{ id: 0, state: "done" }, { id: 3, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, state: "cursor" }] },
         { op: "return", detail: "Yield joined row: (Dan, 150.00)", tablets: [{ id: 0, state: "done" }, { id: 3, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, returned: true, state: "returned" }] },
         { op: "next", detail: "Continue outer scan... end of tables.", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, state: "returned" }, { tablet: 1, row: 0, state: "scanned" }] },
-        { op: "done", detail: "Complete: 1 Outer Scan + 1 Inner Seek", tablets: [], rows: [], summary: { tablets: 3, seeks: 2, nexts: 4, rows: 1 } }
+        { op: "done", detail: "Complete: 1 Outer Scan + 1 Inner Seek", tablets: [], rows: [], summary: { tablets: 3, seeks: 1, nexts: 3, rows: 1 } }
       ]
     },
     initialState: {
@@ -3409,7 +3421,7 @@ WHERE u.name = 'Dan';`,
 <span class="sql-comment">-- ❌ Wrong: plain ts index → permanent write hotspot</span>
 <span class="sql-kw">CREATE INDEX</span> idx_bad <span class="sql-kw">ON</span> events (ts <span class="sql-kw">DESC</span>);
 
-<span class="sql-comment">-- ✅ Bucket index: N=4 tablets, writes spread evenly</span>
+<span class="sql-comment">-- ✅ Bucket index: N=3 tablets, writes spread evenly</span>
 <span class="sql-kw">CREATE INDEX</span> idx_events_ts <span class="sql-kw">ON</span> events (
     (<span class="sh-key">yb_hash_code(ts) % 3</span>) <span class="sql-kw">ASC</span>,
     <span class="cl-key">ts DESC</span>
