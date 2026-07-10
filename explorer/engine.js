@@ -3199,17 +3199,32 @@ async function blacklistDrainNode() {
   const ctx = makeCtx();
   addLog('YB-Master: Blacklist/Drain TServer-2 initiated', 'li');
   addLog('TS-2: received BlacklistNode RPC — beginning graceful drain', 'lw');
-  await ctx.delay(500);
+  await ctx.delay(300);
+
+  // 1. Mark N2 as blacklisted first — before any leader moves
+  const card = document.getElementById('node-2');
+  card.style.opacity = '0.5'; card.style.borderColor = 'var(--warn)';
+  const ind = card.querySelector('.n-indicator');
+  ind.style.background = 'var(--warn)'; ind.style.animation = 'none';
+  addLog('TS-2: marked BLACKLISTED — no new tablets will be assigned', 'lw');
+  await ctx.delay(400);
+
   const ts2Leaders = S.groups.filter(g => g.leaderNode === 2);
-  // Remember exactly which groups were drained so unblacklist can restore them precisely
   window._blDrained = ts2Leaders.map(g => g.id);
   addLog('TS-2: leader for ' + ts2Leaders.map(g => g.id).join(', ') + ' — initiating LeaderStepDown', 'lr');
-  await ctx.delay(300);
+  await ctx.delay(200);
+
   const targets = [1, 3]; let ti = 0;
   for (const g of ts2Leaders) {
     const targetNode = targets[ti % targets.length]; ti++;
+    // 2. Show CANDIDATE on target first
+    ctx.setRole(g.id, targetNode, 'CANDIDATE');
+    addLog('TS-' + targetNode + ': election timeout → CANDIDATE for ' + g.id + ' (term=5)', 'lw');
+    await ctx.delay(200);
+    // 3. Vote request packet flies
     addLog('TS-2→TS-' + targetNode + ': LeaderStepDown(' + g.id + ') — graceful transfer', 'lr');
     await ctx.pktTabletToTablet(g.id, 2, g.id, targetNode, 'pk-vote', 500);
+    // 4. Now becomes LEADER
     S.term = 5; g.leaderNode = targetNode; g.term = 5;
     document.getElementById('term-display').textContent = 'Raft Term: 5';
     ctx.setRole(g.id, targetNode, 'LEADER');
@@ -3217,12 +3232,8 @@ async function blacklistDrainNode() {
     addLog('TS-' + targetNode + ': accepted leadership ' + g.id + ' (term=5) ✓', 'ls');
     await ctx.delay(300);
   }
+
   addLog('TS-2: all leader tablets transferred — drain complete', 'ls');
-  addLog('TS-2: marked BLACKLISTED — no new tablets assigned', 'lw');
-  const card = document.getElementById('node-2');
-  card.style.opacity = '0.5'; card.style.borderColor = 'var(--warn)';
-  const ind = card.querySelector('.n-indicator');
-  ind.style.background = 'var(--warn)'; ind.style.animation = 'none';
   renderAllTablets();
   addLog('Leadership balanced: ' + S.groups.filter(g => g.leaderNode === 1).map(g => g.id).join(',') + '→TS-1, ' + S.groups.filter(g => g.leaderNode === 3).map(g => g.id).join(',') + '→TS-3', 'ls');
   document.getElementById('health-txt').textContent = '⚠️ TS-2 Blacklisted · leaders distributed to TS-1 & TS-3';

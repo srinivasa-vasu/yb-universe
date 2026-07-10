@@ -2198,6 +2198,24 @@
       pointer-events: none
     }
 
+    .bl-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(245, 158, 11, .08);
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--head);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--warn);
+      letter-spacing: 1px;
+      z-index: 3;
+      border: 2px solid var(--warn);
+      pointer-events: none
+    }
+
     .part-overlay {
       position: absolute;
       inset: 0;

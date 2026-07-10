@@ -657,10 +657,10 @@ const SCENARIOS = {
     ]
   },
 
-  // 2: Range (Default)
+  // 2: Range
   "2": {
     group: "Data Distribution", icon: "📏", sortOrder: 2,
-    name: 'Range (Default)', title: 'Range (Default)', subtitle: 'Single tablet start',
+    name: 'Range Sharding', title: 'Range Sharding', subtitle: 'Single tablet start',
     filterTable: 'users',
     desc: 'Standard Range Sharding starts with a single tablet. As data grows, YugabyteDB automatically splits the tablet. This is ideal for small tables or when range scans are frequently used.',
     guidedTour: [
@@ -676,7 +676,7 @@ const SCENARIOS = {
       const allData = S.groups.filter(g => g.table === 'users').reduce((a, g) => a.concat(g.data), []);
       S.groups = S.groups.filter(g => g.table !== 'users');
       S.groups.push({
-        id: 'tg1', table: 'users', tnum: 1, range: '0 — 999', leaderNode: 1, term: 4, replicas: [1, 2, 3],
+        id: 'tg1', table: 'users', tnum: 1, range: '-∞ — ∞', leaderNode: 1, term: 4, replicas: [1, 2, 3],
         data: allData.sort((a, b) => a[0] - b[0])
       });
       ctx.rebuildReplicaState();
@@ -687,7 +687,7 @@ const SCENARIOS = {
       {
         label: 'Initial State', desc: 'Range-sharded tables start with a single tablet on TServer-1, covering the full key range. Writes land sequentially on the same leader — efficient for reads but prone to write hotspots as load grows.', action: async (ctx) => {
           ctx.hlTablet('tg1', 1, 't-hl2');
-          addLog('Single tablet tg1 covers 0–999 on N1 (leader)', 'li');
+          addLog('Single tablet tg1 covers -∞–∞ on N1 (leader)', 'li');
           addLog('All writes route to N1 — sequential hotspot risk', 'lw');
         }
       },
@@ -695,7 +695,7 @@ const SCENARIOS = {
         label: 'Write to Leader', desc: 'INSERT is routed to the single tablet leader (N1). The leader B-Tree compares the key, appends to WAL, and marks the row provisional — visible on the leader immediately but not yet committed. It then fans out to followers.', action: async (ctx) => {
           const pendingRow = [10, 'Jack', 'MUM', 88, Date.now() / 1000];
           ctx.activateClient(true);
-          addLog('INSERT id=10 → key compare → tg1 (0–999), leader N1', 'li');
+          addLog('INSERT id=10 → key compare → tg1 (-∞–∞), leader N1', 'li');
           await ctx.pktClientToTablet('tg1', 1, 'pk-write', 400);
           ctx.hlTablet('tg1', 1, 't-hl');
           const rs = S.replicaState['tg1']?.[1];
@@ -1162,13 +1162,8 @@ const SCENARIOS = {
         elStep: 0,
         action: async (ctx) => {
           ctx.setLat(0, 0.9);
-          addLog('TServer-2 [tg2 LEADER, tg4 LEADER, tg8 LEADER]: heartbeats flowing (term=4)', 'ls');
-          for (let i = 0; i < 3; i++) {
-            const p1 = ctx.pktTabletToTablet('tg2', 2, 'tg2', 1, 'pk-raft', 300);
-            const p2 = ctx.pktTabletToTablet('tg4', 2, 'tg4', 3, 'pk-raft', 300);
-            const p3 = ctx.pktTabletToTablet('tg8', 2, 'tg8', 1, 'pk-raft', 300);
-            await Promise.all([p1, p2, p3]);
-          }
+          addLog('All nodes healthy · heartbeats flowing between all replicas (term=4)', 'ls');
+          addLog('TServer-1: LEADER tg1, tg5 · TServer-2: LEADER tg2, tg4, tg8 · TServer-3: LEADER tg3, tg6', 'li');
         }
       },
       {
@@ -1176,15 +1171,18 @@ const SCENARIOS = {
         desc: 'TServer-2 goes down. Node 1 and Node 3 stop receiving heartbeats. After 3 misses, they increase their monitoring frequency. After 6 misses (approx. 1.2s–1.5s), Node 2 is declared dead.',
         elStep: 2,
         action: async (ctx) => {
+          // Mark node offline without draining leaders — election steps handle leader transition
+          S.nodes.find(n => n.id === 2).alive = false;
+          renderNodeAlive(2, false);
           const el = document.getElementById('node-2');
           if (el) {
-            el.classList.add('n-dead');
+            el.style.opacity = '0.5'; el.style.borderColor = 'var(--warn)';
             const ind = el.querySelector('.n-indicator');
-            ind.style.background = 'var(--dead)'; ind.style.animation = 'none';
-            const ov = document.createElement('div'); ov.className = 'dead-overlay'; ov.id = 'dead-2'; ov.textContent = 'NODE FAILED';
+            ind.style.background = 'var(--warn)'; ind.style.animation = 'none';
+            const ov = document.createElement('div'); ov.className = 'bl-overlay'; ov.id = 'bl-step-2'; ov.textContent = 'OFFLINE';
             el.appendChild(ov);
           }
-          ctx.killNode(2);
+          renderAllTablets(); renderConnections();
           ctx.setLat(2, 290);
           addLog('✕ 6/6 heartbeat failures — TServer-2 declared DEAD', 'le');
           addLog('TS-1, TS-3: election timeout countdown started', 'lw');
@@ -1264,7 +1262,9 @@ const SCENARIOS = {
         action: async (ctx) => {
           addLog('TServer-2: RESTARTED · Joining cluster...', 'li');
           ctx.reviveNode(2);
-          document.getElementById('dead-2')?.remove();
+          const el2 = document.getElementById('node-2');
+          if (el2) { el2.style.opacity = ''; el2.style.borderColor = ''; }
+          document.getElementById('bl-step-2')?.remove();
           addLog('TS-2: term out-of-date (4 < 5) → FOLLOWER', 'lw');
           renderAllTablets(); renderConnections();
           ctx.setLat(6, 120);
@@ -1327,7 +1327,20 @@ const SCENARIOS = {
         label: 'TServer-3 Crashes',
         desc: 'TServer-3 goes down. Heartbeats from TS-3 stop. TS-1 and TS-2 detect the silence, increment to term=5, and become candidates for tg3 and tg6 respectively.',
         action: async (ctx) => {
-          fdKillNode3();
+          // Kill without auto-draining leaders — election steps drive the transition
+          S.nodes.find(n => n.id === 3).alive = false;
+          renderNodeAlive(3, false);
+          const el3 = document.getElementById('node-3');
+          if (el3) {
+            el3.classList.add('n-dead');
+            const ind3 = el3.querySelector('.n-indicator');
+            ind3.style.background = 'var(--dead)'; ind3.style.animation = 'none';
+            const ov3 = document.createElement('div'); ov3.className = 'dead-overlay'; ov3.id = 'dead-3'; ov3.textContent = 'NODE FAILED';
+            el3.appendChild(ov3);
+          }
+          renderAllTablets(); renderConnections();
+          toggleBtn('btn-k3', true); toggleBtn('btn-r3', false);
+          fdRenderNodes();
           ctx.setLat(0, 300);
           addLog('TServer-3: CRASHED', 'le');
           await ctx.delay(600);
@@ -1363,14 +1376,26 @@ const SCENARIOS = {
       },
       {
         label: 'TServer-3 Recovers & Rebalances',
-        desc: 'TServer-3 comes back online. YB-Master streams all missed writes to bring it current. Once caught up, leadership for tg3 and tg6 is gracefully transferred back to TServer-3, restoring the original distribution.',
+        desc: 'TServer-3 comes back online. YB-Master streams all missed writes to bring it current. Once caught up, leadership for tg3 and tg6 is gracefully transferred back to TServer-3, restoring a balanced distribution.',
         action: async (ctx) => {
-          fdReviveNode3();
+          // Revive inline — avoid fdReviveNode3() whose _fdRebalanceToNode races the manual transfers
+          S.nodes.find(n => n.id === 3).alive = true;
+          renderNodeAlive(3, true);
+          const el3r = document.getElementById('node-3');
+          if (el3r) {
+            el3r.classList.remove('n-dead');
+            const ind3r = el3r.querySelector('.n-indicator');
+            ind3r.style.background = ''; ind3r.style.animation = '';
+          }
+          document.getElementById('dead-3')?.remove();
+          renderAllTablets(); setTimeout(renderConnections, 50);
+          toggleBtn('btn-r3', true); toggleBtn('btn-k3', false);
+          fdRenderNodes();
           addLog('TServer-3: ONLINE · catch-up starting', 'ls');
           ctx.setLat(3, 150);
           await fdCatchUp(3);
           addLog('TServer-3 fully caught up · RF=3 restored ✓', 'ls');
-          addLog('YB-Master: Rebalancing leaders back to TS-3', 'li');
+          addLog('YB-Master: Rebalancing — transferring tg3 & tg6 back to TS-3', 'li');
           addLog('TS-1: LeaderStepDown(tg3) → Transfer to TS-3', 'lr');
           addLog('TS-2: LeaderStepDown(tg6) → Transfer to TS-3', 'lr');
           const p1 = ctx.pktTabletToTablet('tg3', 1, 'tg3', 3, 'pk-vote', 600);
@@ -1379,9 +1404,11 @@ const SCENARIOS = {
           S.groups.find(g => g.id === 'tg3').leaderNode = 3; S.groups.find(g => g.id === 'tg3').term = 5;
           S.groups.find(g => g.id === 'tg6').leaderNode = 3; S.groups.find(g => g.id === 'tg6').term = 5;
           renderAllTablets(); renderConnections();
-          addLog('tg3 → LEADER: TServer-3 restored ✓', 'ls');
-          addLog('tg6 → LEADER: TServer-3 restored ✓', 'ls');
-          document.getElementById('health-txt').textContent = `Healthy · RF=3 · 3 TServers · ${S.groups.length} Raft Groups`;
+          addLog('tg3 → LEADER: TServer-3 ✓', 'ls');
+          addLog('tg6 → LEADER: TServer-3 ✓', 'ls');
+          // Final distribution: TS-1 (tg1,tg5)=2 · TS-2 (tg2,tg4,tg8)=3 · TS-3 (tg3,tg6,ts1)=3
+          addLog('Leaders balanced: TS-1×2 · TS-2×3 · TS-3×3', 'ls');
+          document.getElementById('health-txt').textContent = `Healthy · RF=3 · 3 TServers · Leaders balanced TS-1×2 TS-2×3 TS-3×3`;
         }
       }
     ]
@@ -1415,7 +1442,17 @@ const SCENARIOS = {
         label: 'Network Partition: TS-3 Isolated',
         desc: 'The network link between TS-3 and TS-1/TS-2 is severed. TS-3 can no longer send heartbeats to its followers on the majority side. TS-1 & TS-2 detect the silence and begin their own election timeout.',
         action: async (ctx) => {
-          fdPartitionNode3();
+          // Partition without auto-draining leaders — election steps drive the transition
+          if (!S.partitioned.includes(3)) S.partitioned.push(3);
+          drawPartitionWall(true);
+          const card3 = document.getElementById('node-3');
+          card3.classList.add('n-partitioned');
+          const pov = document.createElement('div');
+          pov.className = 'part-overlay'; pov.id = 'part-3'; pov.innerHTML = '⟊ PARTITIONED';
+          card3.appendChild(pov);
+          renderAllTablets(); renderConnections();
+          toggleBtn('btn-prt', true); toggleBtn('btn-heal', false);
+          fdRenderNodes();
           addLog('PARTITION: TS-3 ⟊ {TS-1, TS-2}', 'le');
           addLog('Majority side: TS-1 & TS-2 lost heartbeats from TS-3', 'lw');
           await ctx.delay(500);
@@ -1460,7 +1497,7 @@ const SCENARIOS = {
           addLog('TS-3: read requests arriving (stale data)', 'lw');
           ctx.setLat(3, 1.9);
           await ctx.pktClientToTablet('tg3', 3, 'pk-read', 500);
-          addLog('TS-3 tg3: serving stale data (log behind by N entries)', 'lw');
+          addLog('TS-3 tg3: Rejects the request as the quorum is lost (log behind by N entries)', 'lw');
           await ctx.delay(400);
         }
       },
@@ -1468,7 +1505,15 @@ const SCENARIOS = {
         label: 'Partition Heals — TS-3 Resyncs & Rebalances',
         desc: 'The network link is restored. TS-3 discovers term=5 > its term=4, steps down to FOLLOWER, and catches up all missed writes. Then YB-Master rebalances: tg3 and tg6 leadership transferred back to TS-3.',
         action: async (ctx) => {
-          fdHealPartition();
+          // Heal without _fdRebalanceToNode — manual transfers avoid leader imbalance
+          S.partitioned = S.partitioned.filter(n => n !== 3);
+          drawPartitionWall(false);
+          const card3h = document.getElementById('node-3');
+          card3h.classList.remove('n-partitioned');
+          document.getElementById('part-3')?.remove();
+          renderAllTablets(); setTimeout(renderConnections, 50);
+          toggleBtn('btn-heal', true); toggleBtn('btn-prt', false);
+          fdRenderNodes();
           addLog('Partition healed · TS-3 discovers term=5', 'ls');
           addLog('TS-3: stepping down, starting catch-up', 'ls');
           ctx.setLat(4, 160);
@@ -1483,9 +1528,10 @@ const SCENARIOS = {
           S.groups.find(g => g.id === 'tg3').leaderNode = 3; S.groups.find(g => g.id === 'tg3').term = 5;
           S.groups.find(g => g.id === 'tg6').leaderNode = 3; S.groups.find(g => g.id === 'tg6').term = 5;
           renderAllTablets(); renderConnections();
-          addLog('tg3 → LEADER: TServer-3 restored ✓', 'ls');
-          addLog('tg6 → LEADER: TServer-3 restored ✓', 'ls');
-          document.getElementById('health-txt').textContent = `Healthy · RF=3 · 3 TServers · ${S.groups.length} Raft Groups`;
+          addLog('tg3 → LEADER: TServer-3 ✓', 'ls');
+          addLog('tg6 → LEADER: TServer-3 ✓', 'ls');
+          addLog('Leaders balanced: TS-1×2 · TS-2×3 · TS-3×3', 'ls');
+          document.getElementById('health-txt').textContent = `Healthy · RF=3 · 3 TServers · Leaders balanced TS-1×2 TS-2×3 TS-3×3`;
         }
       }
     ]
