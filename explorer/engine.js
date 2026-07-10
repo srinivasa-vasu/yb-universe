@@ -1274,26 +1274,28 @@ async function _fdRebalanceToNode(nodeId) {
   }
 }
 
-function fdKillNode3() {
+function fdKillNode3(skipDrain = false) {
   S.nodes.find(n => n.id === 3).alive = false;
   renderNodeAlive(3, false);
   addLog('TServer-3: KILLED', 'le');
-  _fdDrainLeaders(3);
+  if (!skipDrain) _fdDrainLeaders(3);
   renderAllTablets(); renderConnections();
   toggleBtn('btn-k3', true); toggleBtn('btn-r3', false);
   fdRenderNodes();
 }
-async function fdReviveNode3() {
+async function fdReviveNode3(skipRebalance = false) {
   S.nodes.find(n => n.id === 3).alive = true;
   renderNodeAlive(3, true); renderAllTablets(); setTimeout(renderConnections, 50);
   addLog('TServer-3: REVIVED · catch-up starting', 'ls');
   toggleBtn('btn-r3', true); toggleBtn('btn-k3', false);
   fdRenderNodes();
   if (S.nodeStats?.[3]?.lagRows > 0) await fdCatchUp(3);
-  addLog('TServer-3 caught up · rebalancing leaders', 'ls');
-  await _fdRebalanceToNode(3);
+  if (!skipRebalance) {
+    addLog('TServer-3 caught up · rebalancing leaders', 'ls');
+    await _fdRebalanceToNode(3);
+  }
 }
-function fdPartitionNode3() {
+function fdPartitionNode3(skipDrain = false) {
   if (!S.partitioned.includes(3)) S.partitioned.push(3);
   drawPartitionWall(true);
   const card = document.getElementById('node-3');
@@ -1303,12 +1305,12 @@ function fdPartitionNode3() {
   ov.innerHTML = '⟊ PARTITIONED';
   card.appendChild(ov);
   addLog('Network partition: TS-3 isolated', 'le');
-  _fdDrainLeaders(3);
+  if (!skipDrain) _fdDrainLeaders(3);
   renderAllTablets(); renderConnections();
   toggleBtn('btn-prt', true); toggleBtn('btn-heal', false);
   fdRenderNodes();
 }
-async function fdHealPartition() {
+async function fdHealPartition(skipRebalance = false) {
   S.partitioned = S.partitioned.filter(n => n !== 3);
   drawPartitionWall(false);
   const card = document.getElementById('node-3');
@@ -1318,8 +1320,10 @@ async function fdHealPartition() {
   toggleBtn('btn-heal', true); toggleBtn('btn-prt', false);
   fdRenderNodes();
   if (S.nodeStats?.[3]?.lagRows > 0) await fdCatchUp(3);
-  addLog('Rebalancing leaders back to TS-3', 'li');
-  await _fdRebalanceToNode(3);
+  if (!skipRebalance) {
+    addLog('Rebalancing leaders back to TS-3', 'li');
+    await _fdRebalanceToNode(3);
+  }
 }
 
 function drawPartitionWall(show) {
@@ -1364,7 +1368,7 @@ function toggleBtn(id, disabled) {
 // ════════════════════════════════════════════
 
 S = freshState();
-let currentScenario = 0, currentStep = -1, playing = false, playTimer = null, speedVal = 1, logTime = 0, stepRunning = false;
+let currentScenario = 0, currentStep = -1, playing = false, playTimer = null, speedVal = 0.5, logTime = 0, stepRunning = false;
 
 function renderAllTablets() {
   // Clear all TServer tablet bodies
@@ -5746,7 +5750,7 @@ window.addEventListener('load', () => {
 
   // Keyboard shortcuts
   window.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if ((e.target.tagName === 'INPUT' && e.target.type !== 'range') || e.target.tagName === 'TEXTAREA') return;
 
     const key = e.key.toLowerCase();
     if (key === 't' && !e.ctrlKey && !e.metaKey) toggleTheme();
