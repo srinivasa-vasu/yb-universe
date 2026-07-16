@@ -695,11 +695,6 @@ V_norm = [v1 / |V|, v2 / |V|, ..., vn / |V|]
               <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">Smaller dimensions (768) are faster but less expressive. Larger (1536, 3072) capture more nuance but consume more RAM and slow index builds. Match dimensions to your embedding model: OpenAI <code>text-embedding-3-small</code> = 1536, Cohere <code>embed-v3</code> = 1024.</div>
             </div>
 
-            <div style="background: rgba(96, 165, 250, 0.05); border-left: 3px solid #60a5fa; padding: 12px; border-radius: 4px;">
-              <div style="font-weight: 600; color: #60a5fa; font-size: 13px; margin-bottom: 5px;">Index Maintenance &amp; REINDEX</div>
-              <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">After significant data changes (>20% inserts/deletes), consider <code>REINDEX INDEX idx_name;</code> to rebuild the HNSW graph. This ensures graph quality doesn't degrade over time. In YugabyteDB, this is a non-blocking online operation.</div>
-            </div>
-
             <div style="background: rgba(16, 185, 129, 0.05); border-left: 3px solid #10b981; padding: 12px; border-radius: 4px;">
               <div style="font-weight: 600; color: #10b981; font-size: 13px; margin-bottom: 5px;">Connection Pooling for Vector Workloads</div>
               <div style="color: var(--txt2); font-size: 13px; line-height: 1.5;">Vector search is CPU-intensive. Use connection pooling (PgBouncer, Odyssey) with <code>transaction</code> mode. Note that session-level settings like <code>SET hnsw.ef_search</code> must be re-applied per transaction when using transaction pooling.</div>
