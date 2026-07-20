@@ -809,7 +809,7 @@ const SCENARIOS = {
     extraBtns: [{ id: 'btn-tn', label: '💀 Kill Near Follower', cls: 'btn-d', cb: 'toggleNearFollower' }],
     guidedTour: [
       { text: "This module demonstrates the <b>Raft Consensus</b> write path.", element: ".canvas-wrap" },
-      { text: "Click <b>Step Forward</b> to see the 5-phase write process (RPC → WAL → Majority → Commit).", element: "#btn-step" },
+      { text: "Click <b>Step Forward</b> to see the 5-step write process (RPC → WAL → Majority ACK → Client ACK → Far Follower).", element: "#btn-step" },
       { text: "Try <b>Kill Near Follower</b> and notice how latency increases because the leader must wait for the 'Far' follower.", element: "#btn-tn" }
     ],
     steps: [
@@ -826,45 +826,27 @@ const SCENARIOS = {
       },
       { label: 'Leader WAL & Replicate', desc: 'Leader fans out AppendEntries to both followers simultaneously — near follower (N2, ~0.8ms) and far follower (N3, ~2.5ms).', action: async (ctx) => { ctx.setLat(0, 0.8); ctx.pktTabletToTablet('tg1', 1, 'tg1', 2, 'pk-raft', 300); ctx.pktTabletToTablet('tg1', 1, 'tg1', 3, 'pk-raft', 1000); await ctx.delay(800); } },
       {
-        label: 'Majority ACK → Commit → Client ACK',
-        desc: 'Near follower (N2) ACKs first — 2/3 majority reached. Leader immediately commits on majority nodes (N1+N2) and ACKs the client. Far follower (N3) ACK and commit complete concurrently in the background — never on the critical path.',
+        label: 'Majority Quorum ACK',
+        desc: 'Near follower (N2) ACKs first — 2/3 majority reached. Leader commits on majority nodes (N1+N2). Far follower (N3) is still in-flight — not on the critical path.',
         action: async (ctx) => {
           const nearAlive = S.nodes[1].alive;
           const g = S.groups.find(x => x.id === 'tg1');
           const rs1 = S.replicaState['tg1']?.[1];
           const row = rs1?.provisionalRows?.[0] || [10, 'Jack', 'MUM', 88, Date.now() / 1000];
+          S._fpwNearAlive = nearAlive;
 
           if (nearAlive) {
             ctx.setLat(1, 1.2); ctx.setLat(2, 9.5);
-            // Await only the majority (N2) ACK
             await ctx.pktTabletToTablet('tg1', 2, 'tg1', 1, 'pk-ack', 350);
-            addLog('N2 ACK → 2/3 majority ✓ — committing & ACKing client now', 'ls');
-
-            // Commit majority nodes (N1 + N2) immediately
+            addLog('N2 ACK → 2/3 majority ✓ — committing on N1+N2', 'ls');
             if (g) {
               g.data.push(row);
               for (const n of [1, 2]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
             }
             for (const n of [1, 2]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
-            ctx.setLat(3, 0.5); ctx.setLat(4, 2.5); ctx.hlLatRow([0, 1, 3, 4]);
-
-            // N3 ACK + commit fires concurrently — intentionally NOT awaited
-            addLog('N3 (far follower) ACK in-flight — async, not on critical path', 'li');
-            (async () => {
-              await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 900);
-              const rs = S.replicaState['tg1']?.[3];
-              if (rs) { rs.provisionalRows = []; }
-              ctx.reRenderTablet('tg1', 3, true); ctx.hlTablet('tg1', 3, 't-hl');
-              addLog('N3 applied commit in background ✓', 'li');
-            })();
-
-            // Client ACK — fires while N3 is still in-flight
-            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
-            ctx.activateClient(false);
-            addLog('Client ACK sent — write complete ✓', 'ls');
-
+            ctx.setLat(3, 0.5); ctx.hlLatRow([0, 1, 3]);
+            addLog('N3 (far follower) ACK still in-flight — not on critical path', 'li');
           } else {
-            // Near follower dead: wait for far follower (N3) as the quorum node
             ctx.setLat(1, 0); ctx.setLat(2, 10.5);
             await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 1000);
             addLog('N3 (far follower) ACK → 2/3 majority ✓ (near follower down)', 'ls');
@@ -873,10 +855,35 @@ const SCENARIOS = {
               for (const n of [1, 3]) { const rs = S.replicaState['tg1']?.[n]; if (rs) rs.provisionalRows = []; }
             }
             for (const n of [1, 3]) { ctx.hlTablet('tg1', n, 't-hl'); ctx.reRenderTablet('tg1', n, true); }
-            ctx.setLat(3, 0.5); ctx.setLat(4, 11.8); ctx.hlLatRow([0, 2, 3, 4]);
-            await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
-            ctx.activateClient(false);
-            addLog('Client ACK sent — write complete ✓', 'ls');
+            ctx.setLat(3, 0.5); ctx.hlLatRow([0, 2, 3]);
+          }
+        }
+      },
+      {
+        label: 'Leader ACKs Client',
+        desc: 'Leader sends ACK to the client — write is durable. Total latency reflects near-follower path (~2.5ms) vs far-follower fallback (~11.8ms).',
+        action: async (ctx) => {
+          const nearAlive = S._fpwNearAlive ?? S.nodes[1].alive;
+          ctx.setLat(4, nearAlive ? 2.5 : 11.8);
+          ctx.hlLatRow([0, nearAlive ? 1 : 2, 3, 4]);
+          await ctx.pktTabletToClient('tg1', 1, 'pk-ack', 400);
+          ctx.activateClient(false);
+          addLog('Client ACK sent — write complete ✓', 'ls');
+        }
+      },
+      {
+        label: 'Far Follower Commits',
+        desc: 'N3 (far follower) ACKs the leader and applies the commit — completes in the background after the client already got its response.',
+        action: async (ctx) => {
+          const nearAlive = S._fpwNearAlive ?? S.nodes[1].alive;
+          if (nearAlive) {
+            await ctx.pktTabletToTablet('tg1', 3, 'tg1', 1, 'pk-ack', 900);
+            const rs = S.replicaState['tg1']?.[3];
+            if (rs) rs.provisionalRows = [];
+            ctx.reRenderTablet('tg1', 3, true); ctx.hlTablet('tg1', 3, 't-hl');
+            addLog('N3 applied commit ✓ — all replicas durable', 'li');
+          } else {
+            addLog('N3 was the quorum node — commit already applied in previous step', 'li');
           }
         }
       }
