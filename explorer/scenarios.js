@@ -605,7 +605,7 @@ const SCENARIOS = {
     init: (ctx) => {
       showDataPanel(true);
       renderDataTable('users');
-      ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY HASH,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+      ctx.setDDL('CREATE TABLE users (\n  id INT,\n  name TEXT,\n  city TEXT,\n  score INT,\n  PRIMARY KEY (id HASH)\n);');
       initHashRouting();
     },
     steps: [
@@ -680,7 +680,7 @@ const SCENARIOS = {
         data: allData.sort((a, b) => a[0] - b[0])
       });
       ctx.rebuildReplicaState();
-      ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY ASC,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+      ctx.setDDL('CREATE TABLE users (\n  id INT,\n  name TEXT,\n  city TEXT,\n  score INT,\n  PRIMARY KEY (id ASC)\n);');
       renderAllTablets(); setTimeout(renderConnections, 80);
     },
     steps: [
@@ -2977,7 +2977,7 @@ const SCENARIOS = {
       }];
       S._docdb = { memtable: [], ssts: [] };
       ctx.rebuildReplicaState();
-      ctx.setDDL('CREATE TABLE users (\n  id INT PRIMARY KEY HASH,\n  name TEXT,\n  city TEXT,\n  score INT\n);');
+      ctx.setDDL('CREATE TABLE users (\n  id INT,\n  name TEXT,\n  city TEXT,\n  score INT,\n  PRIMARY KEY (id HASH)\n);');
       showDocdbPanel(true);
       setDocdbOp('');
       renderDocdbPanel();

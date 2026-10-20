@@ -34,14 +34,15 @@ const SCENARIOS = {
         { id: "Tablet 3", range: "0xAAAB–0xFFFF", rows: [{ data: ["0xCF06", "user-100", "Carol Singh", "APAC", "Active", "2024-04-10"] }, { data: ["0xCEE2", "user-115", "Eve Adams", "US", "Active", "2024-05-01"] }] }
       ]
     },
-    callout: { type: "info", icon: "💡", text: "<b>Hash sharding</b> is the default in YugabyteDB. The PK value is hashed and mapped to one of the hash partitions (tablets). Ideal for point lookups (<code>WHERE user_id = ?</code>), but full table scans are needed for range queries." },
+    callout: { type: "info", icon: "💡", text: "<b>Hash sharding</b> is the default in YugabyteDB. The PK value is hashed and mapped to one of the hash partitions (tablets). Ideal for point lookups (<code>WHERE user_id = ?</code>), but full table scans are needed for range queries. <b>Write <code>HASH</code> explicitly</b>: with Enhanced PostgreSQL Compatibility mode (<code>yb_use_hash_splitting_by_default = off</code>) the default becomes range (ASC)." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="sh-key">user_id</span> <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+    <span class="sh-key">user_id</span> <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
     region  <span class="sql-type">TEXT</span>,
     status  <span class="sql-type">TEXT</span>,
-    created_at <span class="sql-type">DATE</span>
+    created_at <span class="sql-type">DATE</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -52,7 +53,9 @@ const SCENARIOS = {
        <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- By default, single-column PK = HASH sharded</span>
+<span class="sql-comment">-- HASH written explicitly: the default is HASH only when</span>
+<span class="sql-comment">-- yb_use_hash_splitting_by_default = on. Enhanced PostgreSQL</span>
+<span class="sql-comment">-- Compatibility mode turns it off → a plain PRIMARY KEY (id) is ASC</span>
 <span class="sql-comment">-- Point lookup: HASH(user_id) → determines tablet → single RPC</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users <span class="sql-kw">WHERE</span> user_id = <span class="sql-str">'user-105'</span>;
 
@@ -388,11 +391,12 @@ const SCENARIOS = {
     callout: { type: "warn", icon: "⚠️", text: "<b>Hotspot risk:</b> If keys are monotonically increasing (e.g. timestamps, serial IDs), all writes go to the last tablet. Use HASH sharding or synthetic shard keys for such columns." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-    <span class="cl-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY ASC</span>,
+    <span class="cl-key">product_id</span> <span class="sql-type">TEXT</span>,
     category   <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
     status     <span class="sql-type">TEXT</span>,
-    supplier   <span class="sql-type">TEXT</span>
+    supplier   <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">ASC</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -419,7 +423,7 @@ const SCENARIOS = {
 
   "range-pre-split": {
     group: "Range Sharding", icon: "📐", title: "Range: Pre-split", subtitle: "SPLIT AT VALUES",
-    description: "Range sharding with manually defined splits. Prevents initial write hotspots by pre-allocating tablets for specific ranges. Global order is maintained across tablets.",
+    description: "Range sharding with manually defined splits. Pre-allocates tablets for specific key ranges so writes spread from day one — provided the split points match the real key distribution. Global order is maintained across tablets.",
     inputPlaceholder: "Enter product code (A100, M200, Z300)...",
     scanDefault: "product_id BETWEEN 'A001' AND 'J000'",
     legend: [
@@ -455,19 +459,21 @@ const SCENARIOS = {
         }
       ]
     },
-    callout: { type: "info", icon: "✂️", text: "<b>Pre-splitting</b> allows you to distribute load immediately. Use <code>SPLIT AT VALUES</code> for Range sharding or <code>SPLIT INTO N TABLETS</code> for Hash sharding to avoid initial hotspots." },
+    callout: { type: "info", icon: "✂️", text: "<b>Pre-splitting</b> allows you to distribute load immediately. Use <code>SPLIT AT VALUES</code> for Range sharding or <code>SPLIT INTO N TABLETS</code> for Hash sharding to avoid initial hotspots.<br><br>⚠️ <b>Split points must match your data.</b> If every key shares a prefix (e.g. <code>'prod-001'</code>, <code>'prod-002'</code>…), they all fall into one tablet and the other pre-split tablets stay empty. Pre-splitting also does not help monotonically increasing keys: new values always land after the last split point." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-    <span class="cl-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY ASC</span>,
+    <span class="cl-key">product_id</span> <span class="sql-type">TEXT</span>,
     category   <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
     status     <span class="sql-type">TEXT</span>,
-    supplier   <span class="sql-type">TEXT</span>
+    supplier   <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">ASC</span>)
 ) <span class="sql-kw">SPLIT AT VALUES</span> ((<span class="sql-str">'J'</span>), (<span class="sql-str">'R'</span>));
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
 <span class="sql-kw">INSERT INTO</span> products (product_id, category, price, status, supplier)
-<span class="sql-kw">SELECT</span> <span class="sql-str">'prod-'</span> || <span class="sql-fn">lpad</span>(i<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
+<span class="sql-comment">-- Codes spread across the alphabet so every pre-split tablet gets rows</span>
+<span class="sql-kw">SELECT</span> <span class="sql-fn">chr</span>(65 + (i * 7) % 26) || <span class="sql-fn">lpad</span>((i * 37)<span class="sql-type">::text</span>, 3, <span class="sql-str">'0'</span>),
        (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'Electronics'</span>,<span class="sql-str">'Books'</span>,<span class="sql-str">'Home'</span>])[1 + mod(i,3)],
        (10 + i * 9.99)<span class="sql-type">::DECIMAL</span>,
        (<span class="sql-kw">ARRAY</span>[<span class="sql-str">'In Stock'</span>,<span class="sql-str">'Low'</span>,<span class="sql-str">'Out'</span>])[1 + mod(i,3)],
@@ -475,7 +481,9 @@ const SCENARIOS = {
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
 <span class="sql-comment">-- Pre-creates 3 tablets: (-inf, 'J'), ['J', 'R'), ['R', inf)</span>
-<span class="sql-comment">-- Prevents write hotspots for balanced key distributions</span>` },
+<span class="sql-comment">-- Keys H…, O…, V…, C…, J… spread across all three tablets.</span>
+<span class="sql-comment">-- ⚠ Split points must match the real key distribution: keys like</span>
+<span class="sql-comment">--   'prod-001', 'prod-002' would all land in ['R', inf) ('p' > 'R')</span>` },
     guidedTour: [
       { text: "Pre-splitting creates multiple tablets immediately, avoiding the 'all-writes-to-one' problem.", element: "#visual-render-area" },
       { text: "Try inserting 'K500' and 'U100'.", element: "#sim-input-val" },
@@ -595,20 +603,22 @@ const SCENARIOS = {
     guide: {
         richSql: `<span class="sql-comment">-- ASC: Smallest keys first. Perfect for range scans (A → Z)</span>
 <span class="sql-kw">CREATE TABLE</span> products_asc (
-    product_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY ASC</span>,
+    product_id <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT</span>,
     category   <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
-    status     <span class="sql-type">TEXT</span>
+    status     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">ASC</span>)
 );
 
 <span class="sql-comment">-- DESC: Largest keys first. Perfect for finding the "Last" entries</span>
 <span class="sql-kw">CREATE TABLE</span> products_desc (
-    product_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY DESC</span>,
+    product_id <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT</span>,
     category   <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
-    status     <span class="sql-type">TEXT</span>
+    status     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">DESC</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -703,11 +713,12 @@ Object.assign(SCENARIOS, {
     callout: { type: "warn", icon: "⚠️", text: "<b>2-step RPC:</b> 1) Query index tablet to find PK pointer. 2) Query main table tablet to fetch the full row. Use a <b>covering index</b> (INCLUDE) to avoid the 2nd RPC." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="sh-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="sh-key">user_id</span> <span class="sql-type">TEXT</span>,
     email   <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
     region  <span class="sql-type">TEXT</span>,
-    status  <span class="sql-type">TEXT</span>
+    status  <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_users_email
@@ -799,11 +810,12 @@ Object.assign(SCENARIOS, {
     },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-    <span class="pk-key">order_id</span>    <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">order_id</span>    <span class="sql-type">TEXT</span>,
     customer_id <span class="sql-type">TEXT</span>,
     order_date  <span class="sql-type">DATE</span>,
     total       <span class="sql-type">DECIMAL</span>,
-    status      <span class="sql-type">TEXT</span>
+    status      <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_orders_cust_date
@@ -882,10 +894,11 @@ Object.assign(SCENARIOS, {
     },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-    <span class="pk-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">product_id</span> <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
-    status     <span class="sql-type">TEXT</span>
+    status     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_products_price
@@ -917,7 +930,7 @@ Object.assign(SCENARIOS, {
 
   "idx-range-single-split": {
     group: "Indexes", icon: "✂️", title: "Range Index: Pre-split", subtitle: "SPLIT AT VALUES",
-    description: "Range-sharded index with pre-defined split points. Distributes index write load immediately across multiple tablets. Ideal for preventing hotspots on monotonic data.",
+    description: "Range-sharded index with pre-defined split points. Distributes index write load immediately across multiple tablets when values are spread across the split ranges. Note: pre-splitting does not fix monotonic columns (timestamps, sequences) — new values always land after the last split point; use a bucket index for those.",
     inputPlaceholder: "Enter price...",
     scanDefault: "price BETWEEN 20 AND 100",
     legend: [
@@ -973,10 +986,11 @@ Object.assign(SCENARIOS, {
     },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-    <span class="pk-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">product_id</span> <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT</span>,
     price      <span class="sql-type">DECIMAL</span>,
-    status     <span class="sql-type">TEXT</span>
+    status     <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_products_price
@@ -1056,14 +1070,16 @@ Object.assign(SCENARIOS, {
         }
       ]
     },
+    callout: { type: "warn", icon: "⚠️", text: "<b>Write hotspot per region:</b> a low-cardinality leading column (<code>region</code>) followed by an ever-increasing <code>created_at</code> means every new entry lands at the newest end of its region — one hot write point per region, and splitting doesn't help. For write-heavy tables, add a bucket on the primary key <i>after</i> the region: <code>(region ASC, (yb_hash_code(order_id) % 3) ASC, created_at DESC)</code>. <code>WHERE region = ?</code> still seeks, then skip-scans the 3 buckets." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-    <span class="pk-key">order_id</span>   <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">order_id</span>   <span class="sql-type">TEXT</span>,
     product    <span class="sql-type">TEXT</span>,
     total      <span class="sql-type">DECIMAL</span>,
     status     <span class="sql-type">TEXT</span>,
     region     <span class="sql-type">TEXT</span>,
-    created_at <span class="sql-type">TIMESTAMP</span>
+    created_at <span class="sql-type">TIMESTAMP</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_orders_region_date
@@ -1086,7 +1102,16 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> region = <span class="sql-str">'US'</span>
   <span class="sql-kw">AND</span> created_at > <span class="sql-str">'2024-01-01'</span>
-<span class="sql-kw">ORDER BY</span> created_at <span class="sql-kw">DESC</span>;` },
+<span class="sql-kw">ORDER BY</span> created_at <span class="sql-kw">DESC</span>;
+
+<span class="sql-comment">-- ⚠ region (3 values) + monotonic created_at → one hot write</span>
+<span class="sql-comment">--   point per region. Write-heavy alternative: bucket on the PK</span>
+<span class="sql-comment">--   inside each region so new rows spread across 3 tablets:</span>
+<span class="sql-comment">-- CREATE INDEX idx_orders_region_date ON orders (</span>
+<span class="sql-comment">--     region ASC,</span>
+<span class="sql-comment">--     (yb_hash_code(order_id) % 3) ASC,</span>
+<span class="sql-comment">--     created_at DESC</span>
+<span class="sql-comment">-- );</span>` },
     guidedTour: [
       { text: "Range composite indexes maintain strict global order across columns.", element: ".index-area" },
       { text: "Observe how 'US' orders are grouped together and sorted by date (DESC).", element: ".tablet-card" },
@@ -1154,11 +1179,12 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "✅", text: "<b>Index-only scan!</b> Since name and region are INCLUDEd, <code>SELECT name, region FROM users WHERE email = ?</code> is satisfied entirely from the index. No 2nd RPC to the main table." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
     email   <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
     region  <span class="sql-type">TEXT</span>,
-    status  <span class="sql-type">TEXT</span>
+    status  <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_email_cover
@@ -1251,13 +1277,14 @@ Object.assign(SCENARIOS, {
         }
       ]
     },
-    callout: { type: "info", icon: "📏", text: "<b>Smaller index:</b> Only active users are indexed (solid rows). Rows with status='inactive' are in the TABLE (struck through) but excluded from the INDEX — smaller index, faster scans, no hotspot from dominant values." },
+    callout: { type: "info", icon: "📏", text: "<b>Smaller index:</b> Only active users are indexed (solid rows). Rows with status='inactive' are in the TABLE (struck through) but excluded from the INDEX — smaller index, faster scans, no hotspot from dominant values.<br><br>⚠️ <b>Prepared statements:</b> the planner uses a partial index only when it can prove the query implies the predicate. <code>WHERE status = 'active'</code> (literal) works; <code>WHERE status = $1</code> does not once the driver/ORM switches to a generic plan (after 5 executions)." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
     email   <span class="sql-type">TEXT</span>,
     status  <span class="sql-type">TEXT</span>,
-    name    <span class="sql-type">TEXT</span>
+    name    <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_active_users
@@ -1282,7 +1309,11 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-comment">-- ❌ Cannot use this index (no status filter):</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
-<span class="sql-kw">WHERE</span> email = <span class="sql-str">'alice@co.com'</span>;` },
+<span class="sql-kw">WHERE</span> email = <span class="sql-str">'alice@co.com'</span>;
+
+<span class="sql-comment">-- ❌ Generic plan of a prepared statement can't use it either:</span>
+<span class="sql-comment">--    WHERE email = $1 AND status = $2   ($2 might not be 'active')</span>
+<span class="sql-comment">--    Keep the predicate value as a literal in the query text.</span>` },
     guidedTour: [
       { text: "Partial indexes only store rows that match a specific <code>WHERE</code> condition.", element: ".index-area" },
       { text: "Click <b>Auto Generate</b> several times.", element: ".secondary-btn" },
@@ -1296,7 +1327,7 @@ Object.assign(SCENARIOS, {
     inputPlaceholder: "Enter event description...",
     scanDefault: "created_at BETWEEN '2024-03-22 00:00:00' AND '2024-03-25 23:59:59'",
     legend: [
-      { type: "sharding", label: "bucket (Synthetic)", explain: "hex(hash(created_at)) % 3 — distributes writes evenly" },
+      { type: "sharding", label: "bucket (Synthetic)", explain: "yb_hash_code(order_id) % 3 — bucket on the PK so rows inserted in one transaction (same now()) still spread across buckets" },
       { type: "clustering", label: "created_at DESC", explain: "Clustering key — newest first within each bucket" },
       { type: "ptr", label: "order_id (Ptr)", explain: "Pointer to main table PK" }
     ],
@@ -1355,13 +1386,14 @@ Object.assign(SCENARIOS, {
         }
       ]
     },
-    callout: { type: "warn", icon: "🪣", text: "<b>Bucket indexing:</b> Without this, a range index on <code>created_at</code> creates a hotspot (all new writes → last tablet). The synthetic <code>yb_hash_code() % N</code> prefix spreads writes across N tablets. Use <code>SPLIT AT VALUES</code> to pre-create tablets." },
+    callout: { type: "warn", icon: "🪣", text: "<b>Bucket indexing:</b> Without this, a range index on <code>created_at</code> creates a hotspot (all new writes → last tablet). The synthetic <code>yb_hash_code(order_id) % N</code> prefix spreads writes across N tablets. Use <code>SPLIT AT VALUES</code> to pre-create tablets. Bucket on the primary key rather than the timestamp: rows inserted in one transaction share <code>now()</code> and would all hash to one bucket." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-    <span class="pk-key">order_id</span>   <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">order_id</span>   <span class="sql-type">TEXT</span>,
     created_at <span class="sql-type">TIMESTAMP</span>,
     event      <span class="sql-type">TEXT</span>,
-    total      <span class="sql-type">DECIMAL</span>
+    total      <span class="sql-type">DECIMAL</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -1377,8 +1409,11 @@ Object.assign(SCENARIOS, {
   <span class="sql-kw">ON</span> orders (created_at <span class="sql-kw">DESC</span>);
 
 <span class="sql-comment">-- ✅ Bucket index: synthetic prefix distributes writes</span>
+<span class="sql-comment">--    Bucket on the PK, not on created_at: all rows inserted in one</span>
+<span class="sql-comment">--    transaction share now(), so hashing the timestamp would put</span>
+<span class="sql-comment">--    the whole batch into a single bucket</span>
 <span class="sql-kw">CREATE INDEX</span> idx_orders_bucketed <span class="sql-kw">ON</span> orders (
-    (<span class="sh-key">yb_hash_code(created_at) % 3</span>) <span class="sql-kw">ASC</span>,
+    (<span class="sh-key">yb_hash_code(order_id) % 3</span>) <span class="sql-kw">ASC</span>,
     <span class="cl-key">created_at DESC</span>
 ) <span class="sql-kw">SPLIT AT VALUES</span> ((1), (2));
 
@@ -1387,7 +1422,9 @@ Object.assign(SCENARIOS, {
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> created_at >= <span class="sql-fn">NOW</span>() - <span class="sql-str">'7 days'</span><span class="sql-type">::INTERVAL</span>;
 
-<span class="sql-comment">-- ✅ Date-range query with explicit bucket range:</span>
+<span class="sql-comment">-- ✅ Date-range + ORDER BY: skip-scans the 3 buckets.</span>
+<span class="sql-comment">--    v2025.2.1+ merges the per-bucket sorted streams (no Sort);</span>
+<span class="sql-comment">--    older versions add a Sort over all matching rows</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> orders
 <span class="sql-kw">WHERE</span> created_at <span class="sql-kw">BETWEEN</span> <span class="sql-str">'2024-03-22 00:00:00'</span> <span class="sql-kw">AND</span> <span class="sql-str">'2024-03-25 23:59:59'</span>
 <span class="sql-kw">ORDER BY</span> created_at <span class="sql-kw">DESC</span>;` },
@@ -1450,11 +1487,12 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "ƒ", text: "<b>Expression indexes</b> store computed values — not raw column data. <code>WHERE lower(email) = 'alice@initech.co'</code> uses this index even if the stored email is <code>'Alice@Initech.Co'</code>. The expression is evaluated at write time and the result is what gets hashed and stored." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
     email   <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
     region  <span class="sql-type">TEXT</span>,
-    status  <span class="sql-type">TEXT</span>
+    status  <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Expression index: lower(email) is stored, not the raw email</span>
@@ -1487,7 +1525,7 @@ Object.assign(SCENARIOS, {
 
   "idx-unique": {
     group: "Indexes", icon: "🔒", title: "Unique Index", subtitle: "Cross-tablet uniqueness enforcement",
-    description: "UNIQUE indexes guarantee no two rows share the same key value across all tablets. Every write must verify uniqueness globally before committing. Try inserting a duplicate email to see the rejection in action.",
+    description: "UNIQUE indexes guarantee no two rows share the same key value across the whole table. Because the unique index is itself sharded by the key, each write checks the single index tablet that owns that value. Try inserting a duplicate email to see the rejection in action.",
     scanDefault: "email = 'alice@co.com'",
     inputPlaceholder: "Enter email (try a duplicate: alice@co.com)...",
     legend: [
@@ -1529,14 +1567,15 @@ Object.assign(SCENARIOS, {
         { id: "Idx Tablet 3", range: "0xAAAB–0xFFFF", rows: [] }
       ]
     },
-    callout: { type: "info", icon: "🔒", text: "<b>Uniqueness cost:</b> Every write to a UNIQUE index requires YugabyteDB to verify no other tablet already holds that value. This involves a distributed check before committing — slightly higher write latency than a non-unique index, but guaranteed global consistency." },
+    callout: { type: "info", icon: "🔒", text: "<b>Uniqueness cost:</b> Every write to a UNIQUE index reads the index tablet that owns that key (one tablet — the index is sharded by <code>email</code>) to verify no row already holds the value, inside the same distributed transaction. Slightly higher write latency than a non-unique index, but guaranteed global consistency." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
     email   <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
     region  <span class="sql-type">TEXT</span>,
-    status  <span class="sql-type">TEXT</span>
+    status  <span class="sql-type">TEXT</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE UNIQUE INDEX</span> idx_unique_email
@@ -1551,7 +1590,7 @@ Object.assign(SCENARIOS, {
        <span class="sql-str">'Active'</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- ✅ Lookup by unique email — single-RPC index scan</span>
+<span class="sql-comment">-- ✅ Lookup by unique email — index scan + table fetch (2 RPCs)</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
 <span class="sql-kw">WHERE</span> email = <span class="sql-str">'alice@co.com'</span>;
 
@@ -1622,11 +1661,12 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "🔑", text: "<b>Multi-column hash key:</b> <code>(tenant_id, event_type) HASH</code> treats both columns as one compound shard key. The same combination always lands on the same tablet. Compare with <code>customer_id HASH, order_date DESC</code> — there, hash is the shard key and date is an independent per-tablet sort order." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> events (
-    <span class="pk-key">event_id</span>   <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">event_id</span>   <span class="sql-type">TEXT</span>,
     tenant_id  <span class="sql-type">TEXT</span>,
     event_type <span class="sql-type">TEXT</span>,
     payload    <span class="sql-type">TEXT</span>,
-    created_at <span class="sql-type">TIMESTAMP</span>
+    created_at <span class="sql-type">TIMESTAMP</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (event_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Compound hash key: both columns hashed together</span>
@@ -1727,12 +1767,13 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "🍰", text: "<b>Partitioning vs Sharding:</b> Partitioning is a <i>logical</i> split into separate tables (PostgreSQL style). Each partition is then <i>sharded</i> into tablets across the cluster. Great for archiving old data or geo-partitioning by region." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-    order_id    <span class="sql-type">INT</span>,
+    order_id    <span class="sql-type">BIGINT</span>,
     <span class="sh-key">order_date</span>  <span class="sql-type">DATE</span>,
     customer_id <span class="sql-type">TEXT</span>,
     region      <span class="sql-type">TEXT</span>,
     total       <span class="sql-type">DECIMAL</span>,
-    <span class="sql-kw">PRIMARY KEY</span> (order_id, <span class="sh-key">order_date</span>)
+    <span class="sql-comment">-- PK must include the partition key; defined inline (not ALTER)</span>
+    <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>, <span class="sh-key">order_date</span> <span class="sql-kw">ASC</span>)
 ) <span class="sql-kw">PARTITION BY RANGE</span> (<span class="sh-key">order_date</span>);
 
 <span class="sql-comment">-- Create physical child tables (partitions)</span>
@@ -1762,7 +1803,7 @@ Object.assign(SCENARIOS, {
   },
   "partition-index": {
     group: "Table Partitioning", icon: "🌐", title: "Secondary Index", subtitle: "Per-partition secondary index",
-    description: "In YugabyteDB, creating an index on a partitioned table results in a 'Local Index' for each partition. The index is split exactly like the table data, ensuring index entries for a partition stay within that partition's tablets.",
+    description: "In YugabyteDB, creating an index on a partitioned table results in a 'Local Index' for each partition. Each partition's index is its own relation with its own tablets (sharded by the index key, independently of the partition's table tablets), and it only holds entries for rows of that partition.",
     inputPlaceholder: "Enter customer ID (cust-101)...",
     legend: [
       { type: "sharding", label: "customer_id (Index)", explain: "Local index key — sharded within the partition" },
@@ -1868,15 +1909,20 @@ Object.assign(SCENARIOS, {
         ]
       }
     },
-    callout: { type: "info", icon: "📦", text: "<b>Why Colocation?</b> By default, every table in YugabyteDB gets at least one tablet. For 1000 small tables, that's 1000+ tablets. Colocation puts them all in one, drastically reducing metadata overhead." },
+    callout: { type: "info", icon: "📦", text: "<b>Why Colocation?</b> By default, every table in YugabyteDB gets at least one tablet. For 1000 small tables, that's 1000+ tablets. Colocation puts them all in one, drastically reducing metadata overhead. Specify <code>WITH (COLOCATION = true|false)</code> explicitly per table. Colocated tables are range-sharded, so if a table is later moved out of colocation, re-check its keys for monotonic range hotspots." },
     guide: {
       richSql: `<span class="sql-comment">-- Create a multi-tenant colocated database</span>
 <span class="sql-kw">CREATE DATABASE</span> saas_multi_tenant_db <span class="sql-kw">COLOCATED</span> = <span class="sql-kw">true</span>;
 
 <span class="sql-comment">-- These tables share the same physical tablet:</span>
-<span class="sql-kw">CREATE TABLE</span> users (id <span class="sql-type">INT PRIMARY KEY</span>, name <span class="sql-type">TEXT</span>);
-<span class="sql-kw">CREATE TABLE</span> roles (id <span class="sql-type">INT PRIMARY KEY</span>, role <span class="sql-type">TEXT</span>);
-<span class="sql-kw">CREATE TABLE</span> settings (id <span class="sql-type">INT PRIMARY KEY</span>, val <span class="sql-type">TEXT</span>);
+<span class="sql-comment">-- Colocated tables are range-sharded (no HASH): write ASC explicitly</span>
+<span class="sql-comment">-- and state COLOCATION explicitly (true is the default here)</span>
+<span class="sql-kw">CREATE TABLE</span> users (id <span class="sql-type">INT</span>, name <span class="sql-type">TEXT</span>, <span class="sql-kw">PRIMARY KEY</span> (id <span class="sql-kw">ASC</span>)) <span class="sql-kw">WITH</span> (COLOCATION = <span class="sql-kw">true</span>);
+<span class="sql-kw">CREATE TABLE</span> roles (id <span class="sql-type">INT</span>, role <span class="sql-type">TEXT</span>, <span class="sql-kw">PRIMARY KEY</span> (id <span class="sql-kw">ASC</span>)) <span class="sql-kw">WITH</span> (COLOCATION = <span class="sql-kw">true</span>);
+<span class="sql-kw">CREATE TABLE</span> settings (id <span class="sql-type">INT</span>, val <span class="sql-type">TEXT</span>, <span class="sql-kw">PRIMARY KEY</span> (id <span class="sql-kw">ASC</span>)) <span class="sql-kw">WITH</span> (COLOCATION = <span class="sql-kw">true</span>);
+
+<span class="sql-comment">-- A large table can opt out and get its own tablets:</span>
+<span class="sql-comment">-- CREATE TABLE events (...) WITH (COLOCATION = false);</span>
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
 <span class="sql-kw">INSERT INTO</span> users (id, name)
@@ -1960,10 +2006,10 @@ Object.assign(SCENARIOS, {
 
 <span class="sql-comment">-- 2. Create partitioned table</span>
 <span class="sql-kw">CREATE TABLE</span> transactions (
-  order_id   <span class="sql-type">INT</span>,
+  order_id   <span class="sql-type">BIGINT</span>,
   geo_region <span class="sql-type">TEXT</span>,
   amount     <span class="sql-type">DECIMAL</span>,
-  <span class="sql-kw">PRIMARY KEY</span> (order_id, geo_region)
+  <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>, geo_region <span class="sql-kw">ASC</span>)
 ) <span class="sql-kw">PARTITION BY LIST</span> (geo_region);
 
 <span class="sql-comment">-- 3. Pin partitions to tablespaces</span>
@@ -2038,10 +2084,11 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "🎯", text: "<b>O(1) Point Lookup + Packed Rows:</b> Hash sharding enables constant-time lookups. The hash function maps the key directly to one tablet. Because YugabyteDB uses a <b>Packed Row</b> format internally, all columns are stored together in a single RocksDB key-value pair. Thus, one Seek jumps to the row, fetching all columns instantly with 0 Next calls." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  user_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+  user_id <span class="sql-type">TEXT</span>,
   name    <span class="sql-type">TEXT</span>,
   region  <span class="sql-type">TEXT</span>,
-  status  <span class="sql-type">TEXT</span>
+  status  <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2186,9 +2233,10 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "📋", text: "<b>IN-List = Batch Point Lookups:</b> YugabyteDB hashes each value and batches keys by tablet, issuing one parallel RPC per involved tablet. For 100 keys spread across 3 tablets, that is still just 3 RPCs — not 100. Each RPC performs multiple Seeks internally. For IN lists larger than ~1000 values, a <code>JOIN</code> against a temporary/values table is more efficient and avoids query plan bloat." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  user_id <span class="sql-type">TEXT PRIMARY KEY</span>,
+  user_id <span class="sql-type">TEXT</span>,
   name    <span class="sql-type">TEXT</span>,
-  region  <span class="sql-type">TEXT</span>
+  region  <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2308,13 +2356,14 @@ Object.assign(SCENARIOS, {
     description: "When querying on the second column of a composite index, DocDB performs a Skip Scan: it Seeks into each distinct group of the first column, checks for a match, then skips to the next group. Skip Scan is available on range-sharded indexes in YugabyteDB.",
     legend: [
       { type: "clustering", label: "region ASC", explain: "First key in composite — groups data" },
-      { type: "clustering", label: "created_at DESC", explain: "Second key — sorted within each group" }
+      { type: "clustering", label: "created_at DESC", explain: "Second key — sorted within each group" },
+      { type: "clustering", label: "order_id ASC", explain: "Third key — makes the PK unique (many orders per region per day)" }
     ],
     visual: {
       type: "query-exec",
       columns: [
         { label: "region", role: "cl", dir: "ASC" }, { label: "created_at", role: "cl", dir: "DESC" },
-        { label: "order_id", role: "" }, { label: "total", role: "" }
+        { label: "order_id", role: "cl", dir: "ASC" }, { label: "total", role: "" }
       ]
     },
     queryConfig: {
@@ -2346,14 +2395,15 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls. <b>Available on range-sharded indexes in YugabyteDB.</b>" },
+    callout: { type: "info", icon: "⏭", text: "<b>Skip Scan + Packed Rows:</b> Instead of scanning every row, DocDB Seeks directly into each group of the first column, checks for a match on the second column, then <i>skips</i> to the next group. For matching rows, the Packed Row format ensures all other columns are retrieved without extra Next calls. <b>Available on range-sharded indexes in YugabyteDB.</b><br><br>⚠️ <b>Write hotspot:</b> a low-cardinality leading column followed by an ever-increasing date gives one hot write point per region (new rows always land at the newest end of each group). For write-heavy tables, bucket inside each value: <code>(region ASC, (yb_hash_code(order_id) % 3) ASC, created_at DESC)</code>." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
   region     <span class="sql-type">TEXT</span>,
   created_at <span class="sql-type">DATE</span>,
   order_id   <span class="sql-type">TEXT</span>,
   total      <span class="sql-type">DECIMAL</span>,
-  <span class="sql-kw">PRIMARY KEY</span> (region <span class="sql-kw">ASC</span>, created_at <span class="sql-kw">DESC</span>)
+  <span class="sql-comment">-- order_id keeps the PK unique: many orders per region per day</span>
+  <span class="sql-kw">PRIMARY KEY</span> (region <span class="sql-kw">ASC</span>, created_at <span class="sql-kw">DESC</span>, order_id <span class="sql-kw">ASC</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2423,10 +2473,11 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "🔍", text: "<b>Full Scan = O(N):</b> Without an index on <code>name</code>, every tablet must be scanned in parallel. Every single row is evaluated. This is the most expensive pattern — for substring search, add a <code>pg_trgm</code> extension and a <code>ybgin</code> index (YugabyteDB's distributed GIN)." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  user_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+  user_id <span class="sql-type">TEXT</span>,
   name    <span class="sql-type">TEXT</span>,
   region  <span class="sql-type">TEXT</span>,
-  status  <span class="sql-type">TEXT</span>
+  status  <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2451,7 +2502,7 @@ Object.assign(SCENARIOS, {
 <span class="sql-comment">-- 💡 Fix: use a trigram index for substring search:</span>
 <span class="sql-kw">CREATE EXTENSION IF NOT EXISTS</span> pg_trgm;
 <span class="sql-kw">CREATE INDEX</span> idx_name_trgm <span class="sql-kw">ON</span> users <span class="sql-kw">USING</span> <span class="sql-fn">ybgin</span> (name gin_trgm_ops);
-<span class="sql-comment">-- YugabyteDB requires 'ybgin' (not 'gin') for distributed tables</span>
+<span class="sql-comment">-- 'USING gin' also works: YugabyteDB maps it to ybgin automatically</span>
 <span class="sql-comment">-- Now LIKE '%Park%' uses the ybgin index — no full scan</span>` },
     guidedTour: [
       { text: "Click <b>Next Step</b> to manually witness the most expensive execution pattern.", element: "#qe-next-btn" },
@@ -2496,11 +2547,12 @@ Object.assign(SCENARIOS, {
     callout: { type: "warn", icon: "⚠️", text: "<b>Secondary Index Penalty:</b> Because the query requested <code>name</code> and <code>region</code>, but the index only contains <code>email</code> and the PK pointer, DocDB is forced to make a second network hop (RPC) to the main table tablet to fetch the missing columns." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+  <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
   email   <span class="sql-type">TEXT</span>,
   name    <span class="sql-type">TEXT</span>,
   region  <span class="sql-type">TEXT</span>,
-  status  <span class="sql-type">TEXT</span>
+  status  <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-kw">CREATE INDEX</span> idx_users_email
@@ -2558,16 +2610,17 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "⚡", text: "<b>Covering Index:</b> By using the <code>INCLUDE (name, region)</code> clause, the index duplicates those columns. The query finds everything it needs in the index tablet, resulting in an <b>Index Only Scan</b>. The main table is never touched, halving latency." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+  <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
   email   <span class="sql-type">TEXT</span>,
   name    <span class="sql-type">TEXT</span>,
   region  <span class="sql-type">TEXT</span>,
-  status  <span class="sql-type">TEXT</span>
+  status  <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Include additional columns to 'cover' queries</span>
 <span class="sql-kw">CREATE INDEX</span> idx_users_email_covering
-  <span class="sql-kw">ON</span> users (email)
+  <span class="sql-kw">ON</span> users (email <span class="sql-kw">HASH</span>)
   <span class="sql-kw">INCLUDE</span> (name, region);
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2637,10 +2690,11 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "⇄", text: "<b>Secondary Covering Index + Parallel Scan:</b> Base table PK is <code>product_id HASH</code>. The query hits <code>idx_products_price</code> (range-sharded by price) instead. All 3 index tablets receive parallel RPCs simultaneously. Because <code>product</code> and <code>qty</code> are INCLUDEd, there are zero heap fetches. Note how Idx Tablet 1 row 19.99 is never read — the Seek jumps directly to 30." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-  product_id <span class="sql-type">TEXT PRIMARY KEY</span>,
+  product_id <span class="sql-type">TEXT</span>,
   product    <span class="sql-type">TEXT</span>,
   price      <span class="sql-type">DECIMAL</span>,
-  qty        <span class="sql-type">INT</span>
+  qty        <span class="sql-type">INT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Covering secondary index, pre-split into 3 range tablets by price</span>
@@ -2675,11 +2729,11 @@ Object.assign(SCENARIOS, {
 
   "qe-bucket-scan": {
     group: "Query Execution", icon: "🪣", title: "Bucket Index Scan",
-    subtitle: "Merge Append across all bucket tablets",
-    description: "A ts BETWEEN query on a bucket index always fans out to every bucket — there is no range-based pruning. Each bucket is an independent ts-sorted stream. YSQL performs a Merge Append: it holds a cursor at the head of each stream and repeatedly picks the next-largest ts, assembling the final ORDER BY ts DESC result without an extra sort step.",
+    subtitle: "Ordered merge across all bucket tablets",
+    description: "A ts BETWEEN query on a bucket index always fans out to every bucket — there is no range-based pruning. Each bucket is an independent ts-sorted stream. On v2025.2.1+ the index scan merges these streams: it holds a cursor at the head of each stream and repeatedly picks the next-largest ts, assembling the final ORDER BY ts DESC result without an extra sort step. Older versions add a Sort over all matching rows.",
     legend: [
-      { type: "sharding", label: "bucket (Synthetic Key)", explain: "yb_hash_code(ts) % 3 — routes each ts to one of 3 tablets; all 3 are always scanned for any ts range query" },
-      { type: "clustering", label: "ts DESC (Index Key)", explain: "Sorted newest-first within each bucket — Merge Append exploits this to avoid a post-scan sort" },
+      { type: "sharding", label: "bucket (Synthetic Key)", explain: "yb_hash_code(event_id) % 3 — routes each row to one of 3 tablets; all 3 are always scanned for any ts range query" },
+      { type: "clustering", label: "ts DESC (Index Key)", explain: "Sorted newest-first within each bucket — the ordered merge (v2025.2.1+) exploits this to avoid a post-scan sort" },
       { type: "include", label: "metric, value (INCLUDE)", explain: "Covering columns stored in the index — zero heap fetches needed" }
     ],
     visual: {
@@ -2698,7 +2752,7 @@ Object.assign(SCENARIOS, {
         {
           op: "route",
           detail: "Unlike a range-partitioned index, buckets cannot be pruned by ts range — every bucket contains timestamps from any date. All 3 must be scanned.",
-          ysqlStatus: "Planner rewrites to 3 sub-scans: (bucket=0 ∧ ts BETWEEN), (bucket=1 ∧ ts BETWEEN), (bucket=2 ∧ ts BETWEEN) — all buckets always targeted",
+          ysqlStatus: "Skip scan over the bucket prefix: (bucket=0 ∧ ts BETWEEN), (bucket=1 ∧ ts BETWEEN), (bucket=2 ∧ ts BETWEEN) — all buckets always targeted",
           tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }, { id: 2, state: "active" }],
           rows: []
         },
@@ -2723,7 +2777,7 @@ Object.assign(SCENARIOS, {
         {
           op: "next",
           detail: "All 3 streams scan through their range — B0: 2024-03-22 18:45+00✓ 2024-01-03 07:11+00✓ | B1: 2024-02-20 11:30+00✓ 2024-01-15 08:30+00✓ | B2: 2024-02-08 12:00+00✓",
-          ysqlStatus: "Streaming from 3 ts-sorted streams — B0: 2 rows, B1: 2 rows, B2: 1 row — buffering stream heads for Merge Append",
+          ysqlStatus: "Streaming from 3 ts-sorted streams — B0: 2 rows, B1: 2 rows, B2: 1 row — buffering stream heads for the ordered merge",
           tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "done" }],
           rows: [
             { tablet: 0, row: 0, state: "returned" },
@@ -2735,8 +2789,8 @@ Object.assign(SCENARIOS, {
         },
         {
           op: "return",
-          detail: "Merge Append: YSQL holds 3 stream cursors and repeatedly picks the max ts — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
-          ysqlStatus: "Merge Append: pulling next-largest ts from 3 stream heads — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
+          detail: "Ordered merge (v2025.2.1+): 3 stream cursors and repeatedly picks the max ts — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
+          ysqlStatus: "Ordered merge: pulling next-largest ts from 3 stream heads — 2024-03-22 18:45+00 → 2024-02-20 11:30+00 → 2024-02-08 12:00+00 → 2024-01-15 08:30+00 → 2024-01-03 07:11+00",
           tablets: [{ id: 0, state: "done" }, { id: 1, state: "done" }, { id: 2, state: "done" }],
           rows: [
             { tablet: 0, row: 0, state: "returned" },
@@ -2748,8 +2802,8 @@ Object.assign(SCENARIOS, {
         },
         {
           op: "done",
-          detail: "5 rows in ts DESC order — 3 parallel bucket scans + Merge Append, no extra Sort node, zero heap fetches",
-          ysqlStatus: "✓ 5 rows in ts DESC order — Merge Append from 3 parallel bucket streams, no post-sort needed (each bucket already ts-ordered)",
+          detail: "5 rows in ts DESC order — 3 parallel bucket scans + ordered merge, no extra Sort node (v2025.2.1+), zero heap fetches",
+          ysqlStatus: "✓ 5 rows in ts DESC order — ordered merge of 3 parallel bucket streams, no post-sort needed on v2025.2.1+ (each bucket already ts-ordered)",
           tablets: [],
           rows: [],
           summary: { tablets: 3, seeks: 3, nexts: 5, rows: 5 }
@@ -2771,18 +2825,19 @@ Object.assign(SCENARIOS, {
         ]}
       ]
     },
-    callout: { type: "info", icon: "🪣", text: "<b>Bucket scan vs Range scan:</b> A range-partitioned index can prune tablets — <code>WHERE price BETWEEN 30 AND 130</code> may skip some tablets entirely. A bucket index cannot prune — <em>every</em> bucket is always scanned because timestamps are hashed across all of them. The payoff is on the write side: 3× the write throughput, no hotspot. YSQL's Merge Append keeps reads efficient by exploiting the per-bucket ts ordering without a full re-sort." },
+    callout: { type: "info", icon: "🪣", text: "<b>Bucket scan vs Range scan:</b> A range-partitioned index can prune tablets — <code>WHERE price BETWEEN 30 AND 130</code> may skip some tablets entirely. A bucket index cannot prune — <em>every</em> bucket is always scanned because any timestamp can sit in any bucket. The payoff is on the write side: writes spread over 3 tablets, no hotspot. On v2025.2.1+ the ordered merge of the per-bucket streams keeps reads efficient without a full re-sort (verify with <code>EXPLAIN</code>; older versions show a Sort node)." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> events (
-    <span class="pk-key">event_id</span>  <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">event_id</span>  <span class="sql-type">TEXT</span>,
     ts        <span class="sql-type">TIMESTAMPTZ</span>,
     metric    <span class="sql-type">TEXT</span>,
-    value     <span class="sql-type">DECIMAL</span>
+    value     <span class="sql-type">DECIMAL</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (event_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Bucket index: 3 tablets, ts-sorted within each</span>
 <span class="sql-kw">CREATE INDEX</span> idx_events_ts <span class="sql-kw">ON</span> events (
-    (<span class="sh-key">yb_hash_code(ts) % 3</span>) <span class="sql-kw">ASC</span>,
+    (<span class="sh-key">yb_hash_code(event_id) % 3</span>) <span class="sql-kw">ASC</span>,
     <span class="cl-key">ts DESC</span>
 ) <span class="sql-kw">INCLUDE</span> (<span class="inc-key">metric, value</span>)
   <span class="sql-kw">SPLIT AT VALUES</span> ((1), (2));
@@ -2795,11 +2850,11 @@ Object.assign(SCENARIOS, {
        (20 + i * 5.5)<span class="sql-type">::DECIMAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- EXPLAIN (Merge Append of 3 sub-scans):</span>
-<span class="sql-comment">-- Merge Append  (Sort Key: ts DESC)</span>
-<span class="sql-comment">--   -> Index Scan idx_events_ts (bucket=0 ∧ ts BETWEEN)</span>
-<span class="sql-comment">--   -> Index Scan idx_events_ts (bucket=1 ∧ ts BETWEEN)</span>
-<span class="sql-comment">--   -> Index Scan idx_events_ts (bucket=2 ∧ ts BETWEEN)</span>
+<span class="sql-comment">-- Conceptual plan: ONE Index Scan on idx_events_ts that</span>
+<span class="sql-comment">-- skip-scans buckets 0, 1, 2 with ts BETWEEN in each, then</span>
+<span class="sql-comment">-- merges the 3 ts-sorted streams into ts DESC order.</span>
+<span class="sql-comment">-- v2025.2.1+: no Sort node. Older versions: Sort over all</span>
+<span class="sql-comment">-- matching rows. Always confirm with EXPLAIN.</span>
 
 <span class="sql-kw">SELECT</span> event_id, ts, metric, value
 <span class="sql-kw">FROM</span>   events
@@ -2810,7 +2865,7 @@ Object.assign(SCENARIOS, {
       { text: "Each bucket tablet holds a random subset of all timestamps, sorted ts DESC within the bucket. No time range maps to just one bucket.", element: ".tablet-card" },
       { text: "Click <b>Play All</b> — the ROUTE step explains why all 3 buckets are always targeted, unlike a range-partitioned index where some tablets can be skipped.", element: "#qe-play-btn" },
       { text: "The SEEK step positions a cursor in each bucket at the first ts ≤ '2024-04-01'. Entries above the range are skipped without being scanned.", element: ".exec-log" },
-      { text: "The RETURN step shows the Merge Append — YSQL picks the max ts from 3 stream heads on each pull. No extra Sort node needed because each bucket is already ts-ordered.", element: "#ysql-layer" }
+      { text: "The RETURN step shows the ordered merge — the max ts is picked from 3 stream heads on each pull. On v2025.2.1+ no extra Sort node is needed because each bucket is already ts-ordered.", element: "#ysql-layer" }
     ]
   },
 
@@ -2848,9 +2903,10 @@ Object.assign(SCENARIOS, {
     callout: { type: "warn", icon: "🌪️", text: "<b>The Hash Sorting Penalty:</b> Even when querying by the PK, <code>HASH</code> sharding does not preserve order. For <code>LIMIT 5</code>, the database must still scan tablets and re-sort at the YSQL layer." },
     guide: {
         richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-    <span class="pk-key">user_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">user_id</span> <span class="sql-type">TEXT</span>,
     name    <span class="sql-type">TEXT</span>,
-    created_at <span class="sql-type">DATE</span>
+    created_at <span class="sql-type">DATE</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -2860,7 +2916,7 @@ Object.assign(SCENARIOS, {
        <span class="sql-fn">CURRENT_DATE</span> - (i || <span class="sql-str">' days'</span>)<span class="sql-type">::INTERVAL</span>
 <span class="sql-kw">FROM</span> <span class="sql-fn">generate_series</span>(1, 10) <span class="sql-kw">AS</span> i;
 
-<span class="sql-comment">-- PK is HASH-sharded by default</span>
+<span class="sql-comment">-- PK is explicitly HASH-sharded</span>
 <span class="sql-comment">-- PLAN: Seq Scan (Scatter-Gather) -> Sort -> Limit</span>
 <span class="sql-kw">SELECT</span> * <span class="sql-kw">FROM</span> users
 <span class="sql-kw">ORDER BY</span> user_id <span class="sql-kw">ASC</span>
@@ -2906,9 +2962,10 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "🛤️", text: "<b>The Power of Range Order:</b> Because the physical storage is sorted, <code>ORDER BY PK LIMIT 5</code> stops immediately after the first tablet. It never even wakes up Tablet 2 or 3, saving CPU and I/O cluster-wide." },
     guide: {
         richSql: `<span class="sql-kw">CREATE TABLE</span> products (
-    <span class="sh-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY ASC</span>,
+    <span class="sh-key">product_id</span> <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT</span>,
-    price      <span class="sql-type">DECIMAL</span>
+    price      <span class="sql-type">DECIMAL</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">ASC</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -3142,10 +3199,11 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "σ", text: "<b>Expression Pushdown:</b> The WHERE predicate travels <i>inside</i> the DocDB RPC — evaluated at the tablet server, not at YSQL. Strikethrough rows were discarded at the storage layer and never touched the network. For tables with millions of rows and a highly selective filter, pushdown is the difference between a practical and an impractical query. Use <code>EXPLAIN</code> and look for <b>Storage Filter</b> to confirm pushdown is active." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-  order_id <span class="sql-type">TEXT PRIMARY KEY</span>,
+  order_id <span class="sql-type">TEXT</span>,
   region   <span class="sql-type">TEXT</span>,
   status   <span class="sql-type">TEXT</span>,
-  total    <span class="sql-type">DECIMAL</span>
+  total    <span class="sql-type">DECIMAL</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -3222,10 +3280,11 @@ Object.assign(SCENARIOS, {
     callout: { type: "info", icon: "∑", text: "<b>Aggregate Pushdown:</b> Instead of streaming all 8 raw rows to YSQL, DocDB computes <code>COUNT</code> and <code>SUM</code> inside each tablet and returns just 3 tiny summaries. For a 1-billion-row table, the difference between sending 1B rows vs 3 numbers is the difference between a practical and an impractical query." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> orders (
-  order_id <span class="sql-type">TEXT</span> <span class="sql-kw">PRIMARY KEY</span>,
+  order_id <span class="sql-type">TEXT</span>,
   customer <span class="sql-type">TEXT</span>,
   total    <span class="sql-type">DECIMAL</span>,
-  region   <span class="sql-type">TEXT</span>
+  region   <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (order_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -3261,13 +3320,13 @@ Object.assign(SCENARIOS, {
 
   "qe-join-nl": {
     group: "Query Execution", icon: "🤝", title: "Nested Loop Join", subtitle: "users ⨝ orders",
-    description: "In a Nested Loop Join, the query layer scans the outer table (users) and for every row it finds, it issues a Seek to the inner table (orders) using the join key. This works well when the outer result set is small, but can be slow for large sets.",
+    description: "In a Nested Loop Join, the query layer scans the outer table (users) and for every row it finds, it issues a Seek to the inner table (orders) using the join key. The inner Seek is only possible because orders is sharded by user_id — the parent's key. This works well when the outer result set is small, but can be slow for large sets.",
     visual: {
       type: "query-exec",
       topTitle: "▸ users Table (Outer)", topColor: "var(--accent)",
       bottomTitle: "▸ orders Table (Inner)", bottomColor: "var(--green)",
       indexColumns: [{ label: "[hash]", role: "sys" }, { label: "user_id", role: "pk" }, { label: "name", role: "" }],
-      tableColumns: [{ label: "[hash]", role: "sys" }, { label: "order_id", role: "pk" }, { label: "user_id", role: "sh" }, { label: "total", role: "" }]
+      tableColumns: [{ label: "[hash]", role: "sys" }, { label: "user_id", role: "sh" }, { label: "order_id", role: "cl", dir: "ASC" }, { label: "total", role: "" }]
     },
     queryConfig: {
       sql: `SELECT u.name, o.total
@@ -3278,10 +3337,10 @@ WHERE u.name = 'Dan';`,
         { op: "route", detail: "Start Full Scan on Users table for name='Dan'", tablets: [{ id: 0, state: "active" }, { id: 1, state: "active" }], rows: [] },
         { op: "next", detail: "Users T1: Skip Alice (no match)", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 0, state: "scanned" }] },
         { op: "next", detail: "Users T1: Found Dan!", tablets: [{ id: 0, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }] },
-        { op: "hash", detail: "Execute Inner Loop: HASH('user-507') → 0x8A11", tablets: [{ id: 0, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }] },
-        { op: "seek", detail: "Seek(0x8A11) in Orders T2", tablets: [{ id: 0, state: "done" }, { id: 3, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, state: "cursor" }] },
-        { op: "return", detail: "Yield joined row: (Dan, 150.00)", tablets: [{ id: 0, state: "done" }, { id: 3, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, returned: true, state: "returned" }] },
-        { op: "next", detail: "Continue outer scan... end of tables.", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 3, row: 0, state: "returned" }, { tablet: 1, row: 0, state: "scanned" }] },
+        { op: "hash", detail: "Execute Inner Loop: HASH('user-507') → 0x4B12 (orders is sharded by user_id)", tablets: [{ id: 0, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }] },
+        { op: "seek", detail: "Seek(0x4B12, 'user-507') in Orders T1", tablets: [{ id: 0, state: "done" }, { id: 2, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 2, row: 1, state: "cursor" }] },
+        { op: "return", detail: "Yield joined row: (Dan, 150.00)", tablets: [{ id: 0, state: "done" }, { id: 2, state: "done" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 2, row: 1, returned: true, state: "returned" }] },
+        { op: "next", detail: "Continue outer scan... end of tables.", tablets: [{ id: 0, state: "done" }, { id: 1, state: "active" }], rows: [{ tablet: 0, row: 1, state: "returned" }, { tablet: 2, row: 1, state: "returned" }, { tablet: 1, row: 0, state: "scanned" }] },
         { op: "done", detail: "Complete: 1 Outer Scan + 1 Inner Seek", tablets: [], rows: [], summary: { tablets: 3, seeks: 1, nexts: 3, rows: 1 } }
       ]
     },
@@ -3291,21 +3350,25 @@ WHERE u.name = 'Dan';`,
         { id: "Users Tablet 2", range: "0x8000–0xFFFF", rows: [{ fields: ["0xB321", "user-105", "Carol"] }] }
       ],
       tableTablets: [
-        { id: "Orders Tablet 1", range: "0x0000–0x7FFF", rows: [{ fields: ["0x33F1", "ord-99", "user-241", "45.00"] }] },
-        { id: "Orders Tablet 2", range: "0x8000–0xFFFF", rows: [{ fields: ["0x8A11", "ord-42", "user-507", "150.00"] }, { fields: ["0xC42A", "ord-88", "user-105", "99.00"] }] }
+        { id: "Orders Tablet 1", range: "0x0000–0x7FFF", rows: [{ fields: ["0x21F3", "user-241", "ord-99", "45.00"] }, { fields: ["0x4B12", "user-507", "ord-42", "150.00"] }] },
+        { id: "Orders Tablet 2", range: "0x8000–0xFFFF", rows: [{ fields: ["0xB321", "user-105", "ord-88", "99.00"] }] }
       ]
     },
-    callout: { type: "info", icon: "🤝", text: "<b>Nested Loop Join:</b> YugabyteDB's query layer executes the join by taking rows from the outer table and issuing point lookups (Seeks) to the inner table. Notice how the inner table is accessed directly via Hash Seek, preventing a full table scan on orders! The planner also considers <b>Hash Join</b> (builds an in-memory hash table — better for large outer sets) and <b>Batch Nested Loop</b> (batches outer keys into a single RPC — reduces round trips). NL join wins here because the outer set is a single row." },
+    callout: { type: "info", icon: "🤝", text: "<b>Nested Loop Join:</b> YugabyteDB's query layer executes the join by taking rows from the outer table and issuing point lookups (Seeks) to the inner table. Notice how the inner table is accessed directly via Hash Seek, preventing a full table scan on orders — this works because orders is sharded by <code>user_id</code> (the parent's key), so all of a user's orders sit together and the PK doubles as the FK index. With <code>PRIMARY KEY (order_id)</code> and no index on <code>user_id</code>, every inner probe would be a full scan of orders. The planner also considers <b>Hash Join</b> (builds an in-memory hash table — better for large outer sets) and <b>Batch Nested Loop</b> (batches outer keys into a single RPC — reduces round trips). NL join wins here because the outer set is a single row." },
     guide: {
       richSql: `<span class="sql-kw">CREATE TABLE</span> users (
-  user_id <span class="sql-type">TEXT PRIMARY KEY</span>,
-  name    <span class="sql-type">TEXT</span>
+  user_id <span class="sql-type">TEXT</span>,
+  name    <span class="sql-type">TEXT</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>)
 );
 
+<span class="sql-comment">-- Child sharded by the parent's key: all of a user's orders</span>
+<span class="sql-comment">-- share one tablet, and the PK also serves as the FK index</span>
 <span class="sql-kw">CREATE TABLE</span> orders (
-  order_id <span class="sql-type">TEXT PRIMARY KEY</span>,
-  user_id  <span class="sql-type">TEXT</span>,
-  total    <span class="sql-type">DECIMAL</span>
+  user_id  <span class="sql-type">TEXT</span> <span class="sql-kw">NOT NULL REFERENCES</span> users(user_id),
+  order_id <span class="sql-type">TEXT</span>,
+  total    <span class="sql-type">DECIMAL</span>,
+  <span class="sql-kw">PRIMARY KEY</span> (user_id <span class="sql-kw">HASH</span>, order_id <span class="sql-kw">ASC</span>)
 );
 
 <span class="sql-comment">-- Insert sample data using generate_series</span>
@@ -3338,11 +3401,11 @@ WHERE u.name = 'Dan';`,
   "pattern-timeseries": {
     group: "Data Modeling Patterns", icon: "📅", title: "Time-Series",
     subtitle: "Bucket index on ts — write-scalable",
-    description: "A plain range index on a timestamp column creates a permanent write hotspot — every new row is 'now', so all writes pile onto the last tablet. The fix: a synthetic bucket prefix derived from the timestamp distributes writes across N tablets from the start. Reads fan out across all buckets and merge, but the write throughput scales linearly with N.",
+    description: "A plain range index on a timestamp column creates a permanent write hotspot — every new row is 'now', so all writes pile onto the last tablet. The fix: a synthetic bucket prefix derived from the primary key distributes writes across N tablets from the start. Reads fan out across all buckets and merge, but the write throughput scales linearly with N.",
     inputPlaceholder: "Enter a date (e.g. 2024-01-15, 2024-03-22)...",
     scanDefault: "ts BETWEEN '2024-03-01 00:00:00+00' AND '2024-04-30 23:59:59+00'",
     legend: [
-      { type: "sharding", label: "bucket (Synthetic)", explain: "yb_hash_code(ts) % 3 — assigns each timestamp to one of 3 index tablets, preventing all concurrent writes from landing on the same one" },
+      { type: "sharding", label: "bucket (Synthetic)", explain: "yb_hash_code(event_id) % 3 — assigns each row to one of 3 index tablets, preventing all concurrent writes from landing on the same one" },
       { type: "clustering", label: "ts DESC (Index)", explain: "Sorted newest-first within each bucket — recency-ordered scans stay sequential" },
       { type: "ptr", label: "event_id (Ptr)", explain: "Pointer back to the base table primary key" }
     ],
@@ -3407,15 +3470,16 @@ WHERE u.name = 'Dan';`,
         ]}
       ]
     },
-    callout: { type: "warn", icon: "📅", text: "<b>The hotspot trap:</b> <code>CREATE INDEX ON events (ts DESC)</code> creates a single range tablet that receives every new write. At high ingestion rates this tablet becomes the bottleneck for the entire cluster. The bucket prefix — <code>yb_hash_code(ts) % N</code> — spreads writes across N tablets from day one. A range query for a time window must fan out to all N buckets and merge results, but with parallel RPCs the wall-clock cost is just the slowest single bucket." },
+    callout: { type: "warn", icon: "📅", text: "<b>The hotspot trap:</b> <code>CREATE INDEX ON events (ts DESC)</code> creates a single range tablet that receives every new write. At high ingestion rates this tablet becomes the bottleneck for the entire cluster. The bucket prefix — <code>yb_hash_code(event_id) % N</code> — spreads writes across N tablets from day one. Bucket on the primary key, not on <code>ts</code>: rows inserted in one transaction share <code>now()</code> and would all hash to one bucket. A range query for a time window must fan out to all N buckets and merge results, but with parallel RPCs the wall-clock cost is just the slowest single bucket. For <code>ORDER BY ts DESC LIMIT n</code>, v2025.2.1+ merges the sorted buckets without a Sort; older versions sort all matching rows." },
     guide: {
       richSql: `<span class="sql-comment">-- Base table — hash-sharded by event_id</span>
 <span class="sql-kw">CREATE TABLE</span> events (
-    <span class="pk-key">event_id</span>  <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">event_id</span>  <span class="sql-type">TEXT</span>,
     ts        <span class="sql-type">TIMESTAMPTZ</span>,
     device_id <span class="sql-type">TEXT</span>,
     metric    <span class="sql-type">TEXT</span>,
-    value     <span class="sql-type">DECIMAL</span>
+    value     <span class="sql-type">DECIMAL</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (event_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- ❌ Wrong: plain ts index → permanent write hotspot</span>
@@ -3423,7 +3487,7 @@ WHERE u.name = 'Dan';`,
 
 <span class="sql-comment">-- ✅ Bucket index: N=3 tablets, writes spread evenly</span>
 <span class="sql-kw">CREATE INDEX</span> idx_events_ts <span class="sql-kw">ON</span> events (
-    (<span class="sh-key">yb_hash_code(ts) % 3</span>) <span class="sql-kw">ASC</span>,
+    (<span class="sh-key">yb_hash_code(event_id) % 3</span>) <span class="sql-kw">ASC</span>,
     <span class="cl-key">ts DESC</span>
 ) <span class="sql-kw">SPLIT AT VALUES</span> ((1), (2));
 
@@ -3441,14 +3505,15 @@ WHERE u.name = 'Dan';`,
 <span class="sql-kw">WHERE</span> ts >= <span class="sql-str">'2024-03-01'</span> <span class="sql-kw">AND</span> ts < <span class="sql-str">'2024-04-01'</span>
 <span class="sql-kw">ORDER BY</span> ts <span class="sql-kw">DESC LIMIT</span> 100;
 
-<span class="sql-comment">-- Each bucket returns its slice, merged by YSQL:</span>
+<span class="sql-comment">-- Each bucket returns its slice; v2025.2.1+ merges the sorted</span>
+<span class="sql-comment">-- streams without a Sort (older versions: Sort, then LIMIT):</span>
 <span class="sql-comment">-- Bucket 0: (0,'2024-03-28',ev-...) → (0,'2024-03-01',ev-...)</span>
 <span class="sql-comment">-- Bucket 1: (1,'2024-03-25',ev-...) → (1,'2024-03-02',ev-...)</span>
 <span class="sql-comment">-- ... merged and limited to 100 rows</span>`
     },
     guidedTour: [
       { text: "3 bucket index tablets replace a single range index tablet — each bucket handles ⅓ of all timestamp writes.", element: ".index-area" },
-      { text: "Insert a few rows and watch them land in different buckets. The bucket is determined by <code>yb_hash_code(ts) % 3</code>, which distributes dates across the 3 tablets.", element: ".index-row" },
+      { text: "Insert a few rows and watch them land in different buckets. The bucket is determined by <code>yb_hash_code(event_id) % 3</code>, which spreads rows — even ones with the same timestamp — across the 3 tablets.", element: ".index-row" },
       { text: "Click <b>Auto Generate</b> quickly — notice no single bucket becomes a bottleneck even under fast concurrent inserts.", element: ".secondary-btn" },
       { text: "A <code>WHERE ts BETWEEN ... AND ...</code> scan fans out to all 3 buckets in parallel and merges. The trade: 3× read RPCs, but write throughput scales with N.", element: ".tablet-grid" }
     ]
@@ -3457,7 +3522,7 @@ WHERE u.name = 'Dan';`,
   "pattern-multitenant": {
     group: "Data Modeling Patterns", icon: "🏢", title: "Multi-Tenant",
     subtitle: "tenant_id HASH as first PK component",
-    description: "In SaaS schemas, tenant_id must always be the first hash-sharded component of the primary key. This ensures every row for a tenant lands in a deterministic tablet — a query with WHERE tenant_id = 'acme' routes to exactly one tablet. Without this, a per-tenant query fans out to all tablets in the cluster, multiplying RPC cost by the tablet count.",
+    description: "In SaaS schemas, tenant_id is usually the leading hash-sharded component of the primary key. This ensures every row for a tenant lands in a deterministic tablet — a query with WHERE tenant_id = 'acme' routes to exactly one tablet. Without this, a per-tenant query fans out to all tablets in the cluster, multiplying RPC cost by the tablet count.",
     inputPlaceholder: "Enter tenant_id (e.g. acme-corp, initech, umbrella)...",
     scanDefault: "tenant_id = 'acme-corp'",
     legend: [
@@ -3507,7 +3572,7 @@ WHERE u.name = 'Dan';`,
         ]}
       ]
     },
-    callout: { type: "warn", icon: "🏢", text: "<b>The SaaS golden rule:</b> <code>PRIMARY KEY ((tenant_id) HASH, user_id, event_time DESC)</code> — tenant_id first, always. A query <code>WHERE tenant_id = 'acme'</code> computes one hash → targets one tablet → one RPC. Without tenant_id as the hash prefix, the same query fans out across every tablet. At 100 tablets and 1000 req/s per tenant, that's 100× the RPC load." },
+    callout: { type: "warn", icon: "🏢", text: "<b>The SaaS rule of thumb:</b> <code>PRIMARY KEY ((tenant_id) HASH, user_id ASC, event_time DESC)</code> — tenant_id first. A query <code>WHERE tenant_id = 'acme'</code> computes one hash → targets one tablet → one RPC. Without tenant_id as the hash prefix, the same query fans out across every tablet. At 100 tablets and 1000 req/s per tenant, that's 100× the RPC load.<br><br>⚠️ <b>Trade-off:</b> with <code>(tenant_id) HASH</code> alone, each tenant is a single hash value — its data can never spread beyond one tablet, so a very large or busy tenant becomes a hotspot. If queries always include <code>user_id</code>, consider <code>((tenant_id, user_id) HASH, event_time DESC)</code> to spread big tenants (per-tenant scans then fan out)." },
     guide: {
       richSql: `<span class="sql-comment">-- ✅ Correct: tenant_id as the hash sharding key</span>
 <span class="sql-kw">CREATE TABLE</span> user_activity (
@@ -3601,7 +3666,7 @@ WHERE u.name = 'Dan';`,
     },
     callout: {
       type: "info", icon: "💡",
-      text: "<b>One row → N GIN entries.</b> Each JSON key-value pair becomes its own sorted index entry. A <code>@&gt;</code> query seeks directly to matching GIN entries — DocDB never reads the opaque JSONB blobs in the base table. Multi-key filters intersect posting lists before fetching any rows."
+      text: "<b>One row → N GIN entries.</b> Each JSON key-value pair becomes its own sorted index entry. A <code>@&gt;</code> query seeks directly to matching GIN entries instead of scanning every JSONB blob; only the candidate rows are fetched from the base table and rechecked. <b>ybgin limit:</b> a scan uses only <i>one</i> index entry. A multi-key AND filter seeks on one key and rechecks the rest on the fetched rows (no posting-list intersection); an OR across keys (e.g. <code>?|</code>) fails with <i>“cannot use more than one required scan entry”</i> — split it into a <code>UNION</code>."
     },
     initialState: {
       indexTablets: [
@@ -3632,9 +3697,10 @@ WHERE u.name = 'Dan';`,
     guide: {
       richSql: `<span class="sql-comment">-- Product catalog with semi-structured attributes</span>
 <span class="sql-kw">CREATE TABLE</span> products (
-    <span class="pk-key">product_id</span> <span class="sql-type">TEXT PRIMARY KEY</span>,
+    <span class="pk-key">product_id</span> <span class="sql-type">TEXT</span>,
     name       <span class="sql-type">TEXT NOT NULL</span>,
-    metadata   <span class="sql-type">JSONB</span>
+    metadata   <span class="sql-type">JSONB</span>,
+    <span class="sql-kw">PRIMARY KEY</span> (product_id <span class="sql-kw">HASH</span>)
 );
 
 <span class="sql-comment">-- GIN index (jsonb_ops): indexes each key and key-value pair separately</span>
@@ -3666,7 +3732,9 @@ WHERE u.name = 'Dan';`,
 <span class="sql-comment">-- Returns posting list: [prod-001, prod-042]</span>
 <span class="sql-comment">-- 2nd RPC → Table Tablet 1 to fetch full rows</span>
 
-<span class="sql-comment">-- Multi-key filter: GIN intersects posting lists before any table fetch</span>
+<span class="sql-comment">-- Multi-key AND filter: ybgin seeks on ONE entry (e.g. color=red),</span>
+<span class="sql-comment">-- fetches those rows, and rechecks category=apparel on each</span>
+<span class="sql-comment">-- (ybgin does not intersect posting lists)</span>
 <span class="sql-kw">SELECT</span> product_id, name
 <span class="sql-kw">FROM</span>   products
 <span class="sql-kw">WHERE</span>  metadata <span class="sql-kw">@&gt;</span> <span class="sql-str">'{"color":"red","category":"apparel"}'</span>;

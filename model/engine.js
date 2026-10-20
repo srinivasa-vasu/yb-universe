@@ -2100,7 +2100,7 @@ function renderHome(container) {
                         <div class="home-card" onclick="selectScenario('qe-bucket-scan')">
                             <div class="home-card-icon">🪣</div>
                             <div class="home-card-title">Bucket Index Scan</div>
-                            <div class="home-card-desc">Merge Append across all bucket tablets. Every ts range query fans out to all buckets — YSQL merges 3 ts-sorted streams without an extra sort pass.</div>
+                            <div class="home-card-desc">Ordered merge across all bucket tablets. Every ts range query fans out to all buckets — v2025.2.1+ merges 3 ts-sorted streams without an extra sort pass.</div>
                             <button class="home-card-btn">Explore &rarr;</button>
                         </div>
                         <div class="home-card" onclick="selectScenario('qe-order-by-hash')">
