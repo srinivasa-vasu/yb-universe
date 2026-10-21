@@ -1369,6 +1369,10 @@ function toggleBtn(id, disabled) {
 
 S = freshState();
 let currentScenario = 0, currentStep = -1, playing = false, playTimer = null, speedVal = 0.5, logTime = 0, stepRunning = false;
+// Bumped on every navigation so steps still running from the previous view stop at their next delay
+let navGen = 0;
+const STALE_STEP = new Error('stale step');
+window.addEventListener('unhandledrejection', e => { if (e.reason === STALE_STEP) e.preventDefault(); });
 
 function renderAllTablets() {
   // Clear all TServer tablet bodies
@@ -1639,7 +1643,7 @@ function renderStepIndicator(steps, cur) {
   h += `<span class="scount">${cur < 0 ? 0 : cur + 1}/${steps.length}</span>`;
   sec.innerHTML = h;
   const tracker = document.getElementById('steps-tracker');
-  if (tracker && tracker.style.display !== 'none') {
+  if (tracker) {
     tracker.innerHTML = steps.map((s, i) => {
       const lbl = typeof s.label === 'function' ? s.label() : s.label;
       const state = i < cur ? 'done' : i === cur ? 'current' : 'pending';
@@ -1702,8 +1706,9 @@ function renderElectionTimeline(sc, curStep) {
 // ════════════════════════════════════════════
 
 function makeCtx() {
+  const gen = navGen;
   return {
-    delay: ms => new Promise(r => setTimeout(r, ms / speedVal)),
+    delay: ms => new Promise((r, j) => setTimeout(() => gen === navGen ? r() : j(STALE_STEP), ms / speedVal)),
     log: (msg, type = '') => addLog(msg, type),
     activateClient: on => { const el = document.getElementById('client-box'); el.classList.toggle('active', on); },
     setLat: (i, v) => setLatency(i, v),
@@ -2373,6 +2378,7 @@ function scrollSidebarToActive() {
 }
 
 function selectScenario(id) {
+  navGen++;
   currentScenario = id; currentStep = -1; stepRunning = false; stopPlay();
   buildSidebar();
   scrollSidebarToActive();
@@ -2413,6 +2419,8 @@ function selectScenario(id) {
     if (_cw2) { _cw2.classList.remove('snap-hidden'); }
     const _dp2 = document.getElementById('docdb-panel');
     if (_dp2) _dp2.classList.remove('snap-expanded');
+    const _stk2 = document.getElementById('steps-tracker');
+    if (_stk2) _stk2.style.display = 'none';
     dp.style.display = 'none';
     sp.style.display = 'none';
     dbp.style.display = 'none';
@@ -2582,14 +2590,17 @@ async function stepForward() {
   addLog(`▶ Step ${currentStep + 1}: ${lbl.replace(/^\d+\.\s*/, '')}`, 'li');
   if (dsc) document.getElementById('i-desc').innerHTML = dsc;
   const ctx = makeCtx();
+  const gen = navGen;
   try {
     await step.action(ctx);
   } catch (e) {
+    if (e === STALE_STEP || gen !== navGen) return;
     console.error("Step failed", e);
     addLog(`✕ Step Error: ${e.message}`, 'le');
   } finally {
-    stepRunning = false;
+    if (gen === navGen) stepRunning = false;
   }
+  if (gen !== navGen) return;
   if (playing) playTimer = setTimeout(stepForward, 900 / speedVal);
 }
 function togglePlay() {
@@ -3504,6 +3515,8 @@ function _exitArchMode(showCanvas) {
   if (hv) hv.style.display = 'none';
   const cb = document.querySelector('.ctrl-bar');
   if (cb) cb.style.display = showCanvas ? 'flex' : 'none';
+  const stk = document.getElementById('steps-tracker');
+  if (stk) stk.style.display = 'none';
   if (!showCanvas) {
     const ht = document.getElementById('health-txt');
     if (ht) ht.textContent = '';
@@ -3513,12 +3526,17 @@ function _exitArchMode(showCanvas) {
 }
 
 function selectArch(tab) {
+  navGen++; stopPlay(); stepRunning = false; currentStep = -1;
   currentScenario = tab;
   buildSidebar();
   scrollSidebarToActive();
   _exitArchMode(false);
   showDataPanel(false); showSplitPanel(false); showDocdbPanel(false);
   // Hide simulation-only panels that may have been left visible
+  const _fdA = document.getElementById('failure-dash');
+  if (_fdA) _fdA.classList.remove('visible');
+  const _sdA = document.getElementById('scalability-dash');
+  if (_sdA) _sdA.classList.remove('visible');
   const _shpA = document.getElementById('sharding-perf-panel');
   if (_shpA) _shpA.classList.remove('visible');
   const _hapA = document.getElementById('ha-panel');
