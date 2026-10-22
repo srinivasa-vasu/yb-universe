@@ -1371,6 +1371,11 @@ S = freshState();
 let currentScenario = 0, currentStep = -1, playing = false, playTimer = null, speedVal = 0.5, logTime = 0, stepRunning = false;
 // Bumped on every navigation so steps still running from the previous view stop at their next delay
 let navGen = 0;
+// "Flow" view: packets drawn as dotted lines streaming along their path (global, persisted)
+let flowMode = false;
+// Screens that animate packets; arch/security/data-management views have none, so the toggle is dimmed there
+const FLOW_SCENARIOS = new Set(['1', '2', '3', '4', '5', '6', '7', '8', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', 'mz']);
+const flowActive = () => flowMode && FLOW_SCENARIOS.has(String(currentScenario));
 const STALE_STEP = new Error('stale step');
 window.addEventListener('unhandledrejection', e => { if (e.reason === STALE_STEP) e.preventDefault(); });
 
@@ -2033,6 +2038,7 @@ function getTC(tgId, nId, cr) {
   return { x: r.left - cr.left + r.width / 2, y: r.top - cr.top + r.height / 2 };
 }
 function animPkt(from, to, cls, dur, cb) {
+  if (flowActive()) { animFlow(from, to, cls, dur, cb); return; }
   const cw = document.getElementById('canvas-wrap');
   const el = document.createElement('div'); el.className = `pkt ${cls}`;
   // Initial position needs to be relative to the scrollable container
@@ -2043,6 +2049,79 @@ function animPkt(from, to, cls, dur, cb) {
     el.style.left = (from.x + (to.x - from.x) * e) + 'px'; el.style.top = (from.y + (to.y - from.y) * e) + 'px';
     if (t < 1) requestAnimationFrame(frame); else { el.remove(); if (cb) cb(); }
   })(t0);
+}
+
+const FLOW_COLORS = {
+  'pk-write': '#ef4444', 'pk-read': '#10b981', 'pk-raft': '#a78bfa', 'pk-ack': '#22c55e', 'pk-vote': '#f59e0b', 'pk-hb': '#60a5fa', 'pk-sync': '#34d399',
+  'pk-xcl': '#818cf8', 'pk-xcl-req': '#818cf8', 'pk-xcl-apply': '#34d399', 'pk-xcl-rev': '#fb7185'
+};
+let flowSeq = 0;
+function flowLayer(cw) {
+  let svg = document.getElementById('flow-layer');
+  if (!svg || !cw.contains(svg)) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.id = 'flow-layer'; svg.classList.add('flow-layer');
+    cw.appendChild(svg);
+  }
+  svg.setAttribute('width', cw.scrollWidth); svg.setAttribute('height', cw.scrollHeight);
+  return svg;
+}
+// Dotted stream that "pours" from source to target, keeps flowing briefly, then drains away
+function animFlow(from, to, cls, dur, cb) {
+  const cw = document.getElementById('canvas-wrap');
+  const svg = flowLayer(cw), NS = 'http://www.w3.org/2000/svg';
+  const color = FLOW_COLORS[cls] || '#a78bfa';
+  // Bow the path sideways so A→B and B→A streams don't sit on top of each other
+  const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
+  const bow = Math.min(40, len * 0.12);
+  const cx = (from.x + to.x) / 2 - dy / len * bow, cy = (from.y + to.y) / 2 + dx / len * bow;
+  const d = `M${from.x},${from.y} Q${cx},${cy} ${to.x},${to.y}`;
+  const id = `flow-m${++flowSeq}`;
+
+  const g = document.createElementNS(NS, 'g'); g.classList.add('flow-grp');
+  g.innerHTML = `<mask id="${id}" maskUnits="userSpaceOnUse"><path d="${d}" class="flow-reveal"/></mask>
+    <g mask="url(#${id})" style="color:${color}">
+      <path d="${d}" class="flow-pipe"/>
+      <path d="${d}" class="flow-dots" style="animation-duration:${Math.max(250, 700 / speedVal)}ms"/>
+    </g>
+    <circle r="4" class="flow-head" fill="${color}" style="color:${color}"/>`;
+  svg.appendChild(g);
+
+  const reveal = g.querySelector('.flow-reveal'), head = g.querySelector('.flow-head');
+  const L = reveal.getTotalLength();
+  reveal.style.strokeDasharray = `${L} ${L}`;
+  const t0 = performance.now();
+  (function frame(now) {
+    const t = Math.min((now - t0) / dur, 1); const e = t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    reveal.style.strokeDashoffset = L * (1 - e);
+    const p = reveal.getPointAtLength(L * e); head.setAttribute('cx', p.x); head.setAttribute('cy', p.y);
+    if (t < 1) { requestAnimationFrame(frame); return; }
+    head.remove();
+    if (cb) cb();
+    // Shorter linger when many streams are on screen so busy scenarios stay readable
+    const busy = svg.childElementCount > 3;
+    setTimeout(() => { g.classList.add('flow-out'); setTimeout(() => g.remove(), 600); }, Math.min(busy ? 900 : 2000, (busy ? 400 : 900) / speedVal));
+  })(t0);
+}
+function syncFlowBtn() {
+  const b = document.getElementById('flow-toggle-btn'); if (!b) return;
+  const avail = FLOW_SCENARIOS.has(String(currentScenario));
+  b.classList.toggle('on', flowMode);
+  b.classList.toggle('na', !avail);
+  b.title = `Flow view: ${flowMode ? 'On' : 'Off'} (W)` + (avail ? '' : ' — no packet flow on this screen');
+}
+function _applyFlow(on) {
+  flowMode = on;
+  syncFlowBtn();
+  if (!on) document.getElementById('flow-layer')?.remove();
+}
+function initFlow() {
+  // On by default; only an explicit opt-out sticks
+  _applyFlow(localStorage.getItem('yb-flow') !== 'off');
+}
+function toggleFlow() {
+  localStorage.setItem('yb-flow', flowMode ? 'off' : 'on');
+  _applyFlow(!flowMode);
 }
 
 // ════════════════════════════════════════════
@@ -2380,6 +2459,7 @@ function scrollSidebarToActive() {
 function selectScenario(id) {
   navGen++;
   currentScenario = id; currentStep = -1; stepRunning = false; stopPlay();
+  syncFlowBtn();
   buildSidebar();
   scrollSidebarToActive();
 
@@ -3528,6 +3608,7 @@ function _exitArchMode(showCanvas) {
 function selectArch(tab) {
   navGen++; stopPlay(); stepRunning = false; currentStep = -1;
   currentScenario = tab;
+  syncFlowBtn();
   buildSidebar();
   scrollSidebarToActive();
   _exitArchMode(false);
@@ -5761,6 +5842,7 @@ function _getSidebarScenarioOrder() {
 
 window.addEventListener('load', () => {
   initTheme();
+  initFlow();
   buildSidebar();
   selectScenario('home');
   initInfoPanelResize();
@@ -5773,6 +5855,7 @@ window.addEventListener('load', () => {
     const key = e.key.toLowerCase();
     if (key === 't' && !e.ctrlKey && !e.metaKey) toggleTheme();
     if (key === 'f' && !e.ctrlKey && !e.metaKey) toggleFocusMode();
+    if (key === 'w' && !e.ctrlKey && !e.metaKey) toggleFlow();
     if (key === '[') toggleSidebar();
     if (key === ']') toggleInfoPanel();
     if (key === 'h') selectScenario('home');

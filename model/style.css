@@ -1921,3 +1921,47 @@ input:checked + .slider:before {
   content: "▸ Scan Plan";
 }
 
+
+/* ── FLOW VIEW (dotted streams) ── */
+.flow-layer {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 900;
+  pointer-events: none;
+  overflow: visible;
+}
+.flow-reveal { fill: none; stroke: #fff; stroke-width: 14; }
+.flow-pipe { fill: none; stroke: currentColor; stroke-width: 6; stroke-linecap: round; opacity: .12; }
+.flow-dots {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 9;
+  filter: drop-shadow(0 0 3px currentColor);
+  animation: flowDash .7s linear infinite;
+}
+.flow-head { filter: drop-shadow(0 0 6px currentColor); }
+/* Route/hash: planner targeting — still, faint dashes and a ring on the chosen tablet, no packet */
+.flow-aim { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-dasharray: 3 6; opacity: .55; }
+.flow-aim-head { opacity: .5; }
+.flow-target {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: flowTarget 1.1s ease-out infinite;
+}
+@keyframes flowTarget { from { transform: scale(.4); opacity: .9; } to { transform: scale(1.6); opacity: 0; } }
+.flow-grp { transition: opacity .6s ease; }
+.flow-grp.flow-out { opacity: 0; }
+@keyframes flowDash { to { stroke-dashoffset: -18.2; } }
+
+.flow-toggle.on { border-color: #60a5fa; color: #60a5fa; box-shadow: 0 0 8px rgba(96,165,250,.35); }
+.flow-toggle.on path { animation: flowIcon .8s linear infinite; }
+@keyframes flowIcon { to { stroke-dashoffset: -4.1; } }
+.flow-toggle.na { opacity: .45; }
+.flow-toggle.na path { animation: none; }

@@ -2179,6 +2179,72 @@
       box-shadow: 0 0 10px #34d399
     }
 
+    /* ── FLOW (dotted stream) PACKETS ── */
+    .flow-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 100;
+      pointer-events: none;
+      overflow: visible
+    }
+
+    .flow-reveal {
+      fill: none;
+      stroke: #fff;
+      stroke-width: 14
+    }
+
+    .flow-pipe {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 6;
+      stroke-linecap: round;
+      opacity: .12
+    }
+
+    .flow-dots {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      stroke-dasharray: 0.1 9;
+      filter: drop-shadow(0 0 3px currentColor);
+      animation: flowDash linear infinite
+    }
+
+    .flow-head {
+      filter: drop-shadow(0 0 6px currentColor)
+    }
+
+    .flow-grp {
+      transition: opacity .6s ease
+    }
+
+    .flow-grp.flow-out {
+      opacity: 0
+    }
+
+    /* Glow washes out on white — use a crisper, darker stream in light mode */
+    [data-theme="light"] .flow-dots {
+      filter: none;
+      stroke-width: 4
+    }
+
+    [data-theme="light"] .flow-pipe {
+      opacity: .18
+    }
+
+    [data-theme="light"] .flow-head {
+      filter: drop-shadow(0 0 2px currentColor)
+    }
+
+    @keyframes flowDash {
+      to {
+        stroke-dashoffset: -18.2
+      }
+    }
+
     /* ── DEAD OVERLAY ── */
     .dead-overlay {
       position: absolute;
@@ -4878,6 +4944,12 @@ input:checked + .slider:before { transform: translateX(14px); background-color: 
   color: var(--txt);
 }
 [data-theme="light"] .theme-toggle { background: rgba(0,0,0,.04); }
+.flow-toggle.on { border-color: #60a5fa; color: #60a5fa; box-shadow: 0 0 8px rgba(96,165,250,.35); }
+[data-theme="light"] .flow-toggle.on { border-color: #2563eb; color: #2563eb; box-shadow: none; background: rgba(37,99,235,.08); }
+.flow-toggle.on path { animation: flowIcon .8s linear infinite; }
+@keyframes flowIcon { to { stroke-dashoffset: -4.1; } }
+.flow-toggle.na { opacity: .45; }
+.flow-toggle.na path { animation: none; }
 [data-theme="light"] .theme-toggle:hover { background: rgba(0,0,0,.09); }
 
 /* ── Invert rgba(255,255,255,…) backgrounds ── */

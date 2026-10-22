@@ -4,6 +4,7 @@ let queryStepIndex = 0, queryPlaying = false;
 let scanState = null;
 
 document.addEventListener('DOMContentLoaded', () => {
+    initFlow();
     buildSidebar();
     initTabs();
     initKeyboardShortcuts();
@@ -19,6 +20,9 @@ function initKeyboardShortcuts() {
             }
             if (e.key.toLowerCase() === 'h') {
                 selectScenario('home');
+            }
+            if (e.key.toLowerCase() === 'w' && !e.ctrlKey && !e.metaKey) {
+                toggleFlow();
             }
             if (e.key === '?' || e.key === '/') {
                 toggleHelp();
@@ -171,6 +175,8 @@ function scrollSidebarToActive() {
 function selectScenario(id) {
     currentScenarioId = id;
     currentScenario = SCENARIOS[id];
+    clearFlows();
+    syncFlowBtn();
     buildSidebar();
     scrollSidebarToActive();
 
@@ -261,6 +267,7 @@ function selectScenario(id) {
 
 window.resetScenario = function() {
     if (!currentScenario) return;
+    clearFlows();
     scanState = null;
     scenarioState = JSON.parse(JSON.stringify(currentScenario.initialState || {}));
     const simInput = document.getElementById('sim-input-val');
@@ -514,6 +521,7 @@ function renderDataOrg(container) {
                 item.className = `org-row-item${r._isNew ? ' new-val' : ''}`;
                 item.innerHTML = `<span class="org-row-cl">${r.cl}</span><span class="org-row-data">${r.vals.join(' · ')}</span>`;
                 rows.appendChild(item);
+                delete r._isNew;
             });
             part.appendChild(rows);
             body.appendChild(part);
@@ -648,6 +656,7 @@ function renderPartitioning(container, v) {
     const parentCard = buildTabletCard({ id: "Parent Table (Logical)", rows: scenarioState.parentRows || [] }, parentCols, 'accent');
     parentTable.appendChild(parentCard);
     parentSection.appendChild(parentTable);
+    (scenarioState.parentRows || []).forEach(r => { delete r._isNew; });
     wrap.appendChild(parentSection);
 
     container.appendChild(wrap);
@@ -733,6 +742,7 @@ function renderPartitionIndex(container, v) {
     parentSection.innerHTML = `<div class="idx-section-title" style="color:var(--accent)">▸ Logical Parent Table (${parentTableName})</div>`;
     const parentCard = buildTabletCard({ id: "Logical Table", rows: scenarioState.parentRows || [] }, parentCols, 'accent');
     parentSection.appendChild(parentCard);
+    (scenarioState.parentRows || []).forEach(r => { delete r._isNew; });
     wrap.appendChild(parentSection);
 
     container.appendChild(wrap);
@@ -774,11 +784,164 @@ function buildTabletCard(t, cols, accentColor, tabletIdx) {
     return card;
 }
 
+/* ═══ FLOW VIEW (dotted streams) ═══ */
+// Streams live on a fixed, viewport-sized overlay, so every point is in client coordinates
+let flowMode = false, flowSeq = 0, flowGen = 0;
+const FLOW_NS = 'http://www.w3.org/2000/svg';
+const FLOW_DEFAULT = '#f59e0b', FLOW_RETURN = '#22c55e', FLOW_DUR = 650;
+const flowAvailable = () => !!currentScenario && currentScenario.visual?.type !== 'home';
+const flowActive = () => flowMode && flowAvailable();
+
+function flowLayer() {
+    let svg = document.getElementById('flow-layer');
+    if (!svg) {
+        svg = document.createElementNS(FLOW_NS, 'svg');
+        svg.id = 'flow-layer'; svg.classList.add('flow-layer');
+        document.body.appendChild(svg);
+    }
+    return svg;
+}
+function flowPt(el, edge) {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: edge === 'top' ? r.top : edge === 'bottom' ? r.bottom : r.top + r.height / 2 };
+}
+// Tablet cards carry their accent (purple index / green table / amber) on the name label
+function flowColor(el) {
+    const name = el?.closest('.tablet-card')?.querySelector('.t-name');
+    return name?.style.color ? getComputedStyle(name).color : FLOW_DEFAULT;
+}
+// Drop in-flight streams (navigation, reset) so they don't point at re-rendered elements
+function clearFlows() {
+    flowGen++;
+    const svg = document.getElementById('flow-layer');
+    if (svg) svg.innerHTML = '';
+}
+// Same as clearFlows' generation check, for streams queued with a delay
+function flowLater(ms, fn) {
+    const gen = flowGen;
+    setTimeout(() => { if (gen === flowGen) fn(); }, ms);
+}
+
+// Dotted stream that "pours" from source to target, keeps flowing briefly, then drains away.
+// aim=true draws a still, faint targeting line with a ring on the target instead (planning, no RPC sent)
+function animFlow(from, to, color, dur, aim) {
+    const svg = flowLayer();
+    // Bow the path sideways so A→B and B→A streams don't sit on top of each other
+    const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(40, len * 0.12);
+    const cx = (from.x + to.x) / 2 - dy / len * bow, cy = (from.y + to.y) / 2 + dx / len * bow;
+    const d = `M${from.x},${from.y} Q${cx},${cy} ${to.x},${to.y}`;
+    const id = `flow-m${++flowSeq}`;
+
+    const g = document.createElementNS(FLOW_NS, 'g'); g.classList.add('flow-grp');
+    const body = aim
+        ? `<path d="${d}" class="flow-aim"/>`
+        : `<path d="${d}" class="flow-pipe"/><path d="${d}" class="flow-dots"/>`;
+    g.innerHTML = `<mask id="${id}" maskUnits="userSpaceOnUse"><path d="${d}" class="flow-reveal"/></mask>
+        <g mask="url(#${id})" style="color:${color}">${body}</g>
+        <circle r="4" class="${aim ? 'flow-aim-head' : 'flow-head'}" fill="${color}" style="color:${color}"/>`;
+    svg.appendChild(g);
+
+    const reveal = g.querySelector('.flow-reveal'), head = g.querySelector(':scope > circle');
+    const L = reveal.getTotalLength();
+    reveal.style.strokeDasharray = `${L} ${L}`;
+    const t0 = performance.now();
+    (function frame(now) {
+        if (!g.isConnected) return;
+        const t = Math.min((now - t0) / dur, 1); const e = t < .5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        reveal.style.strokeDashoffset = L * (1 - e);
+        const p = reveal.getPointAtLength(L * e); head.setAttribute('cx', p.x); head.setAttribute('cy', p.y);
+        if (t < 1) { requestAnimationFrame(frame); return; }
+        head.remove();
+        if (aim) {
+            const ring = document.createElementNS(FLOW_NS, 'circle');
+            ring.setAttribute('cx', to.x); ring.setAttribute('cy', to.y); ring.setAttribute('r', 10);
+            ring.classList.add('flow-target'); ring.style.color = color;
+            g.appendChild(ring);
+        }
+        // Shorter linger when many streams are on screen so busy views stay readable
+        const busy = svg.childElementCount > 3;
+        setTimeout(() => { g.classList.add('flow-out'); setTimeout(() => g.remove(), 600); }, busy ? 700 : 1600);
+    })(t0);
+}
+
+// Insert: Insert button → every freshly placed row (table, index, partition and parent rows)
+function flowNewRows() {
+    if (!flowActive()) return;
+    const src = document.querySelector('#sim-controls .primary-btn');
+    const area = document.getElementById('visual-render-area');
+    if (!src || !area) return;
+    const from = flowPt(src, 'bottom');
+    // Measure now: a later re-render would detach these rows
+    const targets = [...area.querySelectorAll('tr.new-row-anim, .org-row-item.new-val')]
+        .map(row => ({ to: flowPt(row), color: flowColor(row) }));
+    targets.forEach((t, i) => flowLater(i * 120, () => animFlow(from, t.to, t.color, FLOW_DUR)));
+}
+
+// Scan: Run Scan → hit tablets; with an index, hit index tablets → hit table tablets (the 2nd RPC)
+function flowScan() {
+    if (!flowActive() || !scanState) return;
+    const src = document.querySelector('.scan-group .secondary-btn');
+    const area = document.getElementById('visual-render-area');
+    if (!src || !area) return;
+    const sections = [...area.querySelectorAll('.idx-section')];
+    const hops = (sections.length ? sections : [area])
+        .map(s => [...s.querySelectorAll('.tablet-card.scan-done')].map(c => ({ top: flowPt(c, 'top'), bottom: flowPt(c, 'bottom'), color: flowColor(c) })));
+    let from = flowPt(src, 'bottom');
+    for (let h = 0; h < hops.length && hops[h].length; h++) {
+        const start = from;
+        hops[h].forEach(c => flowLater(h * (FLOW_DUR + 150), () => animFlow(start, c.top, c.color, FLOW_DUR)));
+        from = hops[h][0].bottom;
+    }
+}
+
+// Query execution: YSQL layer ⇄ active tablets (down for RPCs, up for results).
+// route/hash are the planner picking tablets, so they only aim — the RPC itself flows on seek/fanout.
+// next/skip/filter work inside a tablet whose RPC is already open; the row highlights show them
+const FLOW_LOCAL_OPS = new Set(['done', 'next', 'skip', 'filter']);
+function flowQueryStep(step, cards) {
+    if (!flowActive() || FLOW_LOCAL_OPS.has(step.op)) return;
+    const ysql = document.getElementById('ysql-layer');
+    if (!ysql) return;
+    const hub = flowPt(ysql, 'bottom');
+    const up = step.op === 'return' || step.op === 'agg';
+    const aim = step.op === 'route' || step.op === 'hash';
+    (step.tablets || []).filter(ts => ts.state === 'active').forEach(ts => {
+        const card = cards[ts.id];
+        if (!card) return;
+        const pt = flowPt(card, 'top');
+        if (up) animFlow(pt, hub, FLOW_RETURN, FLOW_DUR);
+        else animFlow(hub, pt, flowColor(card), aim ? 450 : FLOW_DUR, aim);
+    });
+}
+
+function syncFlowBtn() {
+    const b = document.getElementById('flow-toggle-btn'); if (!b) return;
+    const avail = flowAvailable();
+    b.classList.toggle('on', flowMode);
+    b.classList.toggle('na', !avail);
+    b.title = `Flow view: ${flowMode ? 'On' : 'Off'} (W)` + (avail ? '' : ' — no data flow on this screen');
+}
+function _applyFlow(on) {
+    flowMode = on;
+    syncFlowBtn();
+    if (!on) clearFlows();
+}
+function initFlow() {
+    // On by default; only an explicit opt-out sticks (shared with the architecture explorer)
+    _applyFlow(localStorage.getItem('yb-flow') !== 'off');
+}
+function toggleFlow() {
+    localStorage.setItem('yb-flow', flowMode ? 'off' : 'on');
+    _applyFlow(!flowMode);
+}
+
 /* ═══ INSERT LOGIC ═══ */
 function simulateInsert() {
     const val = document.getElementById('sim-input-val').value.trim();
     if (!val && !currentScenario.generateRow) return;
     doInsert(val || 'auto');
+    flowNewRows();
 }
 
 function autoInsert() {
@@ -837,6 +1000,7 @@ function autoInsert() {
     }
     document.getElementById('sim-input-val').value = val;
     doInsert(val);
+    flowNewRows();
 }
 
 function getStableHash(str) {
@@ -1459,10 +1623,13 @@ window.runScan = function() {
 
     const clearBtn = document.getElementById('scan-clear-btn');
     if (clearBtn) clearBtn.style.display = '';
+    clearFlows();
     renderVisual();
+    flowScan();
 };
 
 window.clearScan = function() {
+    clearFlows();
     scanState = null;
     const clearBtn = document.getElementById('scan-clear-btn');
     if (clearBtn) clearBtn.style.display = 'none';
@@ -1729,6 +1896,8 @@ function applyQueryStep(stepIdx) {
         if (stepBtn) stepBtn.disabled = true;
         if (playBtn) playBtn.disabled = true;
     }
+
+    flowQueryStep(step, cards);
 }
 
 window.runQueryStep = function() {
@@ -1758,6 +1927,7 @@ window.runAllSteps = function() {
 };
 
 window.resetQuery = function() {
+    clearFlows();
     queryStepIndex = 0;
     queryPlaying = false;
     scenarioState = JSON.parse(JSON.stringify(currentScenario.initialState || {}));
